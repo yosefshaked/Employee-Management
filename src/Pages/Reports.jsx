@@ -7,7 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "../supabaseClient";
 
 import ReportsFilters from "../components/reports/ReportsFilters";
-import EmployeeReport from "../components/reports/EmployeeReport";
+import DetailedEntriesReport from "../components/reports/DetailedEntriesReport";
 import MonthlyReport from "../components/reports/MonthlyReport";
 import PayrollSummary from "../components/reports/PayrollSummary";
 import ChartsOverview from "../components/reports/ChartsOverview";
@@ -216,7 +216,7 @@ export default function Reports() {
               </TabsList>
 
               <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="employee"><EmployeeReport sessions={filteredSessions} employees={employees} services={services} filters={filters} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} filters={filters} isLoading={isLoading} /></TabsContent>
               <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
               <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
             </Tabs>

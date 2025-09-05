@@ -19,7 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { format, parseISO } from "date-fns";
 import { he } from "date-fns/locale";
 
-export default function EmployeeReport({ sessions, employees, filters, isLoading, services = [] }) {
+export default function DetailedEntriesReport({ sessions, employees, filters, isLoading, services = [] }) {
   if (isLoading) {
     return (
       <div className="space-y-4">
