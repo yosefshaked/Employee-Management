@@ -210,7 +210,7 @@ export default function Reports() {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="grid w-full grid-cols-4 mb-6">
                 <TabsTrigger value="overview">סקירה כללית</TabsTrigger>
-                <TabsTrigger value="employee">לפי עובד</TabsTrigger>
+                <TabsTrigger value="employee">פירוט הרישומים</TabsTrigger>
                 <TabsTrigger value="monthly">דוח חודשי</TabsTrigger>
                 <TabsTrigger value="payroll">דוח שכר</TabsTrigger>
               </TabsList>
