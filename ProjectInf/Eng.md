@@ -137,3 +137,8 @@ This guide is for a new developer (or AI) joining the project who needs to set u
 6.  **Run the Development Server:**
     `npm run dev`
     The application should now be running at `http://localhost:5173`.
+
+7. **Save changes to GitHub:**
+    `git add .` (Pack)
+    `git commit -m` "A short description of what was done"
+    `git push` (Send)
