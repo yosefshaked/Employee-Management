@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { InfoTooltip } from "../Components/InfoTooltip";
+import { InfoTooltip } from "../components/InfoTooltip";
 import { Button } from "@/components/ui/button";
 import { BarChart3, Download, Calendar, TrendingUp } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";

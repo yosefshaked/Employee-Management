@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import ChangelogModal from "./Components/ChangelogModal";
+import ChangelogModal from "./components/ChangelogModal";
 import { Link, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 
