@@ -1,0 +1,145 @@
+import React, { useState } from 'react';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ChevronDown, ChevronUp } from "lucide-react";
+
+// קומפוננטה קטנה לשורות הפירוט עם עיצוב משופר
+const InstructorDetailsRow = ({ details }) => (
+  <TableRow className="bg-slate-50 hover:bg-slate-100/70">
+    <TableCell colSpan={1} className="py-2"></TableCell>
+    <TableCell colSpan={5} className="p-2 px-4">
+      <div className="font-semibold text-xs text-slate-500 grid grid-cols-4 gap-4 mb-1 px-2">
+        <span>שם השירות</span>
+        <span className="text-center">כמות מפגשים</span>
+        <span className="text-center">תעריף למפגש</span>
+        <span className="text-left">סה"כ</span>
+      </div>
+      <div className="space-y-1">
+        {details.map((detail, index) => (
+          <div key={index} className="bg-white p-2 rounded-md grid grid-cols-4 gap-4 text-sm items-center border">
+            <span className="font-medium text-slate-700">{detail.serviceName}</span>
+            <span className="font-semibold text-center">{detail.sessionsCount}</span>
+            <span className="text-slate-600 text-center">₪{detail.avgRate.toFixed(2)}</span>
+            <span className="font-semibold text-slate-800 text-left">₪{detail.totalPayment.toLocaleString()}</span>
+          </div>
+        ))}
+      </div>
+    </TableCell>
+  </TableRow>
+);
+
+export default function PayrollSummary({ sessions, employees, services, isLoading }) {
+  const [expandedRows, setExpandedRows] = useState({});
+
+  if (isLoading) { 
+    return (
+      <div className="space-y-2">
+        {Array(5).fill(0).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
+      </div>
+    );
+  }
+
+  const toggleRow = (employeeId) => {
+    setExpandedRows(prev => ({...prev, [employeeId]: !prev[employeeId]}));
+  };
+
+  const employeesSummary = employees.map(employee => {
+    const employeeSessions = sessions.filter(s => s.employee_id === employee.id);
+    const serviceDetails = {};
+
+    let totalPayment = 0;
+    let totalHours = 0;
+    let totalSessions = 0;
+
+    employeeSessions.forEach(session => {
+      totalPayment += session.total_payment || 0;
+      if (employee.employee_type === 'hourly') {
+        totalHours += session.hours || 0;
+      } else {
+        totalSessions += session.sessions_count || 0;
+        if (session.service_id) {
+          if (!serviceDetails[session.service_id]) {
+            const service = services.find(s => s.id === session.service_id);
+            serviceDetails[session.service_id] = { 
+              serviceName: service ? service.name : 'שירות לא ידוע',
+              sessionsCount: 0, 
+              totalPayment: 0 
+            };
+          }
+          serviceDetails[session.service_id].sessionsCount += session.sessions_count || 0;
+          serviceDetails[session.service_id].totalPayment += session.total_payment || 0;
+        }
+      }
+    });
+
+    Object.values(serviceDetails).forEach(detail => {
+        detail.avgRate = detail.totalPayment / (detail.sessionsCount || 1);
+    });
+    
+    return {
+      id: employee.id, name: employee.name, employeeType: employee.employee_type,
+      currentRate: employee.current_rate, isActive: employee.is_active,
+      totalPayment, totalHours: Math.round(totalHours * 10) / 10, totalSessions,
+      details: Object.values(serviceDetails)
+    };
+  }).filter(emp => emp.totalPayment > 0 || emp.isActive);
+
+  return (
+    <Card className="border-0 shadow-lg">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-slate-50 hover:bg-slate-50">
+            <TableHead className="w-12"></TableHead>
+            <TableHead className="text-right">עובד</TableHead>
+            <TableHead className="text-right">סוג</TableHead>
+            <TableHead className="text-right">סה"כ פעילות</TableHead>
+            <TableHead className="text-right">סה״כ לתשלום</TableHead>
+            <TableHead className="text-right">סטטוס</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {employeesSummary.map((employee) => (
+            <React.Fragment key={employee.id}>
+              <TableRow className="hover:bg-slate-50/50">
+                <TableCell>
+                  {employee.employeeType === 'instructor' && employee.details.length > 0 && (
+                    <Button variant="ghost" size="icon" onClick={() => toggleRow(employee.id)} className="w-8 h-8 rounded-full">
+                      {expandedRows[employee.id] ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    </Button>
+                  )}
+                </TableCell>
+                <TableCell className="font-medium">{employee.name}</TableCell>
+                <TableCell>
+                  <Badge variant="outline" className={
+                    employee.employeeType === 'hourly' 
+                      ? 'bg-blue-50 text-blue-700 border-blue-200'
+                      : 'bg-purple-50 text-purple-700 border-purple-200'
+                  }>
+                    {employee.employeeType === 'hourly' ? 'שעתי' : 'מדריך'}
+                  </Badge>
+                </TableCell>
+                <TableCell className="font-semibold">
+                  {employee.employeeType === 'hourly' ? `${employee.totalHours.toFixed(1)} שעות` : `${employee.totalSessions} מפגשים`}
+                </TableCell>
+                <TableCell className="font-semibold text-green-700">₪{employee.totalPayment.toLocaleString()}</TableCell>
+                <TableCell>
+                  <Badge className={
+                    employee.isActive 
+                      ? 'bg-green-100 text-green-800'
+                      : 'bg-slate-100 text-slate-600'
+                  }>
+                    {employee.isActive ? 'פעיל' : 'לא פעיל'}
+                  </Badge>
+                </TableCell>
+              </TableRow>
+              {expandedRows[employee.id] && <InstructorDetailsRow details={employee.details} />}
+            </React.Fragment>
+          ))}
+        </TableBody>
+      </Table>
+    </Card>
+  );
+}
