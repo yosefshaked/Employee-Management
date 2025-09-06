@@ -21,11 +21,13 @@ This release finalizes the MVP by packaging the application for desktop use with
 ### Added
 - **Desktop Application (Electron):** The entire React application has been wrapped in Electron to create a standalone desktop app. This includes a custom-designed launcher (`launcher.html`) that provides options to open the app in its own window or in the user's default browser.
 - **Calendar Date Picker:** The dashboard calendar now includes a user-friendly dropdown picker for quickly navigating to any specific month and year, alongside the existing arrow and "Today" buttons.
+- **Specific File to Host API Credentials:** .env in root.
 
 ### Changed
 - **Launcher Logic:** The Electron main process (`electron.cjs`) was refactored to handle different launch modes (app window vs. external browser) and to correctly manage the application lifecycle.
 - **Refined Calendar UI:** The calendar header was redesigned to seamlessly integrate the new month/year pickers without compromising the existing clean layout.
 - **Path of "release" Folder** Having the release folder within the project's folder created issues uploading to GitHub.
+- **Hourly Rate for Instructos:** Removed.
 
 ### Fixed
 - **Launcher UI:** Fixed several design issues in the launcher, including button colors, layout, and alignment to ensure a professional and polished first impression.

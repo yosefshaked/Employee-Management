@@ -86,9 +86,11 @@ export default function EmployeeList({ employees, onEdit, onToggleActive, isLoad
                 <span className="font-medium">{EMPLOYEE_TYPES[employee.employee_type]}</span>
               </div>
               
-              <div className="flex items-center gap-2 text-sm text-slate-600">
-                <span>תעריף נוכחי: ₪{employee.current_rate}</span>
-              </div>
+              {employee.employee_type === 'hourly' && (
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <span>תעריף שעתי: ₪{employee.current_rate}</span>
+                </div>
+              )}
 
               {employee.phone && (
                 <div className="flex items-center gap-2 text-sm text-slate-600">

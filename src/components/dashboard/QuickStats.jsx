@@ -2,58 +2,79 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Users, Clock, TrendingUp, DollarSign } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { format, startOfMonth, endOfMonth, parseISO } from "date-fns";
+import { format, startOfMonth, endOfMonth, parseISO, isSameMonth } from "date-fns";
 import { he } from "date-fns/locale";
 
-export default function QuickStats({ employees, workSessions, currentDate, isLoading }) {
-  const getCurrentMonthSessions = () => {
-    const start = startOfMonth(currentDate);
-    const end = endOfMonth(currentDate);
+export default function QuickStats({ employees, workSessions, services, currentDate, isLoading }) {
+
+  // === שינוי 1: הלוגיקה כולה רוכזה בפונקציה אחת ברורה ===
+  const calculateMonthlyStats = () => {
+    if (!workSessions || !employees || !services) {
+      return { totalPayment: 0, totalHours: 0, uniqueWorkDays: 0, activeEmployees: 0 };
+    }
     
-    return workSessions.filter(session => {
-      const sessionDate = parseISO(session.date);
-      return sessionDate >= start && sessionDate <= end;
-    });
+    // סינון הרישומים הרלוונטיים לחודש הנוכחי
+    const currentMonthSessions = workSessions.filter(session => 
+      isSameMonth(parseISO(session.date), currentDate)
+    );
+
+    const totalPayment = currentMonthSessions.reduce((sum, session) => sum + (session.total_payment || 0), 0);
+    
+    // חישוב שעות משולב ומדויק
+    const totalHours = currentMonthSessions.reduce((sum, session) => {
+      const employee = employees.find(e => e.id === session.employee_id);
+      if (employee?.employee_type === 'hourly') {
+        return sum + (session.hours || 0);
+      } else if (employee?.employee_type === 'instructor') {
+        const service = services.find(s => s.id === session.service_id);
+        if (service?.duration_minutes) {
+          return sum + (service.duration_minutes / 60) * (session.sessions_count || 0);
+        }
+      }
+      return sum;
+    }, 0);
+
+    // === שינוי 2: הלוגיקה החדשה לספירת ימי עבודה ייחודיים ===
+    const workDaySet = new Set(
+      currentMonthSessions.map(session => `${session.employee_id}-${session.date}`)
+    );
+    const uniqueWorkDays = workDaySet.size;
+
+    return {
+      totalPayment,
+      totalHours,
+      uniqueWorkDays,
+      activeEmployees: employees.length
+    };
   };
 
-  const currentMonthSessions = getCurrentMonthSessions();
-  const totalPayment = currentMonthSessions.reduce((sum, session) => sum + session.total_payment, 0);
-  const totalHours = currentMonthSessions.reduce((sum, session) => {
-    if (session.session_type === 'hourly') {
-      return sum + session.hours;
-    } else {
-      return sum + (session.sessions_count * 0.5); // approximate hours for sessions
-    }
-  }, 0);
-
+  const statsData = calculateMonthlyStats();
+  
+  // === שינוי 3: עדכון מערך הנתונים לתצוגה ===
   const stats = [
     {
       title: "עובדים פעילים",
-      value: employees.length,
+      value: statsData.activeEmployees,
       icon: Users,
       color: "from-blue-500 to-blue-600",
-      trend: ""
     },
     {
-      title: "שעות החודש",
-      value: Math.round(totalHours * 10) / 10,
+      title: "שעות עבודה (מוערך)",
+      value: statsData.totalHours.toFixed(1),
       icon: Clock,
       color: "from-green-500 to-green-600",
-      trend: ""
     },
     {
-      title: "משמרות החודש",
-      value: currentMonthSessions.length,
+      title: "ימי עבודה בחודש",
+      value: statsData.uniqueWorkDays,
       icon: TrendingUp,
       color: "from-purple-500 to-purple-600",
-      trend: ""
     },
     {
-      title: "סה״כ תשלום",
-      value: `₪${totalPayment.toLocaleString()}`,
+      title: `סה״כ תשלום ל${format(currentDate, 'MMMM', { locale: he })}`,
+      value: `₪${statsData.totalPayment.toLocaleString()}`,
       icon: DollarSign,
       color: "from-orange-500 to-orange-600",
-      trend: format(currentDate, 'MMMM', { locale: he })
     }
   ];
 
@@ -72,9 +93,6 @@ export default function QuickStats({ employees, workSessions, currentDate, isLoa
                   <CardTitle className="text-2xl md:text-3xl font-bold text-slate-900">
                     {stat.value}
                   </CardTitle>
-                )}
-                {stat.trend && (
-                  <p className="text-sm text-slate-500">{stat.trend}</p>
                 )}
               </div>
               <div className={`p-3 rounded-xl bg-gradient-to-r ${stat.color} shadow-lg`}>
