@@ -12,9 +12,10 @@ function createWindow() {
 
   // טוען את האתר שלנו. אם אנחנו בפיתוח, הוא יטען מ-localhost.
   // אם אנחנו בגרסה הארוזה, הוא יטען מקובץ HTML מקומי.
-  const startUrl = process.env.ELECTRON_START_URL || `file://${path.join(__dirname, '../dist/index.html')}`;
-  win.loadURL(startUrl);
-}
+  const startUrl =
+  process.env.ELECTRON_START_URL ||
+  `file://${path.join(__dirname, 'dist/index.html')}`;  // remove ../
+
 
 app.whenReady().then(createWindow);
 
@@ -29,3 +30,4 @@ app.on('activate', () => {
     createWindow();
   }
 });
+}

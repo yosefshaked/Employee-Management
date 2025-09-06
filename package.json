@@ -4,15 +4,15 @@
   "author": "Shaked Yossef",
   "main": "electron.cjs",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
-  "dev": "vite",
-  "build": "vite build",
-  "preview": "vite preview",
-  "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
-  "electron:build": "npm run build && electron-builder"
-},
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && set ELECTRON_START_URL=http://localhost:5173 && electron .\"",
+    "electron:build": "npm run build && electron-builder"
+  },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-dialog": "^1.1.15",
@@ -57,16 +57,17 @@
     "vite": "^7.1.2",
     "wait-on": "^8.0.4"
   },
-
   "build": {
-  "appId": "com.company.salaryapp",
-  "productName": "Salary Management",
-  "files": [
-    "dist/**/*",
-    "electron.cjs"
-  ],
-  "directories": {
-    "output": "release"
-    }
+    "appId": "com.HavatTut.salaryapp",
+    "productName": "Salary Management",
+    "files": [
+      "dist/**/*",
+      "electron.cjs"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": { "target": "portable", "icon": "public/icon.ico" },
+    "asar": true
   }
 }
