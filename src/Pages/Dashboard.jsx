@@ -1,9 +1,5 @@
 import React, { useState, useEffect } from 'react';
-
-// === הוספה: מייבאים את הלקוח של Supabase ===
 import { supabase } from '../supabaseClient';
-
-// ייבוא הקומפוננטות של הדשבורד
 import QuickStats from '../components/dashboard/QuickStats';
 import MonthlyCalendar from '../components/dashboard/MonthlyCalendar';
 import RecentActivity from '../components/dashboard/RecentActivity';
@@ -12,24 +8,27 @@ import { toast } from "sonner";
 export default function Dashboard() {
   const [employees, setEmployees] = useState([]);
   const [workSessions, setWorkSessions] = useState([]);
+  const [services, setServices] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
 
-  // טעינת הנתונים הראשוניים מהשרת
   const loadData = async () => {
     setIsLoading(true);
     try {
-      // === החלפה: קוראים ל-Supabase במקום ל-Entities ===
-      const [employeesData, sessionsData] = await Promise.all([
+      const [employeesData, sessionsData, servicesData] = await Promise.all([
         supabase.from('Employees').select('*').eq('is_active', true),
-        supabase.from('WorkSessions').select('*').order('date', { ascending: false }).limit(100) // טוענים 100 רישומים אחרונים
+        // === התיקון הסופי והנכון באמת: מיון לפי created_at ===
+        supabase.from('WorkSessions').select('*').order('created_at', { ascending: false }),
+        supabase.from('Services').select('*')
       ]);
 
       if (employeesData.error) throw employeesData.error;
       if (sessionsData.error) throw sessionsData.error;
+      if (servicesData.error) throw servicesData.error;
 
-      setEmployees(employeesData.data);
-      setWorkSessions(sessionsData.data);
+      setEmployees(employeesData.data || []);
+      setWorkSessions(sessionsData.data || []);
+      setServices(servicesData.data || []);
 
     } catch (error) {
       console.error("Error loading dashboard data:", error);
@@ -38,9 +37,10 @@ export default function Dashboard() {
     setIsLoading(false);
   };
 
-  useEffect(() => {
-    loadData();
-  }, []); // ריצה פעם אחת בלבד כשהקומפוננטה עולה
+  useEffect(() => { loadData(); }, []);
+
+  // אנחנו כבר לא צריכים למיין בצד הלקוח, ה-DB עושה את זה
+  const recentSessions = (workSessions || []).slice(0, 5);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">
@@ -49,17 +49,16 @@ export default function Dashboard() {
           <h1 className="text-3xl font-bold text-slate-900 mb-2">לוח בקרה</h1>
           <p className="text-slate-600">סקירה כללית של הפעילות במערכת</p>
         </div>
-
-        {/* קומפוננטת סטטיסטיקות מהירות */}
+        
         <QuickStats 
           employees={employees} 
           workSessions={workSessions}
+          services={services}
           currentDate={currentDate}
           isLoading={isLoading} 
         />
         
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* קומפוננטת לוח שנה חודשי */}
           <div className="lg:col-span-2">
             <MonthlyCalendar 
               currentDate={currentDate}
@@ -69,12 +68,11 @@ export default function Dashboard() {
               isLoading={isLoading}
             />
           </div>
-          
-          {/* קומפוננטת פעילות אחרונה */}
           <div className="lg:col-span-1">
             <RecentActivity 
-              workSessions={workSessions}
+              sessions={recentSessions} // מעבירים את הרשימה החתוכה
               employees={employees}
+              services={services}
               isLoading={isLoading}
             />
           </div>

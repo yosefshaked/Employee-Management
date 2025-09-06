@@ -193,7 +193,7 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
         </div>
 
         <div>
-          <h3 className="text-lg font-semibold mb-4">מגמה חודשית</h3>
+          <h3 className="text-lg font-semibold mb-4">מגמה חודשית (6 חודשים אחרונים)</h3>
           <div className="mb-2 flex gap-2">
             <button
               className={`px-3 py-1 rounded ${trendType === 'payment' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}

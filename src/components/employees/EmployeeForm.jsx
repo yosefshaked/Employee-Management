@@ -135,8 +135,12 @@ export default function EmployeeForm({ employee, onSubmit, onCancel }) {
             </div>
             <div className="space-y-2">
               <Label htmlFor="is_active" className="text-sm font-semibold text-slate-700">סטטוס עובד</Label>
-              <div className="flex items-center gap-3 mt-2">
-                <Switch id="is_active" checked={formData.is_active} onCheckedChange={(checked) => handleChange('is_active', checked)} />
+              <div className="flex items-center gap-3 pt-2">
+                <Switch
+                  id="is_active"
+                  checked={formData.is_active}
+                  onCheckedChange={(checked) => handleChange('is_active', checked)}
+                />
                 <span className="text-sm text-slate-600">{formData.is_active ? 'פעיל' : 'לא פעיל'}</span>
               </div>
             </div>

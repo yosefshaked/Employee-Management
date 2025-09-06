@@ -3,7 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-- 
+- **Monthly Report Filter Fix:** When filtering a specific employee, it still shows the information about all of the employees.
+- **Monthly Report Improvement:** Make it possible to choose 6-months times (For example, to choose between Jan2024-June2024 even though it was a year ago).
+- **Hide Other Employees on PayrollSummary.jsx Upon Filtering:** When filtering a specific employee, it does remove the calculations for the other employees, but keeps their names. - ***Last Priority!***
+- **Improve Design of Popup in Specific Day:** At the moment looks weird. - ***Last Priority!***
+- **Default View in Employees Page:** Have it set to "Active".
+- **Fix Top Row of the Table:** Become RTL to fix to the data. - פירוט הרישומים, דף שירותים
+- **Instructions:** Easy to understand explanations about functionality of the different, functions that are around the system. Not every function but the more complicated ones.
+- **System Version + Update Log Input:** Create a version to the system by known standard, show under the "מנהל מערכת" and input the functions created to the system in the Update Log.
+- **Fixing Excel Output and Sorting by Date** - DONE.
 
 ## [2025-09-05] - Infrastructure Migration & Feature Enhancement
 

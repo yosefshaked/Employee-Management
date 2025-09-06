@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTooltip } from "../components/InfoTooltip";
 import { Button } from "@/components/ui/button";
@@ -18,15 +19,15 @@ export default function Reports() {
   const [services, setServices] = useState([]);
   const [filteredSessions, setFilteredSessions] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("overview");
-  // Remove sessionTypes, use services for types
+  const location = useLocation(); // מאפשר לנו לגשת למידע על הכתובת הנוכחית
+  const [activeTab, setActiveTab] = useState(location.state?.openTab || "overview");
 
   const [filters, setFilters] = useState({
     selectedEmployee: '',
     dateFrom: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
     dateTo: new Date().toISOString().split('T')[0],
     employeeType: 'all',
-  serviceId: 'all',
+    serviceId: 'all',
   });
 
   const applyFilters = useCallback(() => {
@@ -72,12 +73,9 @@ export default function Reports() {
       if (sessionsData.error) throw sessionsData.error;
       if (servicesData.error) throw servicesData.error;
 
-      setEmployees(employeesData.data);
-      setWorkSessions(sessionsData.data);
-      setServices(servicesData.data);
-  // Extract unique session types from database
-  const types = Array.from(new Set((sessionsData.data || []).map(s => s.session_type).filter(Boolean)));
-  setSessionTypes(types);
+      setEmployees(employeesData.data || []);
+      setWorkSessions(sessionsData.data || []);
+      setServices(servicesData.data || []);
     } catch (error) {
       console.error("Error loading data:", error);
     }
@@ -90,67 +88,58 @@ export default function Reports() {
   };
 
   const exportToExcel = () => {
-    const exportData = filteredSessions.map(session => {
-      const employee = employees.find(emp => emp.id === session.employee_id);
-      return {
-        'שם העובד': employee ? employee.name : 'לא ידוע',
-        'תאריך': session.date,
-        'שירות': getServiceName(session.service_id),
-        'שעות': session.hours || '',
-        'מפגשים': session.sessions_count || '',
-        'תלמידים': session.students_count || '',
-        'תעריף': session.rate_used,
-        'סה"כ תשלום': session.total_payment,
-        'הערות': session.notes || ''
-      };
-    });
+      const exportData = [...filteredSessions]       // copy so the original array isn’t mutated
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .map(session => {
+        const employee = employees.find(emp => emp.id === session.employee_id);
+        return {
+          'שם העובד': employee ? employee.name : 'לא ידוע',
+          'תאריך': session.date,
+          'שירות': getServiceName(session.service_id),
+          'שעות': session.hours || '',
+          'מפגשים': session.sessions_count || '',
+          'תלמידים': session.students_count || '',
+          'תעריף': session.rate_used,
+          'סה"כ תשלום': session.total_payment,
+          'הערות': session.notes || ''
+        };
+      });
 
-    if (exportData.length === 0) return;
+      if (exportData.length === 0) return;
 
-    const headers = Object.keys(exportData[0]);
-    const csvContent = [
-      headers.join(','),
-      ...exportData.map(row => headers.map(header => `"${row[header] || ''}"`).join(','))
-    ].join('\n');
+      const headers = Object.keys(exportData[0]);
+      const csvContent = [
+        headers.join(','),
+        ...exportData.map(row => headers.map(header => `"${row[header] || ''}"`).join(','))
+      ].join('\n');
 
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `דוח_שכר_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `דוח_שכר_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    };
 
   const getTotals = () => {
-  let payment = 0, hours = 0, sessionsCount = 0;
-  const countedSessions = [];
-  filteredSessions.forEach(session => {
-    const employee = employees.find(e => e.id === session.employee_id);
-    payment += session.total_payment || 0;
-    if (employee?.employee_type === 'hourly') {
-      hours += session.hours || 0;
-    } else if (employee?.employee_type === 'instructor') {
-      sessionsCount += session.sessions_count || 0;
-      countedSessions.push({
-        id: session.id,
-        employee: employee?.name,
-        date: session.date,
-        sessions_count: session.sessions_count,
-        service_id: session.service_id
-      });
-      const service = services.find(s => s.id === session.service_id);
-      if (service && service.duration_minutes) {
-        hours += (service.duration_minutes / 60) * (session.sessions_count || 0);
+    let payment = 0, hours = 0, sessionsCount = 0;
+    filteredSessions.forEach(session => {
+      const employee = employees.find(e => e.id === session.employee_id);
+      payment += session.total_payment || 0;
+      if (employee?.employee_type === 'hourly') {
+        hours += session.hours || 0;
+      } else if (employee?.employee_type === 'instructor') {
+        sessionsCount += session.sessions_count || 0;
+        const service = services.find(s => s.id === session.service_id);
+        if (service && service.duration_minutes) {
+          hours += (service.duration_minutes / 60) * (session.sessions_count || 0);
+        }
       }
-    }
-  });
-  if (typeof window !== 'undefined') {
-    console.log('Counted instructor sessions:', countedSessions);
-  }
-  return { payment, hours, sessionsCount };
-};
+    });
+    return { payment, hours, sessionsCount };
+  };
 
   const totals = getTotals();
 
@@ -170,35 +159,29 @@ export default function Reports() {
           </div>
         </div>
 
-  <ReportsFilters filters={filters} setFilters={setFilters} employees={employees} services={services} isLoading={isLoading} />
+        <ReportsFilters filters={filters} setFilters={setFilters} employees={employees} services={services} isLoading={isLoading} />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
-              <CardContent className="p-6 flex items-center gap-4 relative">
-                <div className="absolute left-4 top-4">
-                  <InfoTooltip text={"סה\"כ תשלום הוא הסכום הכולל ששולם לכל העובדים בתקופת הדוח.\nהסכום מחושב לפי תעריף העובד וסוג העבודה (שעות או מפגשים)."} />
-                </div>
-                <div className="p-3 bg-green-100 rounded-lg"><BarChart3 className="w-6 h-6 text-green-600" /></div>
-                <div><p className="text-sm text-slate-600">סה״כ תשלום</p><p className="text-2xl font-bold text-slate-900">₪{totals.payment.toLocaleString()}</p></div>
-              </CardContent>
+            <CardContent className="p-6 flex items-center gap-4 relative">
+              <div className="absolute left-4 top-4"><InfoTooltip text={"סה\"כ תשלום הוא הסכום הכולל ששולם לכל העובדים בתקופת הדוח.\nהסכום מחושב לפי תעריף העובד וסוג העבודה (שעות או מפגשים)."} /></div>
+              <div className="p-3 bg-green-100 rounded-lg"><BarChart3 className="w-6 h-6 text-green-600" /></div>
+              <div><p className="text-sm text-slate-600">סה״כ תשלום</p><p className="text-2xl font-bold text-slate-900">₪{totals.payment.toLocaleString()}</p></div>
+            </CardContent>
           </Card>
           <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
-              <CardContent className="p-6 flex items-center gap-4 relative">
-                <div className="absolute left-4 top-4">
-                  <InfoTooltip text={"סה\"כ שעות הוא סך כל השעות שעובדים עבדו בתקופת הדוח.\nלעובדים שעתיים - נספרות שעות בפועל.\nלמדריכים - השעות מחושבות לפי מספר מפגשים וזמן מפגש."} />
-                </div>
-                <div className="p-3 bg-blue-100 rounded-lg"><Calendar className="w-6 h-6 text-blue-600" /></div>
-                <div><p className="text-sm text-slate-600">סה״כ שעות (מוערך)</p><p className="text-2xl font-bold text-slate-900">{totals.hours.toFixed(1)}</p></div>
-              </CardContent>
+            <CardContent className="p-6 flex items-center gap-4 relative">
+              <div className="absolute left-4 top-4"><InfoTooltip text={"סה\"כ שעות הוא סך כל השעות שעובדים עבדו בתקופת הדוח.\nלעובדים שעתיים - נספרות שעות בפועל.\nלמדריכים - השעות מחושבות לפי מספר מפגשים וזמן מפגש."} /></div>
+              <div className="p-3 bg-blue-100 rounded-lg"><Calendar className="w-6 h-6 text-blue-600" /></div>
+              <div><p className="text-sm text-slate-600">סה״כ שעות (מוערך)</p><p className="text-2xl font-bold text-slate-900">{totals.hours.toFixed(1)}</p></div>
+            </CardContent>
           </Card>
           <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
-              <CardContent className="p-6 flex items-center gap-4 relative">
-                <div className="absolute left-4 top-4">
-                  <InfoTooltip text={"סה\"כ מפגשים הוא מספר כל המפגשים שנערכו בתקופת הדוח.\nלעובדים שעתיים - לא נספרים מפגשים.\nלמדריכים - נספרים כל המפגשים שבוצעו בפועל."} />
-                </div>
-                <div className="p-3 bg-purple-100 rounded-lg"><TrendingUp className="w-6 h-6 text-purple-600" /></div>
-                <div><p className="text-sm text-slate-600">סה״כ מפגשים</p><p className="text-2xl font-bold text-slate-900">{totals.sessionsCount}</p></div>
-              </CardContent>
+            <CardContent className="p-6 flex items-center gap-4 relative">
+              <div className="absolute left-4 top-4"><InfoTooltip text={"סה\"כ מפגשים הוא מספר כל המפגשים שנערכו בתקופת הדוח.\nלעובדים שעתיים - לא נספרים מפגשים.\nלמדריכים - נספרים כל המפגשים שבוצעו בפועל."} /></div>
+              <div className="p-3 bg-purple-100 rounded-lg"><TrendingUp className="w-6 h-6 text-purple-600" /></div>
+              <div><p className="text-sm text-slate-600">סה״כ מפגשים</p><p className="text-2xl font-bold text-slate-900">{totals.sessionsCount}</p></div>
+            </CardContent>
           </Card>
         </div>
 
@@ -214,9 +197,8 @@ export default function Reports() {
                 <TabsTrigger value="monthly">דוח חודשי</TabsTrigger>
                 <TabsTrigger value="payroll">דוח שכר</TabsTrigger>
               </TabsList>
-
               <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} filters={filters} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
               <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
               <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
             </Tabs>

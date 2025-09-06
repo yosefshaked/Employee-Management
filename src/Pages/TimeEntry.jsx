@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Clock, ListChecks } from "lucide-react";
 import TimeEntryForm from "../components/time-entry/TimeEntryForm";
-import RecentEntries from "../components/time-entry/RecentEntries";
+import RecentActivity from "../components/dashboard/RecentActivity";
 import { toast } from "sonner";
 import { supabase } from "../supabaseClient";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,14 +17,16 @@ export default function TimeEntry() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
 
-  useEffect(() => { loadInitialData(); }, []);
+  useEffect(() => {
+    loadInitialData();
+  }, []);
 
   const loadInitialData = async () => {
     setIsLoading(true);
     try {
       const [employeesData, sessionsData, ratesData, servicesData] = await Promise.all([
         supabase.from('Employees').select('*').eq('is_active', true).order('name'),
-        supabase.from('WorkSessions').select('*, service:service_id(name)').order('id', { ascending: false }).limit(5),
+        supabase.from('WorkSessions').select('*, service:service_id(name)').order('date', { ascending: false }).order('id', { ascending: false }).limit(5),
         supabase.from('RateHistory').select('*'),
         supabase.from('Services').select('*')
       ]);
@@ -38,7 +40,10 @@ export default function TimeEntry() {
       setRecentSessions(sessionsData.data || []);
       setRateHistories(ratesData.data || []);
       setServices(servicesData.data || []);
-    } catch (error) { toast.error("שגיאה בטעינת הנתונים"); }
+    } catch (error) { 
+      console.error("Error loading data:", error);
+      toast.error("שגיאה בטעינת הנתונים"); 
+    }
     setIsLoading(false);
   };
 
@@ -60,7 +65,7 @@ export default function TimeEntry() {
       if (!employee) throw new Error("Employee not found");
 
       const sessionsToInsert = rows.map(row => {
-        let rateUsed = getRateForDate(employee.id, row.date, row.service_id);
+        const rateUsed = getRateForDate(employee.id, row.date, row.service_id);
         let totalPayment = 0;
         
         if (employee.employee_type === 'hourly') {
@@ -76,21 +81,29 @@ export default function TimeEntry() {
         }
         
         return {
-          employee_id: employee.id, date: row.date, service_id: row.service_id || null,
-          hours: parseFloat(row.hours) || null,
-          sessions_count: parseInt(row.sessions_count) || null,
-          students_count: parseInt(row.students_count) || null,
-          notes: row.notes, rate_used: rateUsed, total_payment: totalPayment,
+          employee_id: employee.id,
+          date: row.date,
+          service_id: employee.employee_type === 'instructor' ? row.service_id : null,
+          hours: employee.employee_type === 'hourly' ? parseFloat(row.hours) || null : null,
+          sessions_count: employee.employee_type === 'instructor' ? parseInt(row.sessions_count) || null : null,
+          students_count: employee.employee_type === 'instructor' ? parseInt(row.students_count) || null : null,
+          notes: row.notes,
+          rate_used: rateUsed,
+          total_payment: totalPayment,
         };
       }).filter(Boolean);
 
-      if (sessionsToInsert.length === 0) { toast.error("לא נמצאו רישומים תקינים לשמירה."); return; }
+      if (sessionsToInsert.length === 0) {
+        toast.error("לא נמצאו רישומים תקינים לשמירה.");
+        return;
+      }
       
       const { error } = await supabase.from('WorkSessions').insert(sessionsToInsert);
       if (error) throw error;
 
       toast.success(`${sessionsToInsert.length} רישומים נשמרו בהצלחה!`);
       loadInitialData();
+      setSelectedEmployeeId(null);
     } catch (error) {
       console.error("Error submitting sessions:", error);
       toast.error(`שגיאה בשמירת הרישומים: ${error.message}`);
@@ -103,18 +116,22 @@ export default function TimeEntry() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold">רישום זמנים</h1>
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">רישום זמנים</h1>
           <p className="text-slate-600">הזן שעות עבודה או מפגשים עבור העובדים</p>
         </div>
         <div className="grid lg:grid-cols-5 gap-8">
           <div className="lg:col-span-3">
             <Card>
-              <CardHeader><CardTitle className="flex items-center gap-2"><Clock /> הזנת רישום חדש</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="w-5 h-5 text-blue-500" /> הזנת רישום חדש
+                </CardTitle>
+              </CardHeader>
               <CardContent className="p-6">
                 <div className="space-y-2 mb-6">
                   <Label>עבור מי הרישום?</Label>
                   {isLoading ? <Skeleton className="h-10 w-full" /> : (
-                    <Select onValueChange={setSelectedEmployeeId}>
+                    <Select value={selectedEmployeeId || ''} onValueChange={setSelectedEmployeeId}>
                       <SelectTrigger><SelectValue placeholder="בחר עובד..." /></SelectTrigger>
                       <SelectContent>{employees.map(emp => (<SelectItem key={emp.id} value={emp.id}>{emp.name}</SelectItem>))}</SelectContent>
                     </Select>
@@ -133,12 +150,14 @@ export default function TimeEntry() {
             </Card>
           </div>
           <div className="lg:col-span-2">
-            <Card>
-              <CardHeader><CardTitle className="flex items-center gap-2"><ListChecks /> רישומים אחרונים</CardTitle></CardHeader>
-              <CardContent className="p-6">
-                <RecentEntries sessions={recentSessions} employees={employees} isLoading={isLoading} />
-              </CardContent>
-            </Card>
+            <RecentActivity 
+              title="רישומים אחרונים"
+              sessions={recentSessions}
+              employees={employees}
+              services={services}
+              isLoading={isLoading}
+              showViewAllButton={true}
+            />
           </div>
         </div>
       </div>
