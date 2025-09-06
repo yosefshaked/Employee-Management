@@ -10,7 +10,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && set ELECTRON_START_URL=http://localhost:5173 && electron .\"",
+    "electron:dev": "concurrently -k -s first \"npm run dev\" \"wait-on http://localhost:5173 && set ELECTRON_START_URL=http://localhost:5173 && electron .\"",
     "electron:build": "npm run build && electron-builder"
   },
   "dependencies": {
@@ -28,6 +28,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
+    "express": "^5.1.0",
     "lucide-react": "^0.542.0",
     "next-themes": "^0.4.6",
     "react": "^19.1.1",
@@ -62,12 +63,20 @@
     "productName": "Salary Management",
     "files": [
       "dist/**/*",
-      "electron.cjs"
+      "electron.cjs",
+      "launcher.html",
+      "public/**/*"
     ],
     "directories": {
-      "output": "release"
+      "output": "../release"
     },
-    "win": { "target": "portable", "icon": "public/icon.ico" },
-    "asar": true
+    "win": {
+      "target": "portable",
+      "icon": "public/icon.ico"
+    },
+    "asar": true,
+    "asarUnpack": [
+      "dist/**"
+    ]
   }
 }

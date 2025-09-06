@@ -1,16 +1,128 @@
-<button id="open">פתח בדפדפן</button>
-<button id="restart">הפעל מחדש</button>
-<button id="quit">סגור את המערכת</button>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>TutRate - תותרייט</title>
+  <style>
+    :root {
+      --slate-50: #f8fafc;
+      --slate-100: #f1f5f9;
+      --slate-400: #94a3b8;
+      --slate-600: #475569;
+      --slate-800: #1e293b;
+      --blue-500: #3b82f6;
+      --green-500: #22c55e;
+      --white: #ffffff;
+    }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: transparent;
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      direction: rtl;
+      user-select: none; /* Prevent text selection */
+    }
+    .container {
+      background-color: var(--white);
+      padding: 24px 32px;
+      border-radius: 12px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+      text-align: center;
+      width: 320px;
+    }
+    .logo {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 16px auto;
+    }
+    .header {
+      margin-bottom: 24px;
+    }
+    .header h1 {
+      margin: 0 0 4px 0;
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--slate-800);
+    }
+    .header p {
+      margin: 0;
+      font-size: 14px;
+      color: var(--slate-600);
+    }
+    .button-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    button {
+      font-family: inherit;
+      font-size: 16px;
+      font-weight: 600;
+      padding: 12px 20px;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      transition: all 0.2s ease-in-out;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    button svg {
+      width: 18px;
+      height: 18px;
+    }
+    #open-browser {
+      color: var(--white);
+      background-image: linear-gradient(to right, var(--green-500), var(--blue-500));
+      background-size: 200% auto;
+    }
+    #open-browser:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      background-position: right center;
+    }
+    #open-app {
+    color: var(--slate-800); 
+    background-color: var(--white); 
+    border: 1px solid #cbd5e1;
+    }
+    #open-app:hover {
+    background-color: var(--slate-50); 
+    }
+    #quit {
+      color: var(--slate-600);
+      background-color: var(--slate-100);
+      border: 1px solid #e2e8f0;
+    }
+    #quit:hover {
+      background-color: #e2e8f0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <img src="./public/icon.svg" alt="HavatTut Logo" class="logo">
+    <div class="header">
+      <h1>ניהול עובדים</h1>
+      <p>מערכת רישום זמנים</p>
+    </div>
+    <div class="button-group">
+      <button id="open-browser">פתח בדפדפן</button>
+      <button id="open-app">פתח אפליקציה</button>
+    </div>
+    <button id="quit" style="margin-top: 12px; width: 100%;">סגור</button>
+  </div>
 
-<script>
-  const { ipcRenderer, shell } = require('electron');
-
-  document.getElementById('open').onclick = () =>
-    ipcRenderer.send('open-browser');
-
-  document.getElementById('restart').onclick = () =>
-    ipcRenderer.send('restart-app');
-
-  document.getElementById('quit').onclick = () =>
-    ipcRenderer.send('quit-app');
-</script>
+  <script>
+    const { ipcRenderer } = require('electron');
+    
+    document.getElementById('open-browser').onclick = () => ipcRenderer.send('open-browser');
+    document.getElementById('open-app').onclick = () => ipcRenderer.send('open-app');
+    document.getElementById('quit').onclick = () => ipcRenderer.send('quit-app');
+  </script>
+</body>
+</html>
