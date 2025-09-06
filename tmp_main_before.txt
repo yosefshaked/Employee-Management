@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { initializeSupabase } from './supabaseClient'; // ייבוא הפונקציה החדשה
 import './index.css';
 
 // ייבוא של כל העמודים והתבנית הראשית שלך (ללא שינוי)

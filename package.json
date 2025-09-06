@@ -65,7 +65,8 @@
       "dist/**/*",
       "electron.cjs",
       "launcher.html",
-      "public/**/*"
+      "public/**/*",
+      "preload.js"
     ],
     "directories": {
       "output": "../release"

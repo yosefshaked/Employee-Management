@@ -42,7 +42,7 @@ export default function QuickStats({ employees, workSessions, currentDate, isLoa
       trend: ""
     },
     {
-      title: "מפגשים החודש",
+      title: "משמרות החודש",
       value: currentMonthSessions.length,
       icon: TrendingUp,
       color: "from-purple-500 to-purple-600",
