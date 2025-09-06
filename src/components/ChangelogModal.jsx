@@ -47,7 +47,7 @@ export default function ChangelogModal({ open, onClose }) {
             <article class="space-y-3 text-right">
               <header>
                 <h1 class="font-bold text-lg">
-                  <time datetime="2025-09-07">07/09/2025</time> – 🎉 ברוכים הבאים לגרסה 1.0 של מערכת ניהול עובדים ושכר!
+                  <time datetime="2025-09-07">07/09/2025</time> – 🎉 ברוכים הבאים לגרסה 1.0.0 של מערכת ניהול עובדים ושכר!
                 </h1>
                 <p>
                   זוהי ההשקה הרשמית של המערכת החדשה, שנבנתה כדי להחליף את קובצי ה־Excel
