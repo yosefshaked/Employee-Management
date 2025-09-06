@@ -1,0 +1,16 @@
+<button id="open">פתח בדפדפן</button>
+<button id="restart">הפעל מחדש</button>
+<button id="quit">סגור את המערכת</button>
+
+<script>
+  const { ipcRenderer, shell } = require('electron');
+
+  document.getElementById('open').onclick = () =>
+    ipcRenderer.send('open-browser');
+
+  document.getElementById('restart').onclick = () =>
+    ipcRenderer.send('restart-app');
+
+  document.getElementById('quit').onclick = () =>
+    ipcRenderer.send('quit-app');
+</script>
