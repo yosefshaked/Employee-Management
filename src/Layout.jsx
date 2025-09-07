@@ -3,7 +3,7 @@ import ChangelogModal from "./components/ChangelogModal";
 import { Link, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 
-import { Calendar, Users, Clock, BarChart3, Plus, Settings } from "lucide-react";
+import { Calendar, Users, Clock, BarChart3, Plus, Settings, DollarSign } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -39,6 +39,11 @@ const navigationItems = [
     title: "רישום זמנים",
     url: "TimeEntry",
     icon: Clock,
+  },
+  {
+    title: "התאמות שכר",
+    url: "Adjustments",
+    icon: DollarSign,
   },
   {
     title: "דוחות",

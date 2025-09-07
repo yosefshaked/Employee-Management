@@ -29,9 +29,11 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
     const total = rows.reduce((sum, row) => {
       const rate = getRateForDate(employee.id, row.date, row.service_id);
       let rowPayment = 0;
-      if (employee.employee_type === 'hourly') {
+      if (employee.employee_type === 'hourly') { // Only hourly
         rowPayment = (parseFloat(row.hours) || 0) * rate;
-      } else {
+      } else if (employee.employee_type === 'global') {
+        rowPayment = 0; // For global employees, time entries are for tracking, not payment.
+      } else if (employee.employee_type === 'instructor') {
         const service = services.find(s => s.id === row.service_id);
         if (service) {
           if (service.payment_model === 'per_student') {
@@ -63,10 +65,12 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
           const selectedService = services.find(s => s.id === row.service_id);
           const rate = getRateForDate(employee.id, row.date, row.service_id);
           let rowPayment = 0;
-          if (employee.employee_type === 'hourly') {
-            rowPayment = (parseFloat(row.hours) || 0) * rate;
-          } else if (selectedService) {
-            if (selectedService.payment_model === 'per_student') {
+            if (employee.employee_type === 'hourly') { // Only hourly
+              rowPayment = (parseFloat(row.hours) || 0) * rate;
+            } else if (employee.employee_type === 'global') {
+              rowPayment = 0; // For global employees, time entries are for tracking, not payment.
+            } else if (employee.employee_type === 'instructor' && selectedService) {
+              if (selectedService.payment_model === 'per_student') {
               rowPayment = (parseInt(row.sessions_count, 10) || 0) * (parseInt(row.students_count, 10) || 0) * rate;
             } else {
               rowPayment = (parseInt(row.sessions_count, 10) || 0) * rate;
@@ -77,7 +81,7 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
             <div key={row.id} className="p-4 border rounded-lg bg-slate-50 relative space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1"><Label>תאריך</Label><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full justify-start text-right font-normal bg-white"><CalendarIcon className="ml-2 h-4 w-4" />{format(new Date(row.date), 'dd/MM/yyyy')}</Button></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={new Date(row.date)} onSelect={(date) => date && handleRowChange(row.id, 'date', format(date, 'yyyy-MM-dd'))} initialFocus locale={he} /></PopoverContent></Popover></div>
-                {employee.employee_type === 'hourly' ? (
+                {(employee.employee_type === 'hourly' || employee.employee_type === 'global') ? ( // <-- THE FIX
                   <div className="space-y-1"><Label>שעות עבודה</Label><Input type="number" step="0.1" value={row.hours} onChange={(e) => handleRowChange(row.id, 'hours', e.target.value)} required className="bg-white" /></div>
                 ) : (
                   <div className="space-y-1"><Label>שירות</Label><Select value={row.service_id} onValueChange={(value) => handleRowChange(row.id, 'service_id', value)} required><SelectTrigger className="bg-white"><SelectValue placeholder="בחר שירות..." /></SelectTrigger><SelectContent>{services.map(s => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}</SelectContent></Select></div>
@@ -92,7 +96,12 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
                 </div>
               )}
               <div className="text-sm text-slate-600 bg-slate-100 p-2 rounded-md text-right">
-                תעריף: ₪{rate.toFixed(2)} | סה"כ לשורה: <span className="font-bold text-slate-800">₪{rowPayment.toFixed(2)}</span>
+                {employee.employee_type === 'global' 
+                  ? `שכר חודשי: ₪${rate.toFixed(2)}`
+                  : `תעריף: ₪${rate.toFixed(2)}`
+                }
+                {' | '}
+                סה"כ לשורה: <span className="font-bold text-slate-800">₪{rowPayment.toFixed(2)}</span>
               </div>
               {rows.length > 1 && (<Button variant="ghost" size="icon" onClick={() => removeRow(row.id)} className="absolute top-1 left-1 h-7 w-7 text-red-500 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>)}
             </div>

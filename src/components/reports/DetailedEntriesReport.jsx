@@ -19,7 +19,7 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
   
   const getServiceName = (session) => {
     const employee = getEmployee(session.employee_id);
-    if (employee?.employee_type === 'hourly') return 'שעות עבודה';
+    if (employee?.employee_type === 'hourly' || employee?.employee_type === 'global') return 'שעות עבודה';
     const service = services.find(s => s.id === session.service_id);
     return service ? service.name : 'שירות לא ידוע';
   };
@@ -58,9 +58,9 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
           {getServiceName(session)}
         </Badge>
       </TableCell>
-      <TableCell>
-        {getEmployee(session.employee_id)?.employee_type === 'hourly' ? `${session.hours || 0} שעות` : `${session.sessions_count || 0} מפגשים`}
-      </TableCell>
+        <TableCell>
+          {(getEmployee(session.employee_id)?.employee_type === 'hourly' || getEmployee(session.employee_id)?.employee_type === 'global') ? `${session.hours || 0} שעות` : `${session.sessions_count || 0} מפגשים`}
+        </TableCell>
       <TableCell>{session.students_count || '-'}</TableCell>
       <TableCell>₪{session.rate_used?.toFixed(2) || '0.00'}</TableCell>
       <TableCell className="font-semibold">₪{session.total_payment?.toFixed(2) || '0.00'}</TableCell>

@@ -8,6 +8,7 @@ import Layout from './Layout.jsx';
 import Dashboard from './Pages/Dashboard.jsx';
 import Employees from './Pages/Employees.jsx';
 import TimeEntry from './Pages/TimeEntry.jsx';
+import Adjustments from './Pages/Adjustments.jsx';
 import Reports from './Pages/Reports.jsx';
 import Services from './Pages/Services.jsx';
 
@@ -23,6 +24,7 @@ function App() {
         <Route path="/Dashboard" element={<Dashboard />} />
         <Route path="/Employees" element={<Employees />} />
         <Route path="/TimeEntry" element={<TimeEntry />} />
+        <Route path="/Adjustments" element={<Adjustments />} />
         <Route path="/Reports" element={<Reports />} />
         <Route path="/Services" element={<Services />} />
       </Routes>

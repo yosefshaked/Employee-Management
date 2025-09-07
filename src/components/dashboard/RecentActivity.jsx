@@ -9,15 +9,19 @@ import { he } from "date-fns/locale";
 import { Link } from "react-router-dom";
 import { getColorForService } from '@/lib/colorUtils';
 
+const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+
 export default function RecentActivity({ title = "פעילות אחרונה", sessions, employees, services, isLoading, showViewAllButton = true }) {
   
   const getEmployee = (employeeId) => employees.find(emp => emp.id === employeeId);
 
   const getServiceName = (session) => {
     const employee = getEmployee(session.employee_id);
-    if (employee?.employee_type === 'hourly') return "שעות עבודה";
-    const service = services.find(s => s.id === session.service_id);
-    return service ? service.name : 'סוג לא ידוע';
+    if (employee?.employee_type === 'hourly' || employee?.employee_type === 'global') {
+      return "שעות עבודה";
+    }
+    // For instructors, use the service name from the session object itself, which we already fetched.
+    return session.service?.name || 'סוג לא ידוע';
   };
 
   return (
@@ -35,7 +39,7 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
           <div className="space-y-3">
             {sessions.map((session) => {
               const employee = getEmployee(session.employee_id);
-              const isHourly = employee?.employee_type === 'hourly';
+              const isHourlyOrGlobal = employee?.employee_type === 'hourly' || employee?.employee_type === 'global';
               
               return (
                 <div key={session.id} className="flex items-center gap-3 p-3 rounded-lg bg-slate-50">
@@ -52,7 +56,7 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
                     <div className="col-span-1 text-left">
                       <p className="text-sm font-semibold text-slate-700 truncate">₪{session.total_payment.toLocaleString()}</p>
                       <p className="text-xs font-medium text-slate-500 truncate">
-                        {isHourly ? `${session.hours} שעות` : `${session.sessions_count} מפגשים`}
+                        {isHourlyOrGlobal ? `${session.hours || 0} שעות` : `${session.sessions_count || 0} מפגשים`}
                       </p>
                     </div>
                   </div>
@@ -61,9 +65,9 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
                     <Badge variant="outline" className="text-xs w-full block truncate"
                       title={getServiceName(session)}
                       style={{
-                        backgroundColor: `${getColorForService(isHourly ? null : session.service_id)}20`,
-                        color: getColorForService(isHourly ? null : session.service_id),
-                        borderColor: getColorForService(isHourly ? null : session.service_id),
+                        backgroundColor: `${getColorForService(isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : session.service_id)}20`,
+                        color: getColorForService(isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : session.service_id),
+                        borderColor: getColorForService(isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : session.service_id),
                       }}>
                       {getServiceName(session)}
                     </Badge>

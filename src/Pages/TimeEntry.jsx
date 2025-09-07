@@ -9,6 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 
+const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+
 export default function TimeEntry() {
   const [employees, setEmployees] = useState([]);
   const [services, setServices] = useState([]);
@@ -50,10 +52,18 @@ export default function TimeEntry() {
   const getRateForDate = (employeeId, date, serviceId = null) => {
     const employee = employees.find(e => e.id === employeeId);
     if (!employee) return 0;
-    if (employee.employee_type === 'hourly') return employee.current_rate || 0;
+
+    // Use GENERIC_RATE_SERVICE_ID for hourly and global employees
+    const targetServiceId = (employee.employee_type === 'hourly' || employee.employee_type === 'global')
+      ? GENERIC_RATE_SERVICE_ID
+      : serviceId;
 
     const relevantRates = rateHistories
-      .filter(r => r.employee_id === employeeId && r.service_id === serviceId && new Date(r.effective_date) <= new Date(date))
+      .filter(r => 
+        r.employee_id === employeeId && 
+        r.service_id === targetServiceId && 
+        new Date(r.effective_date) <= new Date(date)
+      )
       .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
     
     return relevantRates.length > 0 ? relevantRates[0].rate : 0;
@@ -65,12 +75,17 @@ export default function TimeEntry() {
       if (!employee) throw new Error("Employee not found");
 
       const sessionsToInsert = rows.map(row => {
-        const rateUsed = getRateForDate(employee.id, row.date, row.service_id);
+        const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
+        const serviceIdForRate = isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : row.service_id;
+        
+        const rateUsed = getRateForDate(employee.id, row.date, serviceIdForRate);
         let totalPayment = 0;
         
         if (employee.employee_type === 'hourly') {
           totalPayment = (parseFloat(row.hours) || 0) * rateUsed;
-        } else {
+        } else if (employee.employee_type === 'global') {
+          totalPayment = 0; // Always save 0 for a global employee's time entry
+        } else { // Instructor
           const service = services.find(s => s.id === row.service_id);
           if (!service) return null;
           if (service.payment_model === 'per_student') {
@@ -83,10 +98,10 @@ export default function TimeEntry() {
         return {
           employee_id: employee.id,
           date: row.date,
-          service_id: employee.employee_type === 'instructor' ? row.service_id : null,
-          hours: employee.employee_type === 'hourly' ? parseFloat(row.hours) || null : null,
-          sessions_count: employee.employee_type === 'instructor' ? parseInt(row.sessions_count) || null : null,
-          students_count: employee.employee_type === 'instructor' ? parseInt(row.students_count) || null : null,
+          service_id: isHourlyOrGlobal ? null : row.service_id, // Save null for generic types in WorkSessions
+          hours: isHourlyOrGlobal ? (parseFloat(row.hours) || null) : null,
+          sessions_count: employee.employee_type === 'instructor' ? (parseInt(row.sessions_count) || null) : null,
+          students_count: employee.employee_type === 'instructor' ? (parseInt(row.students_count) || null) : null,
           notes: row.notes,
           rate_used: rateUsed,
           total_payment: totalPayment,

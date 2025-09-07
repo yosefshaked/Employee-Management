@@ -6,6 +6,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
+const EMPLOYEE_TYPES = {
+  hourly: 'שעתי',
+  instructor: 'מדריך',
+  global: 'גלובלי'
+};
+
 // קומפוננטה קטנה לשורות הפירוט עם עיצוב משופר
 const InstructorDetailsRow = ({ details }) => (
   <TableRow className="bg-slate-50 hover:bg-slate-100/70">
@@ -33,6 +39,23 @@ const InstructorDetailsRow = ({ details }) => (
 
 export default function PayrollSummary({ sessions, employees, services, isLoading }) {
   const [expandedRows, setExpandedRows] = useState({});
+  const EMPLOYEE_TYPE_CONFIG = {
+    hourly: {
+      label: 'שעתי',
+      className: 'bg-blue-50 text-blue-700 border-blue-200',
+      activity: (emp) => `${emp.totalHours.toFixed(1)} שעות`
+    },
+    global: {
+      label: 'גלובלי',
+      className: 'bg-yellow-50 text-yellow-700 border-yellow-200', // צבע חדש לגלובלי
+      activity: (emp) => `${emp.totalHours.toFixed(1)} שעות`
+    },
+    instructor: {
+      label: 'מדריך',
+      className: 'bg-purple-50 text-purple-700 border-purple-200',
+      activity: (emp) => `${emp.totalSessions} מפגשים`
+    }
+  };
 
   if (isLoading) { 
     return (
@@ -56,9 +79,9 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
 
     employeeSessions.forEach(session => {
       totalPayment += session.total_payment || 0;
-      if (employee.employee_type === 'hourly') {
+      if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
         totalHours += session.hours || 0;
-      } else {
+      } else if (employee.employee_type === 'instructor') { // <-- Make explicit
         totalSessions += session.sessions_count || 0;
         if (session.service_id) {
           if (!serviceDetails[session.service_id]) {
@@ -113,16 +136,12 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
                 </TableCell>
                 <TableCell className="font-medium">{employee.name}</TableCell>
                 <TableCell>
-                  <Badge variant="outline" className={
-                    employee.employeeType === 'hourly' 
-                      ? 'bg-blue-50 text-blue-700 border-blue-200'
-                      : 'bg-purple-50 text-purple-700 border-purple-200'
-                  }>
-                    {employee.employeeType === 'hourly' ? 'שעתי' : 'מדריך'}
+                  <Badge variant="outline" className={EMPLOYEE_TYPE_CONFIG[employee.employeeType]?.className || ''}>
+                    {EMPLOYEE_TYPE_CONFIG[employee.employeeType]?.label || 'לא ידוע'}
                   </Badge>
                 </TableCell>
                 <TableCell className="font-semibold">
-                  {employee.employeeType === 'hourly' ? `${employee.totalHours.toFixed(1)} שעות` : `${employee.totalSessions} מפגשים`}
+                  {EMPLOYEE_TYPE_CONFIG[employee.employeeType]?.activity(employee) || '-'}
                 </TableCell>
                 <TableCell className="font-semibold text-green-700">₪{employee.totalPayment.toLocaleString()}</TableCell>
                 <TableCell>

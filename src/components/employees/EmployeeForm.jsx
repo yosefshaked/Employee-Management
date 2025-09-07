@@ -9,12 +9,28 @@ import { Switch } from "@/components/ui/switch";
 import { Save, X, User, DollarSign } from "lucide-react";
 import { supabase } from '@/supabaseClient';
 
+const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+
 export default function EmployeeForm({ employee, onSubmit, onCancel }) {
   const [formData, setFormData] = useState({
     name: employee?.name || '',
     employee_id: employee?.employee_id || '',
     employee_type: employee?.employee_type || 'hourly',
-    current_rate: employee?.current_rate || '',
+    current_rate: '',
+    phone: employee?.phone || '',
+    email: employee?.email || '',
+    start_date: employee?.start_date || new Date().toISOString().split('T')[0],
+    is_active: employee?.is_active !== undefined ? employee.is_active : true,
+    notes: employee?.notes || ''
+  });
+
+  useEffect(() => {
+  // This effect resets the form whenever the employee to be edited changes.
+  setFormData({
+    name: employee?.name || '',
+    employee_id: employee?.employee_id || '',
+    employee_type: employee?.employee_type || 'hourly',
+    current_rate: '', // Always start with a blank rate
     phone: employee?.phone || '',
     email: employee?.email || '',
     start_date: employee?.start_date || new Date().toISOString().split('T')[0],
@@ -22,45 +38,65 @@ export default function EmployeeForm({ employee, onSubmit, onCancel }) {
     notes: employee?.notes || ''
   });
   
+  // Also reset the instructor-specific rates
+  setServiceRates({});
+
+}, [employee]); // This dependency is crucial!
+
   const [services, setServices] = useState([]);
   const [rateHistory, setRateHistory] = useState([]);
   const [serviceRates, setServiceRates] = useState({});
   const [isLoading, setIsLoading] = useState(false);
 
-  useEffect(() => {
-    const loadFormData = async () => {
-      if (formData.employee_type === 'instructor') {
-        const { data: servicesData } = await supabase.from('Services').select('*').order('name');
-        setServices(servicesData || []);
+useEffect(() => {
+  const loadServicesAndRates = async () => {
+    // Load services only if the employee is an instructor
+    if (formData.employee_type === 'instructor') {
+      const { data: servicesData } = await supabase.from('Services').select('*').order('name');
+      setServices(servicesData || []);
+    }
 
-        if (employee) {
-          const { data: ratesData } = await supabase.from('RateHistory').select('*').eq('employee_id', employee.id);
-          setRateHistory(ratesData || []);
-        }
-      }
-    };
-    loadFormData();
-  }, [formData.employee_type, employee]);
+    // Load rate history FOR ANY existing employee
+    if (employee) {
+      const { data: ratesData } = await supabase.from('RateHistory').select('*').eq('employee_id', employee.id);
+      setRateHistory(ratesData || []);
+      setFormData(prev => ({ ...prev, current_rate: '' }));
+    }
+  };
+  loadServicesAndRates();
+}, [formData.employee_type, employee]);
 
-  useEffect(() => {
-    if (employee && rateHistory.length > 0) {
-      const initialRates = {};
-      const latestRates = {};
+useEffect(() => {
+     if (employee && rateHistory.length > 0) {
+          const latestRatesByService = {};
 
-      rateHistory.forEach(rate => {
-        if (rate.service_id) {
-          if (!latestRates[rate.service_id] || new Date(rate.effective_date) > new Date(latestRates[rate.service_id].effective_date)) {
-            latestRates[rate.service_id] = rate;
+          // Find the latest rate for each service_id (including the generic one)
+          rateHistory.forEach(rate => {
+            // Use the actual service_id as the key. If it's the generic one, use it.
+            const key = rate.service_id; 
+            if (!latestRatesByService[key] || new Date(rate.effective_date) > new Date(latestRatesByService[key].effective_date)) {
+              latestRatesByService[key] = rate;
+            }
+          });
+
+          const initialServiceRates = {};
+          Object.keys(latestRatesByService).forEach(key => {
+            // Only populate serviceRates for actual services, not the generic one.
+            if (key !== GENERIC_RATE_SERVICE_ID) {
+              initialServiceRates[key] = latestRatesByService[key].rate;
+            }
+          });
+          setServiceRates(initialServiceRates);
+
+          // Set the hourly/global rate in the main form data by looking for the generic ID
+          if (latestRatesByService[GENERIC_RATE_SERVICE_ID]) {
+            setFormData(prev => ({
+              ...prev,
+              current_rate: latestRatesByService[GENERIC_RATE_SERVICE_ID].rate
+            }));
           }
         }
-      });
-
-      Object.keys(latestRates).forEach(serviceId => {
-        initialRates[serviceId] = latestRates[serviceId].rate;
-      });
-      setServiceRates(initialRates);
-    }
-  }, [employee, rateHistory]);
+      }, [employee, rateHistory]);
 
   const handleServiceRateChange = (serviceId, value) => {
     setServiceRates(prev => ({ ...prev, [serviceId]: value }));
@@ -71,7 +107,7 @@ export default function EmployeeForm({ employee, onSubmit, onCancel }) {
     setIsLoading(true);
     try {
       await onSubmit({
-        employeeData: { ...formData, current_rate: parseFloat(formData.current_rate) || 0 },
+        employeeData: formData,
         serviceRates,
       });
     } catch (error) {
@@ -83,6 +119,12 @@ export default function EmployeeForm({ employee, onSubmit, onCancel }) {
 
   const handleChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  // Helper object for dynamic labels
+  const rateLabels = {
+    hourly: 'תעריף שעתי (₪) *',
+    global: 'שכר חודשי (₪) *',
   };
 
   return (
@@ -112,15 +154,26 @@ export default function EmployeeForm({ employee, onSubmit, onCancel }) {
                 <SelectContent>
                   <SelectItem value="hourly">עובד שעתי</SelectItem>
                   <SelectItem value="instructor">מדריך</SelectItem>
+                  <SelectItem value="global">עובד גלובלי</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {formData.employee_type === 'hourly' ? (
+            {(formData.employee_type === 'hourly' || formData.employee_type === 'global') && (
               <div className="space-y-2">
-                <Label htmlFor="current_rate" className="text-sm font-semibold text-slate-700">תעריף שעתי (₪) *</Label>
-                <Input id="current_rate" type="number" step="0.01" value={formData.current_rate} onChange={(e) => handleChange('current_rate', e.target.value)} placeholder="0.00" required />
+                <Label htmlFor="current_rate" className="text-sm font-semibold text-slate-700">
+                  {rateLabels[formData.employee_type]}
+                </Label>
+                <Input 
+                  id="current_rate" 
+                  type="number" 
+                  step="0.01" 
+                  value={formData.current_rate} 
+                  onChange={(e) => handleChange('current_rate', e.target.value)} 
+                  placeholder="0.00" 
+                  required 
+                />
               </div>
-            ) : (<div className="md:col-span-1"></div>)}
+            )}
             <div className="space-y-2">
               <Label htmlFor="phone" className="text-sm font-semibold text-slate-700">טלפון</Label>
               <Input id="phone" value={formData.phone} onChange={(e) => handleChange('phone', e.target.value)} placeholder="050-1234567" />

@@ -15,20 +15,26 @@ export default function Employees() {
   const [showForm, setShowForm] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
-  const [activeTab, setActiveTab] = useState("all");
+  const [activeTab, setActiveTab] = useState("active");
   const [isLoading, setIsLoading] = useState(true);
+  const [services, setServices] = useState([]);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [employeesData, ratesData] = await Promise.all([
+      const [employeesData, ratesData, servicesData] = await Promise.all([
         supabase.from('Employees').select('*').order('name'),
-        supabase.from('RateHistory').select('*')
+        supabase.from('RateHistory').select('*'),
+        supabase.from('Services').select('*')
       ]);
+
       if (employeesData.error) throw employeesData.error;
       if (ratesData.error) throw ratesData.error;
+      if (servicesData.error) throw servicesData.error; 
+
       setEmployees(employeesData.data);
       setRateHistories(ratesData.data);
+      setServices(servicesData.data); 
     } catch (error) {
       console.error('Error fetching data:', error);
       toast.error("שגיאה בטעינת הנתונים");
@@ -54,44 +60,71 @@ export default function Employees() {
 
   const handleSubmit = async ({ employeeData, serviceRates }) => {
     try {
-      let employeeId;
+      // Separate the rate from the main employee data to avoid saving it in the Employees table
+      const { current_rate, ...employeeDetails } = employeeData;
+      const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
       const isNewEmployee = !editingEmployee;
+      let employeeId;
 
+      // Step 1: Insert or Update the employee in the 'Employees' table
       if (isNewEmployee) {
-        const { data, error } = await supabase.from('Employees').insert([employeeData]).select('id').single();
+        const { data, error } = await supabase.from('Employees').insert([employeeDetails]).select('id').single();
         if (error) throw error;
         employeeId = data.id;
         toast.success("העובד נוצר בהצלחה!");
       } else {
         employeeId = editingEmployee.id;
-        const { error } = await supabase.from('Employees').update(employeeData).eq('id', employeeId);
+        const { error } = await supabase.from('Employees').update(employeeDetails).eq('id', employeeId);
         if (error) throw error;
         toast.success("פרטי העובד עודכנו בהצלחה!");
       }
 
-      if (employeeData.employee_type === 'instructor') {
-        const rateUpdates = Object.keys(serviceRates).map(serviceId => {
-          const rateValue = parseFloat(serviceRates[serviceId]);
-          if (!isNaN(rateValue)) {
-            return {
-              employee_id: employeeId,
-              service_id: serviceId,
-              effective_date: new Date().toISOString().split('T')[0],
-              rate: rateValue,
-              notes: isNewEmployee ? 'תעריף התחלתי' : 'שינוי תעריף',
-            };
-          }
-          return null;
-        }).filter(Boolean);
+      // Step 2: Prepare the rate updates for the 'RateHistory' table for ALL types
+      const rateUpdates = [];
+      const effective_date = new Date().toISOString().split('T')[0];
+      const notes = isNewEmployee ? 'תעריף התחלתי' : 'שינוי תעריף';
 
-        if (rateUpdates.length > 0) {
-          const { error } = await supabase.from('RateHistory').upsert(rateUpdates, { onConflict: 'employee_id,service_id,effective_date' });
-          if (error) throw error;
+      // Handle hourly and global employees
+      if (employeeData.employee_type === 'hourly' || employeeData.employee_type === 'global') {
+        const rateValue = parseFloat(current_rate);
+        if (!isNaN(rateValue)) {
+          rateUpdates.push({
+            employee_id: employeeId,
+            service_id: GENERIC_RATE_SERVICE_ID, 
+            effective_date,
+            rate: rateValue,
+            notes,
+          });
         }
       }
+
+      // Handle instructor employees
+      if (employeeData.employee_type === 'instructor') {
+        Object.keys(serviceRates).forEach(serviceId => {
+          const rateValue = parseFloat(serviceRates[serviceId]);
+          if (!isNaN(rateValue)) {
+            rateUpdates.push({
+              employee_id: employeeId,
+              service_id: serviceId,
+              effective_date,
+              rate: rateValue,
+              notes,
+            });
+          }
+        });
+      }
+
+      // Step 3: Upsert all prepared rate updates into 'RateHistory'
+      if (rateUpdates.length > 0) {
+        const { error } = await supabase.from('RateHistory').upsert(rateUpdates, { onConflict: 'employee_id,service_id,effective_date' });
+        if (error) throw error;
+      }
+
+      // Step 4: Cleanup and reload
       setShowForm(false);
       setEditingEmployee(null);
       loadData();
+
     } catch (error) {
       console.error("Error in handleSubmit:", error);
       toast.error(`שגיאה בשמירת הנתונים: ${error.message}`);
@@ -143,7 +176,14 @@ export default function Employees() {
                 </TabsList>
               </Tabs>
             </div>
-            <EmployeeList employees={filteredEmployees} onEdit={handleEdit} onToggleActive={handleToggleActive} isLoading={isLoading} />
+            <EmployeeList 
+              employees={filteredEmployees} 
+              rateHistories={rateHistories}
+              services={services}
+              onEdit={handleEdit} 
+              onToggleActive={handleToggleActive} 
+              isLoading={isLoading} 
+            />
           </>
         )}
       </div>

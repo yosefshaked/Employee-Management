@@ -23,7 +23,7 @@ export default function QuickStats({ employees, workSessions, services, currentD
     // חישוב שעות משולב ומדויק
     const totalHours = currentMonthSessions.reduce((sum, session) => {
       const employee = employees.find(e => e.id === session.employee_id);
-      if (employee?.employee_type === 'hourly') {
+      if (employee?.employee_type === 'hourly' || employee?.employee_type === 'global') {
         return sum + (session.hours || 0);
       } else if (employee?.employee_type === 'instructor') {
         const service = services.find(s => s.id === session.service_id);

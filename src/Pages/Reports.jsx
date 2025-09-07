@@ -128,7 +128,7 @@ export default function Reports() {
     filteredSessions.forEach(session => {
       const employee = employees.find(e => e.id === session.employee_id);
       payment += session.total_payment || 0;
-      if (employee?.employee_type === 'hourly') {
+      if (employee?.employee_type === 'hourly' || employee?.employee_type === 'global') {
         hours += session.hours || 0;
       } else if (employee?.employee_type === 'instructor') {
         sessionsCount += session.sessions_count || 0;
