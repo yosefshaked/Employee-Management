@@ -21,6 +21,7 @@ export default function Reports() {
   const [isLoading, setIsLoading] = useState(true);
   const location = useLocation(); // מאפשר לנו לגשת למידע על הכתובת הנוכחית
   const [activeTab, setActiveTab] = useState(location.state?.openTab || "overview");
+  const [rateHistories, setRateHistories] = useState([]);
 
   const [filters, setFilters] = useState({
     selectedEmployee: '',
@@ -63,19 +64,22 @@ export default function Reports() {
   const loadInitialData = async () => {
     setIsLoading(true);
     try {
-      const [employeesData, sessionsData, servicesData] = await Promise.all([
+      const [employeesData, sessionsData, servicesData, ratesData] = await Promise.all([
         supabase.from('Employees').select('*').order('name'),
         supabase.from('WorkSessions').select('*'),
-        supabase.from('Services').select('*')
+        supabase.from('Services').select('*'),
+        supabase.from('RateHistory').select('*')
       ]);
 
       if (employeesData.error) throw employeesData.error;
       if (sessionsData.error) throw sessionsData.error;
       if (servicesData.error) throw servicesData.error;
+      if (ratesData.error) throw ratesData.error;
 
       setEmployees(employeesData.data || []);
       setWorkSessions(sessionsData.data || []);
       setServices(servicesData.data || []);
+      setRateHistories(ratesData.data || []);
     } catch (error) {
       console.error("Error loading data:", error);
     }
@@ -200,7 +204,7 @@ export default function Reports() {
               <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
               <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
               <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
             </Tabs>
           </CardContent>
         </Card>

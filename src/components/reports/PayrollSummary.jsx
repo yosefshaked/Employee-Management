@@ -37,8 +37,17 @@ const InstructorDetailsRow = ({ details }) => (
   </TableRow>
 );
 
-export default function PayrollSummary({ sessions, employees, services, isLoading }) {
+export default function PayrollSummary({ sessions, employees, services, rateHistories, isLoading }) {
   const [expandedRows, setExpandedRows] = useState({});
+  const getBaseSalary = (employeeId) => {
+  if (!rateHistories) return 0;
+  const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+  const relevantRates = rateHistories
+    .filter(r => r.employee_id === employeeId && r.service_id === GENERIC_RATE_SERVICE_ID)
+    .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
+  return relevantRates.length > 0 ? relevantRates[0].rate : 0;
+};
+
   const EMPLOYEE_TYPE_CONFIG = {
     hourly: {
       label: 'שעתי',
@@ -69,47 +78,64 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
     setExpandedRows(prev => ({...prev, [employeeId]: !prev[employeeId]}));
   };
 
-  const employeesSummary = employees.map(employee => {
-    const employeeSessions = sessions.filter(s => s.employee_id === employee.id);
-    const serviceDetails = {};
+    const employeesSummary = employees.map(employee => {
+      const employeeSessions = sessions.filter(s => s.employee_id === employee.id);
+      
+      // Initialize variables for all types
+      let totalPayment = 0;
+      let totalHours = 0;
+      let totalSessions = 0;
+      let serviceDetails = {};
+      let totalAdjustments = 0;
+      let baseSalary = null;
 
-    let totalPayment = 0;
-    let totalHours = 0;
-    let totalSessions = 0;
+      if (employee.employee_type === 'global') {
+        baseSalary = getBaseSalary(employee.id);
+        totalAdjustments = employeeSessions.reduce((sum, s) => s.entry_type === 'adjustment' ? sum + (s.total_payment || 0) : sum, 0);
+        totalHours = employeeSessions.reduce((sum, s) => s.entry_type === 'hours' ? sum + (s.hours || 0) : sum, 0);
+        totalPayment = baseSalary + totalAdjustments;
 
-    employeeSessions.forEach(session => {
-      totalPayment += session.total_payment || 0;
-      if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
-        totalHours += session.hours || 0;
-      } else if (employee.employee_type === 'instructor') { // <-- Make explicit
-        totalSessions += session.sessions_count || 0;
-        if (session.service_id) {
-          if (!serviceDetails[session.service_id]) {
-            const service = services.find(s => s.id === session.service_id);
-            serviceDetails[session.service_id] = { 
-              serviceName: service ? service.name : 'שירות לא ידוע',
-              sessionsCount: 0, 
-              totalPayment: 0 
-            };
+      } else if (employee.employee_type === 'hourly') {
+        totalHours = employeeSessions.reduce((sum, s) => sum + (s.hours || 0), 0);
+        totalPayment = employeeSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
+
+      } else if (employee.employee_type === 'instructor') {
+        totalSessions = employeeSessions.reduce((sum, s) => sum + (s.sessions_count || 0), 0);
+        totalPayment = employeeSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
+        
+        // Calculate service details for instructors
+        employeeSessions.forEach(session => {
+          if (session.service_id) {
+            if (!serviceDetails[session.service_id]) {
+              const service = services.find(s => s.id === session.service_id);
+              serviceDetails[session.service_id] = { 
+                serviceName: service ? service.name : 'שירות לא ידוע',
+                sessionsCount: 0, 
+                totalPayment: 0 
+              };
+            }
+            serviceDetails[session.service_id].sessionsCount += session.sessions_count || 0;
+            serviceDetails[session.service_id].totalPayment += session.total_payment || 0;
           }
-          serviceDetails[session.service_id].sessionsCount += session.sessions_count || 0;
-          serviceDetails[session.service_id].totalPayment += session.total_payment || 0;
-        }
+        });
+
+        Object.values(serviceDetails).forEach(detail => {
+          detail.avgRate = detail.totalPayment / (detail.sessionsCount || 1);
+        });
       }
-    });
-
-    Object.values(serviceDetails).forEach(detail => {
-        detail.avgRate = detail.totalPayment / (detail.sessionsCount || 1);
-    });
+      
+      return {
+        id: employee.id, name: employee.name, employeeType: employee.employee_type,
+        baseSalary,
+        totalAdjustments,
+        isActive: employee.is_active,
+        totalPayment, 
+        totalHours: Math.round(totalHours * 10) / 10, 
+        totalSessions,
+        details: Object.values(serviceDetails)
+      };
+    }).filter(emp => emp.totalPayment > 0 || emp.totalAdjustments !== 0 || emp.isActive);
     
-    return {
-      id: employee.id, name: employee.name, employeeType: employee.employee_type,
-      currentRate: employee.current_rate, isActive: employee.is_active,
-      totalPayment, totalHours: Math.round(totalHours * 10) / 10, totalSessions,
-      details: Object.values(serviceDetails)
-    };
-  }).filter(emp => emp.totalPayment > 0 || emp.isActive);
-
   return (
     <Card className="border-0 shadow-lg">
       <Table>
@@ -118,7 +144,9 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
             <TableHead className="w-12"></TableHead>
             <TableHead className="text-right">עובד</TableHead>
             <TableHead className="text-right">סוג</TableHead>
+            <TableHead className="text-right">שכר בסיס</TableHead>
             <TableHead className="text-right">סה"כ פעילות</TableHead>
+            <TableHead className="text-right">התאמות</TableHead>
             <TableHead className="text-right">סה״כ לתשלום</TableHead>
             <TableHead className="text-right">סטטוס</TableHead>
           </TableRow>
@@ -128,7 +156,7 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
             <React.Fragment key={employee.id}>
               <TableRow className="hover:bg-slate-50/50">
                 <TableCell>
-                  {employee.employeeType === 'instructor' && employee.details.length > 0 && (
+                  {(employee.employeeType === 'instructor' || employee.employeeType === 'global') && employee.details.length > 0 && (
                     <Button variant="ghost" size="icon" onClick={() => toggleRow(employee.id)} className="w-8 h-8 rounded-full">
                       {expandedRows[employee.id] ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                     </Button>
@@ -140,16 +168,18 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
                     {EMPLOYEE_TYPE_CONFIG[employee.employeeType]?.label || 'לא ידוע'}
                   </Badge>
                 </TableCell>
+                <TableCell className="font-semibold text-slate-600">
+                  {employee.baseSalary !== null ? `₪${employee.baseSalary.toLocaleString()}` : '-'}
+                </TableCell>
                 <TableCell className="font-semibold">
                   {EMPLOYEE_TYPE_CONFIG[employee.employeeType]?.activity(employee) || '-'}
                 </TableCell>
+                <TableCell className={`font-semibold ${employee.totalAdjustments >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                  {employee.totalAdjustments !== null && employee.totalAdjustments !== 0 ? `₪${employee.totalAdjustments.toLocaleString()}` : '-'}
+                </TableCell>
                 <TableCell className="font-semibold text-green-700">₪{employee.totalPayment.toLocaleString()}</TableCell>
                 <TableCell>
-                  <Badge className={
-                    employee.isActive 
-                      ? 'bg-green-100 text-green-800'
-                      : 'bg-slate-100 text-slate-600'
-                  }>
+                  <Badge className={employee.isActive ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'}>
                     {employee.isActive ? 'פעיל' : 'לא פעיל'}
                   </Badge>
                 </TableCell>
