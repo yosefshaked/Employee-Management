@@ -128,20 +128,57 @@ export default function Reports() {
     };
 
   const getTotals = () => {
-    let payment = 0, hours = 0, sessionsCount = 0;
+    // Helper function defined inside getTotals to have access to rateHistories
+    const getBaseSalary = (employeeId) => {
+      if (!rateHistories) return 0;
+      const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+      const relevantRates = rateHistories
+        .filter(r => r.employee_id === employeeId && r.service_id === GENERIC_RATE_SERVICE_ID)
+        .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
+      return relevantRates.length > 0 ? relevantRates[0].rate : 0;
+    };
+
+    let payment = 0;
+    let hours = 0;
+    let sessionsCount = 0;
+
+    // Calculate totals from session records first
     filteredSessions.forEach(session => {
       const employee = employees.find(e => e.id === session.employee_id);
+      if (!employee) return;
+
       payment += session.total_payment || 0;
-      if (employee?.employee_type === 'hourly' || employee?.employee_type === 'global') {
-        hours += session.hours || 0;
-      } else if (employee?.employee_type === 'instructor') {
+
+      if (employee.employee_type === 'instructor') {
         sessionsCount += session.sessions_count || 0;
         const service = services.find(s => s.id === session.service_id);
         if (service && service.duration_minutes) {
           hours += (service.duration_minutes / 60) * (session.sessions_count || 0);
         }
+      } else { // Hourly and Global
+        if (session.entry_type !== 'adjustment') {
+          hours += session.hours || 0;
+        }
       }
     });
+
+    // Find unique global employees active in the filtered range
+    const activeGlobalEmployeeIds = [...new Set(
+      filteredSessions
+        .map(s => employees.find(e => e.id === s.employee_id))
+        .filter(e => e && e.employee_type === 'global')
+        .map(e => e.id)
+    )];
+
+    // Determine how many unique months are covered by the filter
+    const monthYearSet = new Set(filteredSessions.map(s => format(parseISO(s.date), 'yyyy-MM')));
+    const numberOfMonths = Math.max(1, monthYearSet.size); // Use at least 1 to avoid multiplying by 0
+
+    // Add their base salary for each month in the range
+    activeGlobalEmployeeIds.forEach(employeeId => {
+      payment += getBaseSalary(employeeId) * numberOfMonths;
+    });
+
     return { payment, hours, sessionsCount };
   };
 
