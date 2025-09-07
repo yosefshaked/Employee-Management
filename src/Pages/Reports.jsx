@@ -203,7 +203,7 @@ export default function Reports() {
               </TabsList>
               <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
               <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
               <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
             </Tabs>
           </CardContent>

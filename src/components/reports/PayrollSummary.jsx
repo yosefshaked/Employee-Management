@@ -78,63 +78,80 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
     setExpandedRows(prev => ({...prev, [employeeId]: !prev[employeeId]}));
   };
 
-    const employeesSummary = employees.map(employee => {
-      const employeeSessions = sessions.filter(s => s.employee_id === employee.id);
-      
-      // Initialize variables for all types
-      let totalPayment = 0;
-      let totalHours = 0;
-      let totalSessions = 0;
-      let serviceDetails = {};
-      let totalAdjustments = 0;
-      let baseSalary = null;
-
-      if (employee.employee_type === 'global') {
-        baseSalary = getBaseSalary(employee.id);
-        totalAdjustments = employeeSessions.reduce((sum, s) => s.entry_type === 'adjustment' ? sum + (s.total_payment || 0) : sum, 0);
-        totalHours = employeeSessions.reduce((sum, s) => s.entry_type === 'hours' ? sum + (s.hours || 0) : sum, 0);
-        totalPayment = baseSalary + totalAdjustments;
-
-      } else if (employee.employee_type === 'hourly') {
-        totalHours = employeeSessions.reduce((sum, s) => sum + (s.hours || 0), 0);
-        totalPayment = employeeSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
-
-      } else if (employee.employee_type === 'instructor') {
-        totalSessions = employeeSessions.reduce((sum, s) => sum + (s.sessions_count || 0), 0);
-        totalPayment = employeeSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
+      const employeesSummary = employees.map(employee => {
+        const employeeSessions = sessions.filter(s => s.employee_id === employee.id);
         
-        // Calculate service details for instructors
-        employeeSessions.forEach(session => {
-          if (session.service_id) {
-            if (!serviceDetails[session.service_id]) {
-              const service = services.find(s => s.id === session.service_id);
-              serviceDetails[session.service_id] = { 
-                serviceName: service ? service.name : 'שירות לא ידוע',
-                sessionsCount: 0, 
-                totalPayment: 0 
-              };
-            }
-            serviceDetails[session.service_id].sessionsCount += session.sessions_count || 0;
-            serviceDetails[session.service_id].totalPayment += session.total_payment || 0;
+        // Calculate totals based on session data first
+        const sessionTotals = employeeSessions.reduce((acc, session) => {
+        // Always add the payment part from the session itself
+        acc.sessionPayment += session.total_payment || 0;
+        
+        // Handle activity totals based on employee type and entry type
+        if (employee.employee_type === 'instructor') {
+          acc.totalSessions += session.sessions_count || 0;
+        } else if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
+          if (session.entry_type === 'adjustment') {
+            acc.totalAdjustments += session.total_payment || 0;
+          } else { // It's an 'hours' entry, or an old entry without a type
+            acc.totalHours += session.hours || 0;
           }
-        });
+        }
+        
+        return acc;
+      }, { sessionPayment: 0, totalHours: 0, totalSessions: 0, totalAdjustments: 0 });
 
-        Object.values(serviceDetails).forEach(detail => {
-          detail.avgRate = detail.totalPayment / (detail.sessionsCount || 1);
-        });
-      }
-      
-      return {
-        id: employee.id, name: employee.name, employeeType: employee.employee_type,
-        baseSalary,
-        totalAdjustments,
-        isActive: employee.is_active,
-        totalPayment, 
-        totalHours: Math.round(totalHours * 10) / 10, 
-        totalSessions,
-        details: Object.values(serviceDetails)
-      };
-    }).filter(emp => emp.totalPayment > 0 || emp.totalAdjustments !== 0 || emp.isActive);
+        let finalPayment = 0;
+        let baseSalary = null;
+
+        if (employee.employee_type === 'global') {
+          baseSalary = getBaseSalary(employee.id);
+          // For global, final pay is base + adjustments. Session payments (for hours) are ignored.
+          finalPayment = baseSalary + sessionTotals.totalAdjustments;
+        } else {
+          // For hourly and instructors, final pay is the sum of all their session payments + any adjustments.
+          finalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments;
+        }
+        
+        // Instructor service details logic (remains the same)
+        let serviceDetails = {};
+        if (employee.employee_type === 'instructor') {
+          employeeSessions.forEach(session => {
+            if (session.service_id) {
+              if (!serviceDetails[session.service_id]) {
+                const service = services.find(s => s.id === session.service_id);
+                serviceDetails[session.service_id] = { 
+                  serviceName: service ? service.name : 'שירות לא ידוע',
+                  sessionsCount: 0, 
+                  totalPayment: 0 
+                };
+              }
+              serviceDetails[session.service_id].sessionsCount += session.sessions_count || 0;
+              serviceDetails[session.service_id].totalPayment += session.total_payment || 0;
+            }
+          });
+          Object.values(serviceDetails).forEach(detail => {
+            detail.avgRate = detail.totalPayment / (detail.sessionsCount || 1);
+          });
+        }
+
+        return {
+          id: employee.id, name: employee.name, employeeType: employee.employee_type,
+          baseSalary,
+          totalAdjustments: sessionTotals.totalAdjustments,
+          isActive: employee.is_active,
+          totalPayment: finalPayment, 
+          totalHours: Math.round(sessionTotals.totalHours * 10) / 10, 
+          totalSessions: sessionTotals.totalSessions,
+          details: Object.values(serviceDetails)
+        };
+      }).filter(emp => {
+          // Show active employees, OR employees with any kind of payment/activity in the filtered period
+          if (emp.isActive) return true;
+          if (emp.totalPayment !== 0) return true;
+          if (emp.totalHours > 0) return true;
+          if (emp.totalSessions > 0) return true;
+          return false;
+      });
     
   return (
     <Card className="border-0 shadow-lg">
