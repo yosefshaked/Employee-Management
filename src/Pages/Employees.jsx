@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import EmployeeList from "../components/employees/EmployeeList";
+import { searchVariants } from "@/lib/layoutSwap";
 import EmployeeForm from "../components/employees/EmployeeForm";
 import { supabase } from "../supabaseClient";
 
@@ -47,10 +48,12 @@ export default function Employees() {
     if (activeTab === "active") filtered = filtered.filter(emp => emp.is_active);
     else if (activeTab === "inactive") filtered = filtered.filter(emp => !emp.is_active);
     if (searchTerm) {
-      filtered = filtered.filter(emp =>
-        emp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        emp.employee_id?.toLowerCase().includes(searchTerm.toLowerCase())
-      );
+      const variants = searchVariants(searchTerm);
+      filtered = filtered.filter(emp => {
+        const name = (emp.name || '').toLowerCase();
+        const id = (emp.employee_id || '').toLowerCase();
+        return variants.some(v => name.includes(v) || id.includes(v));
+      });
     }
     setFilteredEmployees(filtered);
   }, [employees, searchTerm, activeTab]);
