@@ -6,9 +6,64 @@ import { he } from "date-fns/locale";
 
 const COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#06B6D4'];
 
-export default function ChartsOverview({ sessions, employees, isLoading, services }) {
+export default function ChartsOverview({ sessions, employees, isLoading, services, rateHistories, workSessions = [], dateFrom, dateTo }) {
   const [pieType, setPieType] = React.useState('count');
+
+  const getBaseSalary = (employeeId) => {
+  if (!rateHistories) return 0;
+  const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+  const relevantRates = rateHistories
+    .filter(r => r.employee_id === employeeId && r.service_id === GENERIC_RATE_SERVICE_ID)
+    .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
+  return relevantRates.length > 0 ? relevantRates[0].rate : 0;
+};
+
   const [trendType, setTrendType] = React.useState('payment');
+  
+  // Aggregate sessions by type for the pie chart (count vs time)
+  // Must be declared before any early returns to preserve hook order
+  const sessionsByType = React.useMemo(() => {
+    if (!sessions || !employees || !services) return [];
+
+    const totals = new Map();
+    const employeeById = new Map(employees.map(e => [e.id, e]));
+    const serviceById = new Map(services.map(s => [s.id, s]));
+
+    const sessionTypeToHours = (session) => {
+      if (session.hours != null) return session.hours;
+      switch (session.session_type) {
+        case 'session_30':
+          return 0.5 * (session.sessions_count || 0);
+        case 'session_45':
+          return 0.75 * (session.sessions_count || 0);
+        case 'session_150':
+          return 2.5 * (session.sessions_count || 0);
+        default:
+          return 0;
+      }
+    };
+
+    for (const s of sessions) {
+      const emp = employeeById.get(s.employee_id);
+      if (!emp || !emp.is_active) continue;
+
+      // Only include instructor sessions in the pie
+      if (emp.employee_type !== 'instructor') continue;
+
+      const service = serviceById.get(s.service_id);
+      const name = service ? service.name : 'Unknown Service';
+      const value = pieType === 'count'
+        ? (s.sessions_count || 0)
+        : (service && service.duration_minutes
+            ? (service.duration_minutes / 60) * (s.sessions_count || 0)
+            : sessionTypeToHours(s));
+      if (!value) continue;
+      totals.set(name, (totals.get(name) || 0) + value);
+    }
+
+    return Array.from(totals, ([name, value]) => ({ name, value }));
+  }, [sessions, employees, services, pieType]);
+
   if (isLoading) {
     return (
       <div className="space-y-8">
@@ -26,10 +81,41 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     return employee ? employee.name : 'לא ידוע';
   };
 
-  // Payment by employee
-  const paymentByEmployee = employees.map(employee => {
+  // Payment by employee (active employees only)
+  const paymentByEmployee = employees.filter(e => e.is_active).map(employee => {
     const employeeSessions = sessions.filter(s => s.employee_id === employee.id);
-    const totalPayment = employeeSessions.reduce((sum, s) => sum + s.total_payment, 0);
+    
+    let totalPayment = employeeSessions.reduce((sum, s) => sum + s.total_payment, 0);
+
+    // Add base salary for global employees
+    if (employee.employee_type === 'global') {
+      // Month-aware rule across the filter's full months:
+      // Count base once for each calendar month covered by [dateFrom, dateTo]
+      // if this employee has any entry anywhere in that same month (using all workSessions).
+      let start = dateFrom ? startOfMonth(new Date(dateFrom)) : undefined;
+      let end = dateTo ? endOfMonth(new Date(dateTo)) : undefined;
+      if (!start || !end) {
+        // Fallback to months derived from filtered sessions
+        if (sessions.length > 0) {
+          const dates = sessions.map(s => parseISO(s.date));
+          start = startOfMonth(new Date(Math.min(...dates)));
+          end = endOfMonth(new Date(Math.max(...dates)));
+        } else {
+          const now = new Date();
+          start = startOfMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+          end = endOfMonth(now);
+        }
+      }
+      const monthsInRange = eachMonthOfInterval({ start, end });
+      const monthsKeysInRange = new Set(monthsInRange.map(m => format(m, 'yyyy-MM')));
+      const employeeMonthsAll = new Set((workSessions.length ? workSessions : sessions)
+        .filter(s => s.employee_id === employee.id)
+        .map(s => format(parseISO(s.date), 'yyyy-MM')));
+      let monthsCount = 0;
+      monthsKeysInRange.forEach(k => { if (employeeMonthsAll.has(k)) monthsCount++; });
+      if (monthsCount > 0) totalPayment += getBaseSalary(employee.id) * monthsCount;
+    }
+    
     return {
       name: employee.name,
       payment: totalPayment,
@@ -37,30 +123,18 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     };
   }).filter(item => item.payment > 0);
 
-  // Sessions by service (from Supabase)
-  const sessionsByType = services.map(service => {
-    const serviceSessions = sessions.filter(s => s.service_id === service.id);
-  // Count sessions (sum sessions_count)
-  const sessionCount = serviceSessions.reduce((sum, s) => sum + (s.sessions_count || 1), 0);
-    // Calculate total time (hours)
-    const totalTime = serviceSessions.reduce((sum, s) => {
-      // If service has duration_minutes, use it, else fallback to 1 hour
-      const duration = service.duration_minutes ? service.duration_minutes / 60 : 1;
-      return sum + duration * (s.sessions_count || 1);
-    }, 0);
-    return {
-      name: service.name,
-      value: pieType === 'count' ? sessionCount : totalTime,
-      sessionCount,
-      totalTime,
-      payment: serviceSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0)
-    };
-  }).filter(item => item.value > 0);
-
-  // Monthly trend (last 6 months) - match main report logic
-  const now = new Date();
-  const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-  const months = eachMonthOfInterval({ start: sixMonthsAgo, end: now });
+  // Monthly trend based on filtered range (fallback to last 6 months)
+  let startDate, endDate;
+  if (sessions.length > 0) {
+    const dates = sessions.map(s => parseISO(s.date));
+    startDate = startOfMonth(new Date(Math.min(...dates)));
+    endDate = endOfMonth(new Date(Math.max(...dates)));
+  } else {
+    const now = new Date();
+    endDate = now;
+    startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+  }
+  const months = eachMonthOfInterval({ start: startDate, end: endDate });
   const monthlyData = months.map(month => {
     const monthStart = startOfMonth(month);
     const monthEnd = endOfMonth(month);
@@ -71,21 +145,33 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     let payment = 0, hours = 0, sessionsCount = 0;
     const countedSessions = [];
     monthSessions.forEach(session => {
+      const employee = employees.find(e => e.id === session.employee_id);
+      if (!employee || !employee.is_active) return;
+
+      // Sum payment for all employees (hourly, instructor, global). Adjustments included.
       payment += session.total_payment || 0;
+
+      // Hours: for hours entries (not adjustments) or estimate for instructor sessions
       if (session.hours != null) {
-        hours += session.hours;
+        if (session.entry_type !== 'adjustment') {
+          hours += session.hours;
+          // Count hourly/global activity into the "sessions" metric as hours
+          sessionsCount += session.hours || 0;
+        }
       } else {
         if (session.session_type === 'session_30') {
-          hours += 0.5 * (session.sessions_count || 0);
+          const inc = 0.5 * (session.sessions_count || 0);
+          hours += inc;
+          sessionsCount += (session.sessions_count || 0);
         } else if (session.session_type === 'session_45') {
-          hours += 0.75 * (session.sessions_count || 0);
+          const inc = 0.75 * (session.sessions_count || 0);
+          hours += inc;
+          sessionsCount += (session.sessions_count || 0);
         } else if (session.session_type === 'session_150') {
-          hours += 2.5 * (session.sessions_count || 0);
+          const inc = 2.5 * (session.sessions_count || 0);
+          hours += inc;
+          sessionsCount += (session.sessions_count || 0);
         }
-      }
-      // Only count instructor sessions
-      if (session.hours == null) {
-        sessionsCount += session.sessions_count || 0;
         countedSessions.push({
           id: session.id,
           employee_id: session.employee_id,
@@ -94,6 +180,17 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
           service_id: session.service_id
         });
       }
+    });
+    
+    // Add base salary for active global employees who had activity this month
+    const activeGlobalEmployeeIdsInMonth = [...new Set(
+      monthSessions
+        .map(s => employees.find(e => e.id === s.employee_id))
+        .filter(e => e && e.is_active && e.employee_type === 'global')
+        .map(e => e.id)
+    )];
+    activeGlobalEmployeeIdsInMonth.forEach(employeeId => {
+      payment += getBaseSalary(employeeId);
     });
     if (typeof window !== 'undefined') {
       console.log('ChartsOverview - Counted instructor sessions for month', format(month, 'MMM yyyy', { locale: he }), countedSessions);

@@ -1,31 +1,49 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 
 export default function ChangelogModal({ open, onClose }) {
+  // סגירה עם ESC
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => e.key === 'Escape' && onClose?.();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
   if (!open) return null;
+
   return (
-    <div style={{
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      width: '100vw',
-      height: '100vh',
-      zIndex: 10000,
-      background: 'rgba(255,255,255,0.4)',
-      backdropFilter: 'blur(6px)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-    }}>
-      <div style={{
-        background: 'white',
-        borderRadius: 18,
-        boxShadow: '0 8px 32px 0 rgba(60,60,120,0.18)',
-        padding: '32px 28px 24px 28px',
-        minWidth: 340,
-        maxWidth: 1080,
-        textAlign: 'center',
-        position: 'relative',
-      }}>
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="changelog-title"
+      onClick={(e) => {
+        // סגירה בלחיצה מחוץ לקופסה
+        if (e.target === e.currentTarget) onClose?.();
+      }}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 10000,
+        background: 'rgba(255,255,255,0.4)',
+        backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <div
+        style={{
+          background: 'white',
+          borderRadius: 18,
+          boxShadow: '0 8px 32px 0 rgba(60,60,120,0.18)',
+          padding: '32px 28px 24px 28px',
+          minWidth: 340,
+          maxWidth: 1080,
+          textAlign: 'center',
+          position: 'relative',
+        }}
+      >
         <button
           onClick={onClose}
           style={{
@@ -40,24 +58,78 @@ export default function ChangelogModal({ open, onClose }) {
             zIndex: 10001,
           }}
           aria-label="סגור עדכונים"
-        >×</button>
-        <h2 style={{ fontSize: 22, fontWeight: 700, color: '#2563eb', marginBottom: 18 }}>עדכונים במערכת</h2>
+        >
+          ×
+        </button>
+
+        <h2
+          id="changelog-title"
+          style={{ fontSize: 22, fontWeight: 700, color: '#2563eb', marginBottom: 18 }}
+        >
+          עדכונים במערכת
+        </h2>
+
         <ul style={{ listStyle: 'none', padding: 0, margin: 0, color: '#334155', fontSize: 17 }}>
-          <li class="mb-4" dir="rtl">
-            <article class="space-y-3 text-right">
+          {/* 1.2.0 */}
+          <li className="mb-4" dir="rtl" style={{ marginBottom: 20, textAlign: 'right' }}>
+            <article className="space-y-3">
               <header>
-                <h1 class="font-bold text-lg">
-                  <time datetime="2025-09-07">07/09/2025</time> – 🎉 ברוכים הבאים לגרסה 1.0.0 של מערכת ניהול עובדים ושכר!
+                <h1 className="font-bold text-lg" style={{ fontWeight: 700, fontSize: 18, margin: 0 }}>
+                  <time dateTime="2025-09-08">08/09/2025</time> – 🚀 גרסה 1.2.0 זמינה!
                 </h1>
-                <p>
+              </header>
+              <section>
+                <ul className="list-disc pr-5 space-y-1" style={{ paddingRight: 18, margin: 0 }}>
+                  <li>הסברים בעברית במדדים ודוחות.</li>
+                  <li>אזהרה כשנבחר חודש חלקי - לתשומת לב כאשר נדרשים חישובים מדויקים יותר.</li>
+                  <li>תווית "התאמה" בפעילות אחרונה.</li>
+                  <li>גרפי מדריכים בצבעי שירותים.</li>
+                  <li>חישובים חודשיים מדויקים יותר (תשלומים, מגמות, דוחות, סיכומי שכר).</li>
+                  <li>תיקוני באגים ושיפורי תוויות בעברית.</li>
+                </ul>
+              </section>
+            </article>
+          </li>
+
+          {/* 1.1.0 */}
+          <li className="mb-4" dir="rtl" style={{ marginBottom: 20, textAlign: 'right' }}>
+            <article className="space-y-3">
+              <header>
+                <h1 className="font-bold text-lg" style={{ fontWeight: 700, fontSize: 18, margin: 0 }}>
+                  <time dateTime="2025-09-07">07/09/2025</time> – ✨ גרסה 1.1.0
+                </h1>
+              </header>
+              <section>
+                <ul className="list-disc pr-5 space-y-1" style={{ paddingRight: 18, margin: 0 }}>
+                  <li>סוג עובד חדש – "גלובלי" עם שכר חודשי קבוע.</li>
+                  <li>דף התאמות שכר: יכולת ניכוי וזיכוי/בונוס לעובדים.</li>
+                  <li>תצוגת טבלת עובדים מקצועית עם קיפול/פתיחת תעריפי מדריכים + "פתח/סגור הכל".</li>
+                  <li>בסיס לניהול חופשות (LeaveBalances). יכולת בפיתוח.</li>
+                  <li>שיפור לדיוק היסטוריית השכר והפעולות.</li>
+                  <li>תיקוני באגים קטנים ושיפורי ממשק.</li>
+                </ul>
+              </section>
+            </article>
+          </li>
+
+          {/* 1.0.0 (כפי שהיה בקוד שלך) */}
+          <li className="mb-4" dir="rtl" style={{ marginBottom: 0, textAlign: 'right' }}>
+            <article className="space-y-3">
+              <header>
+                <h1 className="font-bold text-lg" style={{ fontWeight: 700, fontSize: 18, margin: 0 }}>
+                  <time dateTime="2025-09-07">07/09/2025</time> – 🎉 ברוכים הבאים לגרסה 1.0.0 של מערכת ניהול עובדים ושכר!
+                </h1>
+                <p style={{ marginTop: 6, marginBottom: 10 }}>
                   זוהי ההשקה הרשמית של המערכת החדשה, שנבנתה כדי להחליף את קובצי ה־Excel
                   המורכבים ולאפשר עבודה פשוטה, מדויקת ואמינה.
                 </p>
               </header>
 
               <section>
-                <h2 class="font-semibold">מה כולל בשלב זה:</h2>
-                <ul class="list-disc pr-5 space-y-1">
+                <h2 className="font-semibold" style={{ fontWeight: 600, fontSize: 16, margin: '6px 0' }}>
+                  מה כולל בשלב זה:
+                </h2>
+                <ul className="list-disc pr-5 space-y-1" style={{ paddingRight: 18, margin: 0 }}>
                   <li>📋 ניהול עובדים לפי סוג העסקה (שעתי / מדריך לפי שיעור)</li>
                   <li>💰 הגדרת תעריפים דינמיים עם שמירת היסטוריה מלאה</li>
                   <li>🐎 ניהול סוגי שירותים ומעקב אחרי ביצועי מדריכים</li>
@@ -67,9 +139,11 @@ export default function ChangelogModal({ open, onClose }) {
               </section>
 
               <section>
-                <h2 class="font-semibold">מה חשוב לדעת:</h2>
-                <ul class="list-disc pr-5 space-y-1">
-                  <li>זוהי גרסת בסיס ראשונה – יתכנו עדכונים ושיפורים בהמשך.</li>
+                <h2 className="font-semibold" style={{ fontWeight: 600, fontSize: 16, margin: '10px 0 6px' }}>
+                  מה חשוב לדעת:
+                </h2>
+                <ul className="list-disc pr-5 space-y-1" style={{ paddingRight: 18, margin: 0 }}>
+                  <li>זוהי גרסת בסיס הראשונה – יתכנו עדכונים ושיפורים בהמשך.</li>
                   <li>הפידבק שלכם קריטי – כל רעיון, תקלה או שאלה יעזרו לשפר.</li>
                   <li>כל הנתונים נשמרים בצורה מאובטחת ונשענים על בסיס נתונים יציב (PostgreSQL + Supabase).</li>
                 </ul>

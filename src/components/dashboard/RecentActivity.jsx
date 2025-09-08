@@ -62,6 +62,13 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
                   </div>
 
                   <div className="flex-shrink-0 w-28 text-center">
+                    {session.entry_type === 'adjustment' && (
+                      <Badge variant="outline" className="text-xs w-full block truncate mb-1"
+                        title="התאמה"
+                        style={{ backgroundColor: '#EF444420', color: '#EF4444', borderColor: '#EF4444' }}>
+                        התאמה
+                      </Badge>
+                    )}
                     <Badge variant="outline" className="text-xs w-full block truncate"
                       title={getServiceName(session)}
                       style={{

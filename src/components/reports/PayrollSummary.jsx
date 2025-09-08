@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { format, parseISO } from "date-fns";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -37,7 +38,7 @@ const InstructorDetailsRow = ({ details }) => (
   </TableRow>
 );
 
-export default function PayrollSummary({ sessions, employees, services, rateHistories, isLoading }) {
+export default function PayrollSummary({ sessions, employees, services, rateHistories, isLoading, workSessions = [] }) {
   const [expandedRows, setExpandedRows] = useState({});
   const getBaseSalary = (employeeId) => {
   if (!rateHistories) return 0;
@@ -103,13 +104,31 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
         let finalPayment = 0;
         let baseSalary = null;
 
+        // Build month set covered by the current filtered sessions range
+        const monthsSet = new Set(sessions.map(s => format(parseISO(s.date), 'yyyy-MM')));
+
+        // Month-aware extra adjustments (outside exact range but within same months)
+        const filteredIds = new Set(employeeSessions.map(s => s.id));
+        const extraAdjustments = (workSessions || [])
+          .filter(s => s.employee_id === employee.id && s.entry_type === 'adjustment')
+          .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM'))) 
+          .filter(s => !filteredIds.has(s.id))
+          .reduce((sum, s) => sum + (s.total_payment || 0), 0);
+
         if (employee.employee_type === 'global') {
           baseSalary = getBaseSalary(employee.id);
-          // For global, final pay is base + adjustments. Session payments (for hours) are ignored.
-          finalPayment = baseSalary + sessionTotals.totalAdjustments;
+          // Count months in range where this employee has any entry (use all sessions)
+          const employeeMonthsAll = new Set(
+            (workSessions || [])
+              .filter(s => s.employee_id === employee.id)
+              .map(s => format(parseISO(s.date), 'yyyy-MM'))
+          );
+          let monthsCount = 0;
+          monthsSet.forEach(m => { if (employeeMonthsAll.has(m)) monthsCount++; });
+          finalPayment = (baseSalary * monthsCount) + sessionTotals.totalAdjustments + extraAdjustments;
         } else {
-          // For hourly and instructors, final pay is the sum of all their session payments + any adjustments.
-          finalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments;
+          // For hourly and instructors, final pay is sessions + adjustments (including month-aware extra)
+          finalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments + extraAdjustments;
         }
         
         // Instructor service details logic (remains the same)
@@ -151,7 +170,7 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
           if (emp.totalHours > 0) return true;
           if (emp.totalSessions > 0) return true;
           return false;
-      });
+      }).sort((a, b) => (b.totalPayment || 0) - (a.totalPayment || 0));
     
   return (
     <Card className="border-0 shadow-lg">

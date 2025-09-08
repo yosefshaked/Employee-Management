@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTooltip } from "../components/InfoTooltip";
 import { Button } from "@/components/ui/button";
 import { BarChart3, Download, Calendar, TrendingUp } from "lucide-react";
+import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "../supabaseClient";
 
@@ -23,10 +24,17 @@ export default function Reports() {
   const [activeTab, setActiveTab] = useState(location.state?.openTab || "overview");
   const [rateHistories, setRateHistories] = useState([]);
 
+  const formatDateLocal = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
   const [filters, setFilters] = useState({
     selectedEmployee: '',
-    dateFrom: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
-    dateTo: new Date().toISOString().split('T')[0],
+    dateFrom: formatDateLocal(new Date(new Date().getFullYear(), new Date().getMonth(), 1)),
+    dateTo: formatDateLocal(new Date()),
     employeeType: 'all',
     serviceId: 'all',
   });
@@ -162,27 +170,46 @@ export default function Reports() {
       }
     });
 
-    // Find unique global employees active in the filtered range
-    const activeGlobalEmployeeIds = [...new Set(
-      filteredSessions
-        .map(s => employees.find(e => e.id === s.employee_id))
-        .filter(e => e && e.employee_type === 'global')
-        .map(e => e.id)
-    )];
+    // Global base rule across full months in filter using all sessions
+    const fromDate = new Date(filters.dateFrom);
+    const toDate = new Date(filters.dateTo);
+    const monthsInRange = eachMonthOfInterval({ start: startOfMonth(fromDate), end: endOfMonth(toDate) });
 
-    // Determine how many unique months are covered by the filter
-    const monthYearSet = new Set(filteredSessions.map(s => format(parseISO(s.date), 'yyyy-MM')));
-    const numberOfMonths = Math.max(1, monthYearSet.size); // Use at least 1 to avoid multiplying by 0
-
-    // Add their base salary for each month in the range
-    activeGlobalEmployeeIds.forEach(employeeId => {
-      payment += getBaseSalary(employeeId) * numberOfMonths;
+    const globals = employees.filter(e => e.employee_type === 'global');
+    globals.forEach(emp => {
+      const monthsWithEntries = new Set(
+        (workSessions || [])
+          .filter(s => s.employee_id === emp.id)
+          .map(s => format(parseISO(s.date), 'yyyy-MM'))
+      );
+      let monthsCount = 0;
+      monthsInRange.forEach(m => {
+        const key = format(m, 'yyyy-MM');
+        if (monthsWithEntries.has(key)) monthsCount += 1;
+      });
+      if (monthsCount > 0) payment += getBaseSalary(emp.id) * monthsCount;
     });
+
+    // Month-aware adjustments: include all adjustments that fall in months covered by the filter,
+    // even if their specific day is outside the exact from/to range. Avoid double-counting ones already included.
+    const filteredIds = new Set(filteredSessions.map(s => s.id));
+    const monthsSet = new Set(monthsInRange.map(m => format(m, 'yyyy-MM')));
+    const extraAdjustmentsTotal = (workSessions || [])
+      .filter(s => s.entry_type === 'adjustment')
+      .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM')))
+      .filter(s => !filteredIds.has(s.id))
+      .reduce((sum, s) => sum + (s.total_payment || 0), 0);
+    payment += extraAdjustmentsTotal;
 
     return { payment, hours, sessionsCount };
   };
 
   const totals = getTotals();
+
+  // Show a warning when the selected range is a partial month
+  const fromDate = new Date(filters.dateFrom);
+  const toDate = new Date(filters.dateTo);
+  const isPartialRange = fromDate.getDate() !== 1 || toDate.getDate() !== endOfMonth(toDate).getDate();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">
@@ -200,6 +227,11 @@ export default function Reports() {
           </div>
         </div>
 
+        {isPartialRange && (
+          <div className="mb-4 p-3 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+            שים לב: נבחר טווח חלקי של חודש. הסיכומים כוללים גם התאמות ושכר גלובלי לכל החודש/ים שבטווח המסונן.
+          </div>
+        )}
         <ReportsFilters filters={filters} setFilters={setFilters} employees={employees} services={services} isLoading={isLoading} />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -238,10 +270,10 @@ export default function Reports() {
                 <TabsTrigger value="monthly">דוח חודשי</TabsTrigger>
                 <TabsTrigger value="payroll">דוח שכר</TabsTrigger>
               </TabsList>
-              <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} workSessions={workSessions} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
               <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} workSessions={workSessions} isLoading={isLoading} /></TabsContent>
             </Tabs>
           </CardContent>
         </Card>

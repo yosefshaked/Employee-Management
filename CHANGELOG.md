@@ -4,7 +4,6 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
   - **Monthly Report Filter Fix:** When filtering a specific employee, it still shows the information about all of the employees.
-  - **Monthly Report Improvement:** Make it possible to choose 6-months times (For example, to choose between Jan2024-June2024 even though it was a year ago).
   - **Hide Other Employees on PayrollSummary.jsx Upon Filtering:** When filtering a specific employee, it does remove the calculations for the other employees, but keeps their names. - ***Last Priority!***
   - **Design of Popup in Specific Day:** Improve the design of the popup shown when clicking a specific date in the Dashboard. At the moment looks weird. - ***Last Priority!***
   - **Fix Top Row of the Table:** Become RTL to fix to the data. - פירוט הרישומים, דף שירותים
@@ -15,6 +14,32 @@ All notable changes to this project will be documented in this file.
   - **Deployment in Web Hosting:** Deploying under thepcrunners.com domain, think of an option of showing the domain portal.havat-tut.co.il for Havat Tut's portal.
   - **Vacation Days and Bonuses (UI & Logic):** Implementing the user interface and logic for managing vacation days and bonuses for all employee types (the database table `LeaveBalances` is ready).
   - **Check Possible Future Clash:** In TimeEntryForm.jsx there's   id: Math.random(), - does it mean that it randomly generate the ID? Does it make sure the ID doesn't already exist? What will happen if the ID exist? Will it fail or will it reroll?
+
+## [1.2.0] - 2025-09-08
+
+  ## Added
+  - **QuickStats:** Hebrew tooltips for each metric; tooltip positioned top‑left inside the card.
+  - **Reports:** Tooltip clarifies month‑aware rules (adjustments and global base).
+  - **Reports:** Warning banner when selecting a partial month (explains month‑aware inclusion).
+  - **Recent Activity:** Red badge “התאמה” for adjustment entries.
+  - **Overview (Charts):** Instructor‑only pie aggregation (count vs time), service‑colored.
+
+  ## Changed
+  - **Overview (Payments by employee):** Hide inactive employees; add global base per months with activity in range.
+  - **Overview (Monthly trend):** Uses the filter’s month span; includes hourly/global hours and instructor sessions; excludes inactive employees.
+  - **Reports totals:** Month‑aware logic
+  - **Global base:** add once per employee for each calendar month in range where they have any entry (even if the exact day is outside the from/to).
+  - **Adjustments:** include if they fall in months covered by the filter; avoid double counting ones already in the filtered list.
+  - **Payroll Summary:** Uses the same month‑aware logic as Reports so totals align.
+  - **QuickStats payments:** Add global base only if the global employee has any entry in the current month.
+  - **Reports defaults:** Local‑date formatting; “from” = 1st of current month (prevents timezone shifts).
+
+  ## Fixed
+  - ChartsOverview hook‑order error by moving hooks above early returns.
+  - Implemented missing sessionsByType to prevent ReferenceError and render pie.
+  - 31st‑of‑month edge cases handled via month‑aware rules.
+  - Avoided duplicate counting of adjustments already present in the filtered range.
+  - Replaced several garbled Hebrew labels with clear text.
 
 ## [1.1.0] - 2025-09-07
 
