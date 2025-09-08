@@ -24,23 +24,24 @@ export default function ChangelogModal({ open, onClose }) {
         position: 'fixed',
         inset: 0,
         zIndex: 10000,
-        background: 'rgba(255,255,255,0.4)',
+        background: 'rgba(2,6,23,0.25)',
         backdropFilter: 'blur(6px)',
         WebkitBackdropFilter: 'blur(6px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
+        padding: 16,
       }}
     >
       <div
         style={{
           background: 'white',
-          borderRadius: 18,
-          boxShadow: '0 8px 32px 0 rgba(60,60,120,0.18)',
-          padding: '32px 28px 24px 28px',
-          minWidth: 340,
-          maxWidth: 1080,
-          textAlign: 'center',
+          borderRadius: 16,
+          boxShadow: '0 10px 30px rgba(2,6,23,0.2)',
+          width: 'min(90vw, 860px)',
+          height: 'min(85vh, 640px)',
+          display: 'flex',
+          flexDirection: 'column',
           position: 'relative',
         }}
       >
@@ -69,7 +70,25 @@ export default function ChangelogModal({ open, onClose }) {
           עדכונים במערכת
         </h2>
 
+        <div style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
         <ul style={{ listStyle: 'none', padding: 0, margin: 0, color: '#334155', fontSize: 17 }}>
+          {/* 1.2.1 */}
+          <li className="mb-4" dir="rtl" style={{ marginBottom: 20, textAlign: 'right' }}>
+            <article className="space-y-3">
+              <header>
+                <h1 className="font-bold text-lg" style={{ fontWeight: 700, fontSize: 18, margin: 0 }}>
+                  <time dateTime="2025-09-08">08/09/2025</time> – גרסה 1.2.1
+                </h1>
+              </header>
+              <section>
+                <ul className="list-disc pr-5 space-y-1" style={{ paddingRight: 18, margin: 0 }}>
+                  <li>חיפוש בדף העובדים כעת מוצא אם רשמתם בטעות באנגלית.</li>
+                  <li>תיקון באגים.</li>
+                </ul>
+              </section>
+            </article>
+          </li>
+          
           {/* 1.2.0 */}
           <li className="mb-4" dir="rtl" style={{ marginBottom: 20, textAlign: 'right' }}>
             <article className="space-y-3">
@@ -151,7 +170,9 @@ export default function ChangelogModal({ open, onClose }) {
             </article>
           </li>
         </ul>
+        </div>
       </div>
-    </div>
-  );
-}
+      </div>
+    );
+  }
+

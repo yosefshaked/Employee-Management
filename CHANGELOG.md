@@ -15,6 +15,12 @@ All notable changes to this project will be documented in this file.
   - **Vacation Days and Bonuses (UI & Logic):** Implementing the user interface and logic for managing vacation days and bonuses for all employee types (the database table `LeaveBalances` is ready).
   - **Check Possible Future Clash:** In TimeEntryForm.jsx there's   id: Math.random(), - does it mean that it randomly generate the ID? Does it make sure the ID doesn't already exist? What will happen if the ID exist? Will it fail or will it reroll?
 
+## [1.2.1] - 2025-09-08
+  ## Fixed
+  - **Bug Fixes Regrading Reports**
+  - **Search Bar in Emplyees Now Turn HE->EN/EN->HE Text**
+  - **Change Log Now Scrollable**
+
 ## [1.2.0] - 2025-09-08
 
   ## Added
