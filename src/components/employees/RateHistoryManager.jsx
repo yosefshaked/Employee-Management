@@ -3,11 +3,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus } from "lucide-react";
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
-export default function RateHistoryManager({ rateHistory, services, employeeType, onChange, onRemove }) {
+export default function RateHistoryManager({ rateHistory, services, employeeType, onChange }) {
   const handleChange = (index, field, value) => {
     const updated = [...rateHistory];
     updated[index] = { ...updated[index], [field]: value };
@@ -22,12 +22,6 @@ export default function RateHistoryManager({ rateHistory, services, employeeType
       notes: ''
     };
     onChange([...rateHistory, newEntry]);
-  };
-
-  const removeEntry = (index) => {
-    const entry = rateHistory[index];
-    if (onRemove) onRemove(entry);
-    onChange(rateHistory.filter((_, i) => i !== index));
   };
 
   return (
@@ -60,9 +54,6 @@ export default function RateHistoryManager({ rateHistory, services, employeeType
             <Label>הערות</Label>
             <Input value={entry.notes || ''} onChange={(e) => handleChange(index, 'notes', e.target.value)} />
           </div>
-          <Button type="button" variant="ghost" onClick={() => removeEntry(index)} className="text-red-600 hover:text-red-700 p-2 md:col-span-4 w-fit">
-            <Trash2 className="w-4 h-4" />
-          </Button>
         </div>
       ))}
       <Button type="button" variant="outline" onClick={addEntry} className="flex items-center gap-2">

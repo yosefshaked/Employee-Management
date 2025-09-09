@@ -46,7 +46,6 @@ export default function EmployeeForm({ employee, onSubmit, onCancel }) {
 
   const [services, setServices] = useState([]);
   const [rateHistory, setRateHistory] = useState([]);
-  const [removedRates, setRemovedRates] = useState([]);
   const [serviceRates, setServiceRates] = useState({});
   const [isLoading, setIsLoading] = useState(false);
 
@@ -62,7 +61,6 @@ useEffect(() => {
     if (employee) {
       const { data: ratesData } = await supabase.from('RateHistory').select('*').eq('employee_id', employee.id);
       setRateHistory(ratesData || []);
-      setRemovedRates([]);
       setFormData(prev => ({ ...prev, current_rate: '' }));
     }
   };
@@ -113,7 +111,6 @@ useEffect(() => {
         employeeData: formData,
         serviceRates,
         rateHistory,
-        removedRates,
       });
     } catch (error) {
       console.error("Form submission error", error);
@@ -237,7 +234,6 @@ useEffect(() => {
                 services={services}
                 employeeType={formData.employee_type}
                 onChange={setRateHistory}
-                onRemove={(entry) => setRemovedRates(prev => [...prev, entry])}
               />
             </div>
           )}
