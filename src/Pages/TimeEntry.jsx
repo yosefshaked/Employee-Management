@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { format, formatDuration, parseISO } from "date-fns"; 
+import { format } from "date-fns";
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -93,7 +93,7 @@ export default function TimeEntry() {
         const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
         const serviceIdForRate = isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : row.service_id;
         
-        const rateUsed = getRateForDate(employee.id, row.date, serviceIdForRate);
+        const { rate: rateUsed } = getRateForDate(employee.id, row.date, serviceIdForRate);
         let totalPayment = 0;
         
         if (employee.employee_type === 'hourly') {
