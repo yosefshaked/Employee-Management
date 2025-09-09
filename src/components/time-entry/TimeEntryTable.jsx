@@ -38,10 +38,35 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                         <TableHeader className="sticky top-0 z-20">
                         <TableRow>
                             <TableHead className="sticky w-24 text-right right-0 bg-slate-100 z-20 shadow-sm">תאריך</TableHead>
-                            {/* Headers are just the employee names */}
-                            {employees.map(emp => (
-                            <TableHead key={emp.id} className="top-0 text-center z-20 min-w-[140px] p-2 bg-slate-50 shadow-sm">{emp.name}</TableHead>
-                            ))}
+                            {/* Headers display each employee with current rate info */}
+                            {employees.map(emp => {
+                            const headerRateInfo = (emp.employee_type === 'hourly' || emp.employee_type === 'global')
+                              ? getRateForDate(emp.id, currentMonth)
+                              : null;
+                            return (
+                              <TableHead key={emp.id} className="top-0 text-center z-20 min-w-[140px] p-2 bg-slate-50 shadow-sm">
+                                <div className="flex flex-col items-center">
+                                  <span>{emp.name}</span>
+                                  {headerRateInfo && (
+                                    headerRateInfo.rate > 0 ? (
+                                      <>
+                                        <span className="text-xs text-green-700">
+                                          {emp.employee_type === 'hourly'
+                                            ? `₪${headerRateInfo.rate.toFixed(2)}`
+                                            : `₪${headerRateInfo.rate.toLocaleString()} לחודש`}
+                                        </span>
+                                        <span className="text-[10px] text-slate-500">
+                                          {`מ-${format(parseISO(headerRateInfo.effectiveDate), 'dd/MM/yy')}`}
+                                        </span>
+                                      </>
+                                    ) : headerRateInfo.reason === 'לא התחילו לעבוד עדיין' ? (
+                                      <span className="text-xs text-red-700">טרם התחיל</span>
+                                    ) : null
+                                  )}
+                                </div>
+                              </TableHead>
+                            );
+                            })}
                         </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -93,17 +118,9 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                     >
                                         <div className="font-semibold text-sm">{summaryText}</div>
     
-                                        {/* --- DISPLAY WARNINGS & RATE INFO --- */}
-                                        {rateInfo && (
-                                          <div className="text-xs">
-                                            {rateInfo.rate > 0 ? (
-                                              <span className="text-green-700" title={`החל מ-${format(parseISO(rateInfo.effectiveDate), 'dd/MM/yy')}`}>
-                                                {emp.employee_type === 'hourly' ? `₪${rateInfo.rate.toFixed(2)}` : `₪${rateInfo.rate.toLocaleString()} לחודש`}
-                                              </span>
-                                            ) : rateInfo.reason === 'לא התחילו לעבוד עדיין' ? (
-                                              <span className="text-red-700">טרם התחיל</span>
-                                            ) : null}
-                                          </div>
+                                        {/* --- WARNINGS --- */}
+                                        {rateInfo?.reason === 'לא התחילו לעבוד עדיין' && (
+                                          <div className="text-xs text-red-700">טרם התחיל</div>
                                         )}
 
                                         {showNoRateWarning && summaryText !== '-' && (
