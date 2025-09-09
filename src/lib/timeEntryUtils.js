@@ -1,6 +1,6 @@
 export const calculateRowPayment = (row, employee, services, getRateForDate) => {
   const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
-  const rate = getRateForDate(employee.id, row.date, isHourlyOrGlobal ? null : row.service_id);
+  const { rate } = getRateForDate(employee.id, row.date, isHourlyOrGlobal ? null : row.service_id);
   
   if (employee.employee_type === 'hourly') {
     return (parseFloat(row.hours) || 0) * rate;

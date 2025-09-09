@@ -64,22 +64,24 @@ export default function TimeEntryTable({ employees, workSessions, services, rate
                                 );
                                 let summaryText = '-';
                                 let summaryPayment = 0;
-                                let displayRate = null;
+                                let rateInfo = null; // Will hold the entire rate object
+
+                                if (emp.employee_type !== 'instructor') {
+                                rateInfo = getRateForDate(emp.id, day);
+                                }
+
                                 if (dailySessions.length > 0) {
                                 summaryPayment = dailySessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
                                 
                                 if (emp.employee_type === 'instructor') {
                                     const sessionCount = dailySessions.reduce((sum, s) => sum + (s.sessions_count || 0), 0);
                                     summaryText = `${sessionCount} מפגשים`;
-                                } else { // Hourly and Global
+                                } else { // Hourly or Global
                                     const hoursCount = dailySessions.reduce((sum, s) => sum + (s.hours || 0), 0);
                                     summaryText = `${hoursCount.toFixed(1)} שעות`;
                                 }
                                 }
-                                // For hourly/global, we want to show the rate regardless of sessions
-                                if (emp.employee_type === 'hourly' || emp.employee_type === 'global') {
-                                    displayRate = getRateForDate(emp.id, day);
-                                }
+                
                                 return (
                                     <TableCell 
                                         key={emp.id} 
@@ -87,19 +89,25 @@ export default function TimeEntryTable({ employees, workSessions, services, rate
                                         onClick={() => setEditingCell({ day, employee: emp, existingSessions: dailySessions })}
                                     >
                                         <div className="font-semibold text-sm">{summaryText}</div>
-                                        
-                                        {/* Display rate ONLY if it's > 0 and summary is not '-' (meaning there's activity) OR if the user is hovering/editing */}
-                                        {displayRate > 0 && emp.employee_type === 'hourly' && summaryText !== '-' && (
-                                        <div className="text-xs text-green-700">₪{displayRate.toFixed(2)}</div>
+    
+                                        {/* --- NEW DISPLAY LOGIC --- */}
+                                        {rateInfo && (
+                                        <div className="text-xs text-green-700">
+                                            {rateInfo.rate > 0 ? (
+                                            <span title={`החל מ-${format(parseISO(rateInfo.effectiveDate), 'dd/MM/yy')}`}>
+                                                {emp.employee_type === 'hourly' ? `₪${rateInfo.rate.toFixed(2)}` : `₪${rateInfo.rate.toLocaleString()} לחודש`}
+                                            </span>
+                                            ) : summaryText !== '-' ? ( // Only show reason if there was activity
+                                                <span className="text-xs text-red-700">{rateInfo.reason === 'Not yet started' ? 'טרם התחיל' : 'לא הוגדר תעריף'}</span>
+                                            ) : null}
+                                        </div>
                                         )}
-                                        {displayRate > 0 && emp.employee_type === 'global' && summaryText !== '-' && (
-                                        <div className="text-xs text-slate-500">לחודש: {displayRate.toLocaleString()}₪</div>
-                                        )}
+
                                         {summaryPayment > 0 && (
                                         <div className="text-xs text-green-700">₪{summaryPayment.toLocaleString()}</div>
                                         )}
                                     </TableCell>
-                                );
+                                    );
                             })}
                             </TableRow>
                         ))}

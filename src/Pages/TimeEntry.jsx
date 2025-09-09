@@ -55,11 +55,16 @@ export default function TimeEntry() {
 
   const getRateForDate = (employeeId, date, serviceId = null) => {
     const employee = employees.find(e => e.id === employeeId);
-    if (!employee) return 0;
+    if (!employee) return { rate: 0, reason: 'אין עובד כזה' };
 
     const targetServiceId = (employee.employee_type === 'hourly' || employee.employee_type === 'global')
       ? GENERIC_RATE_SERVICE_ID
       : serviceId;
+
+    // Check if the employee's start date is after the requested date
+    if (employee.start_date && new Date(date) < new Date(employee.start_date)) {
+      return { rate: 0, reason: 'לא התחילו לעבוד עדיין' };
+    }
 
     const relevantRates = rateHistories
       .filter(r => 
@@ -69,7 +74,14 @@ export default function TimeEntry() {
       )
       .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
     
-    return relevantRates.length > 0 ? relevantRates[0].rate : 0;
+    if (relevantRates.length > 0) {
+      return {
+        rate: relevantRates[0].rate,
+        effectiveDate: relevantRates[0].effective_date
+      };
+    }
+    
+    return { rate: 0, reason: 'לא הוגדר תעריף' };
   };
 
   const handleSessionSubmit = async (rows) => {
@@ -98,9 +110,12 @@ export default function TimeEntry() {
           }
         }
         
+        const entryType = isHourlyOrGlobal ? 'hours' : 'session';
+
         return {
           employee_id: employee.id,
           date: row.date,
+          entry_type: entryType,
           service_id: isHourlyOrGlobal ? null : row.service_id, // Save null for generic types in WorkSessions
           hours: isHourlyOrGlobal ? (parseFloat(row.hours) || null) : null,
           sessions_count: employee.employee_type === 'instructor' ? (parseInt(row.sessions_count) || null) : null,
@@ -159,7 +174,7 @@ export default function TimeEntry() {
             }
           }
         
-        const rateUsed = getRateForDate(employee.id, day, isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : row.service_id);
+        const { rate: rateUsed } = getRateForDate(employee.id, day, isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : row.service_id);
         let totalPayment = 0;
 
         if (isHourlyOrGlobal) {
