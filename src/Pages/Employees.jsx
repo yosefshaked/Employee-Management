@@ -61,7 +61,7 @@ export default function Employees() {
   useEffect(() => { loadData(); }, []);
   useEffect(() => { filterEmployees(); }, [filterEmployees]);
 
-  const handleSubmit = async ({ employeeData, serviceRates }) => {
+  const handleSubmit = async ({ employeeData, serviceRates, rateHistory, removedRates }) => {
     try {
       // Separate the rate from the main employee data to avoid saving it in the Employees table
       const { current_rate, ...employeeDetails } = employeeData;
@@ -121,6 +121,34 @@ export default function Employees() {
       if (rateUpdates.length > 0) {
         const { error } = await supabase.from('RateHistory').upsert(rateUpdates, { onConflict: 'employee_id,service_id,effective_date' });
         if (error) throw error;
+      }
+
+      // Step 3b: Handle manual rate history edits for existing employees
+      if (!isNewEmployee && rateHistory) {
+        const entriesToUpsert = rateHistory.map(entry => ({
+          ...entry,
+          employee_id: employeeId,
+        }));
+        if (entriesToUpsert.length > 0) {
+          const { error } = await supabase.from('RateHistory').upsert(entriesToUpsert, { onConflict: 'employee_id,service_id,effective_date' });
+          if (error) throw error;
+        }
+        if (removedRates && removedRates.length > 0) {
+          const deletePromises = removedRates
+            .filter(entry => entry.service_id && entry.effective_date)
+            .map(entry =>
+              supabase
+                .from('RateHistory')
+                .delete()
+                .match({
+                  employee_id: employeeId,
+                  service_id: entry.service_id,
+                  effective_date: entry.effective_date,
+                })
+            );
+          const deleteResults = await Promise.all(deletePromises);
+          deleteResults.forEach(({ error }) => { if (error) throw error; });
+        }
       }
 
       // Step 4: Cleanup and reload
