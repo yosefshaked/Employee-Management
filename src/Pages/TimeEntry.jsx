@@ -214,7 +214,7 @@ export default function TimeEntry() {
           sessionData.sessions_count = parseInt(row.sessions_count, 10) || 1;
           sessionData.students_count = parseInt(row.students_count, 10) || null;
         }
-        
+         
         return sessionData;
 
       }).filter(Boolean);
