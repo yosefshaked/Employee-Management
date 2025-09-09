@@ -21,6 +21,30 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
   const goToPreviousMonth = () => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
   const goToNextMonth = () => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
 
+  const monthlyTotals = useMemo(() => {
+    const start = startOfMonth(currentMonth);
+    const end = endOfMonth(currentMonth);
+    const totals = {};
+
+    employees.forEach(emp => {
+      totals[emp.id] = { hours: 0, sessions: 0, payment: 0 };
+    });
+
+    workSessions.forEach(s => {
+      const sessionDate = parseISO(s.date);
+      if (sessionDate >= start && sessionDate <= end && totals[s.employee_id]) {
+        totals[s.employee_id].payment += s.total_payment || 0;
+        if (s.entry_type === 'hours') {
+          totals[s.employee_id].hours += s.hours || 0;
+        } else {
+          totals[s.employee_id].sessions += s.sessions_count || 0;
+        }
+      }
+    });
+
+    return totals;
+  }, [workSessions, employees, currentMonth]);
+
   return (
     <> {/* Using a Fragment (<>) instead of a div to avoid extra wrappers */}
         <Card>
@@ -80,11 +104,11 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                 <span className="text-xs text-slate-500">{format(day, 'EEE', { locale: he })}</span>
                                 </div>
                             </TableCell>
-                            
+
                             {/* For each day, loop through employees to create a cell */}
                             {employees.map(emp => {
-                                const dailySessions = workSessions.filter(s => 
-                                s.employee_id === emp.id && 
+                                const dailySessions = workSessions.filter(s =>
+                                s.employee_id === emp.id &&
                                 format(parseISO(s.date), 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd')
                                 );
                                 let summaryText = '-';
@@ -111,15 +135,15 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                     }
                                   }
                                 }
-                
+
                                 return (
-                                    <TableCell 
-                                        key={emp.id} 
+                                    <TableCell
+                                        key={emp.id}
                                         className="text-center cursor-pointer hover:bg-blue-50 transition-colors p-2"
                                         onClick={() => setEditingCell({ day, employee: emp, existingSessions: dailySessions })}
                                     >
                                         <div className="font-semibold text-sm">{summaryText}</div>
-    
+
                                         {/* --- WARNINGS --- */}
                                         {rateInfo?.reason === 'לא התחילו לעבוד עדיין' && (
                                           <div className="text-xs text-red-700">טרם התחיל</div>
@@ -137,6 +161,33 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                             })}
                             </TableRow>
                         ))}
+
+                        {/* Totals Rows */}
+                        <TableRow className="bg-slate-100 font-medium">
+                          <TableCell className="text-right sticky right-0 bg-slate-100">סה"כ שיעורים/שעות</TableCell>
+                          {employees.map(emp => {
+                            const totals = monthlyTotals[emp.id] || { hours: 0, sessions: 0 };
+                            const value = emp.employee_type === 'instructor'
+                              ? `${totals.sessions} מפגשים`
+                              : `${totals.hours.toFixed(1)} שעות`;
+                            return (
+                              <TableCell key={emp.id} className="text-center">
+                                {value}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
+                        <TableRow className="bg-slate-100 font-medium">
+                          <TableCell className="text-right sticky right-0 bg-slate-100">סה"כ צפי לתשלום</TableCell>
+                          {employees.map(emp => {
+                            const totals = monthlyTotals[emp.id] || { payment: 0 };
+                            return (
+                              <TableCell key={emp.id} className="text-center text-green-700">
+                                ₪{totals.payment.toLocaleString()}
+                              </TableCell>
+                            );
+                          })}
+                        </TableRow>
                         </TableBody>
                     </Table>
                 </div>

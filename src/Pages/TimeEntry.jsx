@@ -61,16 +61,18 @@ export default function TimeEntry() {
       ? GENERIC_RATE_SERVICE_ID
       : serviceId;
 
+    const dateStr = format(new Date(date), 'yyyy-MM-dd');
+
     // Check if the employee's start date is after the requested date
-    if (employee.start_date && new Date(date) < new Date(employee.start_date)) {
+    if (employee.start_date && employee.start_date > dateStr) {
       return { rate: 0, reason: 'לא התחילו לעבוד עדיין' };
     }
 
     const relevantRates = rateHistories
-      .filter(r => 
-        r.employee_id === employeeId && 
-        r.service_id === targetServiceId && 
-        new Date(r.effective_date) <= new Date(date)
+      .filter(r =>
+        r.employee_id === employeeId &&
+        r.service_id === targetServiceId &&
+        r.effective_date <= dateStr
       )
       .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
     
