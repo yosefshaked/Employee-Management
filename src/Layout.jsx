@@ -155,7 +155,7 @@ export default function Layout({ children, currentPageName }) {
         </main>
       </div>
       <ChangelogModal open={showChangelog} onClose={() => setShowChangelog(false)} />
-      <Toaster richColors position="top-right" />
+      <Toaster richColors position="top-right" closeButton />
     </SidebarProvider>
   );
 }

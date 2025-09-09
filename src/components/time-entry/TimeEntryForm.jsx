@@ -9,47 +9,35 @@ import { Calendar as CalendarIcon, Save, Plus, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { he } from "date-fns/locale";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { calculateRowPayment } from '@/lib/timeEntryUtils';
 
-const createNewRow = () => ({
-  id: Math.random(),
-  date: new Date().toISOString().split('T')[0],
-  service_id: '',
-  hours: '',
-  sessions_count: '1',
-  students_count: '',
-  notes: ''
-});
 
-export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate }) {
-  const [rows, setRows] = useState([createNewRow()]);
+
+export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate, initialRows = null, selectedDate }) {
+  const createNewRow = () => ({
+    id: crypto.randomUUID(),
+    isNew: true,
+    date: format(selectedDate || new Date(), 'yyyy-MM-dd'),
+    service_id: '',
+    hours: '',
+    sessions_count: '1',
+    students_count: '',
+    notes: ''
+  });
+  const [rows, setRows] = useState(initialRows && initialRows.length > 0 ? initialRows : [createNewRow(selectedDate)]);
   const [totalCalculatedPayment, setTotalCalculatedPayment] = useState(0);
 
   // useEffect שיחשב את התשלום הכולל בכל שינוי
   useEffect(() => {
     const total = rows.reduce((sum, row) => {
-      const rate = getRateForDate(employee.id, row.date, row.service_id);
-      let rowPayment = 0;
-      if (employee.employee_type === 'hourly') { // Only hourly
-        rowPayment = (parseFloat(row.hours) || 0) * rate;
-      } else if (employee.employee_type === 'global') {
-        rowPayment = 0; // For global employees, time entries are for tracking, not payment.
-      } else if (employee.employee_type === 'instructor') {
-        const service = services.find(s => s.id === row.service_id);
-        if (service) {
-          if (service.payment_model === 'per_student') {
-            rowPayment = (parseInt(row.sessions_count, 10) || 0) * (parseInt(row.students_count, 10) || 0) * rate;
-          } else {
-            rowPayment = (parseInt(row.sessions_count, 10) || 0) * rate;
-          }
-        }
-      }
+      const rowPayment = calculateRowPayment(row, employee, services, getRateForDate);
       return sum + rowPayment;
     }, 0);
     setTotalCalculatedPayment(total);
   }, [rows, employee, services, getRateForDate]);
 
-  const addRow = () => setRows(prev => [...prev, createNewRow()]);
-  const removeRow = (id) => { if (rows.length > 1) setRows(prev => prev.filter(row => row.id !== id)); };
+  const addRow = () => {const referenceDate = rows.length > 0 ? rows[0].date : new Date();setRows(prev => [...prev, createNewRow(new Date(referenceDate))]);};
+  const removeRow = (id) => {setRows(prev => {const newRows = prev.filter(row => row.id !== id);return newRows.length > 0 ? newRows : [createNewRow()];});};
   const handleRowChange = (id, field, value) => { setRows(prev => prev.map(row => row.id === id ? { ...row, [field]: value } : row)); };
 
   const handleSubmit = (e) => {
@@ -63,35 +51,25 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
       <div className="space-y-4">
         {rows.map((row) => {
           const selectedService = services.find(s => s.id === row.service_id);
-          const rate = getRateForDate(employee.id, row.date, row.service_id);
-          let rowPayment = 0;
-            if (employee.employee_type === 'hourly') { // Only hourly
-              rowPayment = (parseFloat(row.hours) || 0) * rate;
-            } else if (employee.employee_type === 'global') {
-              rowPayment = 0; // For global employees, time entries are for tracking, not payment.
-            } else if (employee.employee_type === 'instructor' && selectedService) {
-              if (selectedService.payment_model === 'per_student') {
-              rowPayment = (parseInt(row.sessions_count, 10) || 0) * (parseInt(row.students_count, 10) || 0) * rate;
-            } else {
-              rowPayment = (parseInt(row.sessions_count, 10) || 0) * rate;
-            }
-          }
+          const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
+          const rate = getRateForDate(employee.id, row.date, isHourlyOrGlobal ? null : row.service_id);
+          const rowPayment = calculateRowPayment(row, employee, services, getRateForDate);
 
           return (
             <div key={row.id} className="p-4 border rounded-lg bg-slate-50 relative space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1"><Label>תאריך</Label><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full justify-start text-right font-normal bg-white"><CalendarIcon className="ml-2 h-4 w-4" />{format(new Date(row.date), 'dd/MM/yyyy')}</Button></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={new Date(row.date)} onSelect={(date) => date && handleRowChange(row.id, 'date', format(date, 'yyyy-MM-dd'))} initialFocus locale={he} /></PopoverContent></Popover></div>
                 {(employee.employee_type === 'hourly' || employee.employee_type === 'global') ? ( // <-- THE FIX
-                  <div className="space-y-1"><Label>שעות עבודה</Label><Input type="number" step="0.1" value={row.hours} onChange={(e) => handleRowChange(row.id, 'hours', e.target.value)} required className="bg-white" /></div>
+                  <div className="space-y-1"><Label>שעות עבודה</Label><Input type="number" step="0.1" value={row.hours || ''} onChange={(e) => handleRowChange(row.id, 'hours', e.target.value)} required className="bg-white" /></div>
                 ) : (
-                  <div className="space-y-1"><Label>שירות</Label><Select value={row.service_id} onValueChange={(value) => handleRowChange(row.id, 'service_id', value)} required><SelectTrigger className="bg-white"><SelectValue placeholder="בחר שירות..." /></SelectTrigger><SelectContent>{services.map(s => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}</SelectContent></Select></div>
+                  <div className="space-y-1"><Label>שירות</Label><Select value={row.service_id} onValueChange={(serviceId) => handleRowChange(row.id, 'service_id', serviceId)} required><SelectTrigger className="bg-white"><SelectValue placeholder="בחר שירות..." /></SelectTrigger><SelectContent>{services.map(s => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}</SelectContent></Select></div>
                 )}
               </div>
               {employee.employee_type === 'instructor' && selectedService && (
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1"><Label>כמות מפגשים</Label><Input type="number" value={row.sessions_count} onChange={(e) => handleRowChange(row.id, 'sessions_count', e.target.value)} required className="bg-white" /></div>
+                  <div className="space-y-1"><Label>כמות מפגשים</Label><Input type="number" value={row.sessions_count || ''} onChange={(e) => handleRowChange(row.id, 'sessions_count', e.target.value)} required className="bg-white" /></div>
                   {selectedService.payment_model === 'per_student' && (
-                    <div className="space-y-1"><Label>כמות תלמידים</Label><Input type="number" value={row.students_count} onChange={(e) => handleRowChange(row.id, 'students_count', e.target.value)} required className="bg-white" /></div>
+                    <div className="space-y-1"><Label>כמות תלמידים</Label><Input type="number" value={row.students_count || ''} onChange={(e) => handleRowChange(row.id, 'students_count', e.target.value)} required className="bg-white" /></div>
                   )}
                 </div>
               )}
@@ -103,7 +81,11 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
                 {' | '}
                 סה"כ לשורה: <span className="font-bold text-slate-800">₪{rowPayment.toFixed(2)}</span>
               </div>
-              {rows.length > 1 && (<Button variant="ghost" size="icon" onClick={() => removeRow(row.id)} className="absolute top-1 left-1 h-7 w-7 text-red-500 hover:bg-red-50"><Trash2 className="h-4 w-4" /></Button>)}
+              {employee.employee_type === 'instructor' && typeof row.id === 'string' && rows.length > 1 && (
+                <Button variant="ghost" size="icon" onClick={() => removeRow(row.id)} className="absolute top-1 left-1 h-7 w-7 text-red-500 hover:bg-red-50">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           );
         })}

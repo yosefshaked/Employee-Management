@@ -72,6 +72,41 @@ export default function ChangelogModal({ open, onClose }) {
 
         <div style={{ padding: 20, overflowY: 'auto', flex: 1 }}>
         <ul style={{ listStyle: 'none', padding: 0, margin: 0, color: '#334155', fontSize: 17 }}>
+
+          {/* 1.3.0 */}
+          <li className="mb-4" dir="rtl" style={{ marginBottom: 20, textAlign: 'right' }}>
+            <article className="space-y-3">
+              <header>
+                <h1 className="font-bold text-lg" style={{ fontWeight: 700, fontSize: 18, margin: 0 }}>
+                  <time dateTime="2025-09-08">08/09/2025</time> – גרסה 1.3.0
+                </h1>
+              </header>
+              <section>
+                <ul className="list-disc pr-5 space-y-1" style={{ paddingRight: 18, margin: 0 }}>
+                  <li>הוספת טבלה לניהול רישום הזמנים</li>
+                  <li>תיקון באגים.</li>
+                </ul>
+              </section>
+            </article>
+          </li>
+
+          {/* 1.2.1 */}
+          <li className="mb-4" dir="rtl" style={{ marginBottom: 20, textAlign: 'right' }}>
+            <article className="space-y-3">
+              <header>
+                <h1 className="font-bold text-lg" style={{ fontWeight: 700, fontSize: 18, margin: 0 }}>
+                  <time dateTime="2025-09-08">08/09/2025</time> – גרסה 1.2.1
+                </h1>
+              </header>
+              <section>
+                <ul className="list-disc pr-5 space-y-1" style={{ paddingRight: 18, margin: 0 }}>
+                  <li>חיפוש בדף העובדים כעת מוצא אם רשמתם בטעות באנגלית.</li>
+                  <li>תיקון באגים.</li>
+                </ul>
+              </section>
+            </article>
+          </li>
+
           {/* 1.2.1 */}
           <li className="mb-4" dir="rtl" style={{ marginBottom: 20, textAlign: 'right' }}>
             <article className="space-y-3">
