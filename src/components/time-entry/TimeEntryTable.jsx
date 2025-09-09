@@ -95,13 +95,13 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
     
                                         {/* --- DISPLAY WARNINGS & RATE INFO --- */}
                                         {rateInfo && (
-                                          <div className="text-xs text-green-700">
+                                          <div className="text-xs">
                                             {rateInfo.rate > 0 ? (
-                                              <span title={`החל מ-${format(parseISO(rateInfo.effectiveDate), 'dd/MM/yy')}`}>
+                                              <span className="text-green-700" title={`החל מ-${format(parseISO(rateInfo.effectiveDate), 'dd/MM/yy')}`}>
                                                 {emp.employee_type === 'hourly' ? `₪${rateInfo.rate.toFixed(2)}` : `₪${rateInfo.rate.toLocaleString()} לחודש`}
                                               </span>
-                                            ) : summaryText !== '-' && rateInfo.reason === 'לא התחילו לעבוד עדיין' ? (
-                                              <span className="text-xs text-red-700">טרם התחיל</span>
+                                            ) : rateInfo.reason === 'לא התחילו לעבוד עדיין' ? (
+                                              <span className="text-red-700">טרם התחיל</span>
                                             ) : null}
                                           </div>
                                         )}
