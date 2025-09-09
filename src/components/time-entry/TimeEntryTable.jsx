@@ -27,23 +27,34 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
     const totals = {};
 
     employees.forEach(emp => {
-      totals[emp.id] = { hours: 0, sessions: 0, payment: 0 };
+      totals[emp.id] = { hours: 0, sessions: 0, payment: 0, hasEntry: false };
     });
 
     workSessions.forEach(s => {
       const sessionDate = parseISO(s.date);
       if (sessionDate >= start && sessionDate <= end && totals[s.employee_id]) {
-        totals[s.employee_id].payment += s.total_payment || 0;
+        const empTotals = totals[s.employee_id];
+        empTotals.hasEntry = true;
+        empTotals.payment += s.total_payment || 0;
         if (s.entry_type === 'hours') {
-          totals[s.employee_id].hours += s.hours || 0;
+          empTotals.hours += s.hours || 0;
         } else {
-          totals[s.employee_id].sessions += s.sessions_count || 0;
+          empTotals.sessions += s.sessions_count || 0;
         }
       }
     });
 
+    // For global employees, if they have any entry this month, show their monthly rate
+    employees.forEach(emp => {
+      const empTotals = totals[emp.id];
+      if (emp.employee_type === 'global' && empTotals.hasEntry) {
+        const { rate } = getRateForDate(emp.id, start);
+        empTotals.payment = rate;
+      }
+    });
+
     return totals;
-  }, [workSessions, employees, currentMonth]);
+  }, [workSessions, employees, currentMonth, getRateForDate]);
 
   return (
     <> {/* Using a Fragment (<>) instead of a div to avoid extra wrappers */}
