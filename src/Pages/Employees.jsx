@@ -125,12 +125,15 @@ export default function Employees() {
 
       // Step 3b: Handle manual rate history edits for existing employees
       if (!isNewEmployee && rateHistory) {
-        const entriesToUpsert = rateHistory.map(entry => ({
-          ...entry,
+        const entriesToUpsert = rateHistory.map(({ id, ...rest }) => ({
+          ...rest,
           employee_id: employeeId,
+          ...(id ? { id } : {}),
         }));
         if (entriesToUpsert.length > 0) {
-          const { error } = await supabase.from('RateHistory').upsert(entriesToUpsert, { onConflict: 'employee_id,service_id,effective_date' });
+          const { error } = await supabase
+            .from('RateHistory')
+            .upsert(entriesToUpsert, { onConflict: 'id' });
           if (error) throw error;
         }
       }
