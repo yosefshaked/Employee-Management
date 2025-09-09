@@ -3,12 +3,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, getDate, isToday, parseISO } from "date-fns";
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isToday, parseISO } from "date-fns";
 import { he } from "date-fns/locale";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import TimeEntryForm from './TimeEntryForm'; // Assuming it's in the same folder
 
-export default function TimeEntryTable({ employees, workSessions, services, rateHistories, getRateForDate, onTableSubmit }) {
+export default function TimeEntryTable({ employees, workSessions, services, getRateForDate, onTableSubmit }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
   const daysInMonth = useMemo(() => {
@@ -65,9 +65,12 @@ export default function TimeEntryTable({ employees, workSessions, services, rate
                                 let summaryText = '-';
                                 let summaryPayment = 0;
                                 let rateInfo = null; // Will hold the entire rate object
+                                let showNoRateWarning = false;
 
-                                if (emp.employee_type !== 'instructor') {
+                                if (emp.employee_type === 'hourly' || emp.employee_type === 'global') {
                                 rateInfo = getRateForDate(emp.id, day);
+                                } else {
+                                showNoRateWarning = dailySessions.some(s => s.rate_used === 0);
                                 }
 
                                 if (dailySessions.length > 0) {
@@ -90,21 +93,25 @@ export default function TimeEntryTable({ employees, workSessions, services, rate
                                     >
                                         <div className="font-semibold text-sm">{summaryText}</div>
     
-                                        {/* --- NEW DISPLAY LOGIC --- */}
+                                        {/* --- DISPLAY WARNINGS & RATE INFO --- */}
                                         {rateInfo && (
-                                        <div className="text-xs text-green-700">
+                                          <div className="text-xs text-green-700">
                                             {rateInfo.rate > 0 ? (
-                                            <span title={`החל מ-${format(parseISO(rateInfo.effectiveDate), 'dd/MM/yy')}`}>
+                                              <span title={`החל מ-${format(parseISO(rateInfo.effectiveDate), 'dd/MM/yy')}`}>
                                                 {emp.employee_type === 'hourly' ? `₪${rateInfo.rate.toFixed(2)}` : `₪${rateInfo.rate.toLocaleString()} לחודש`}
-                                            </span>
-                                            ) : summaryText !== '-' ? ( // Only show reason if there was activity
-                                                <span className="text-xs text-red-700">{rateInfo.reason === 'Not yet started' ? 'טרם התחיל' : 'לא הוגדר תעריף'}</span>
+                                              </span>
+                                            ) : summaryText !== '-' && rateInfo.reason === 'לא התחילו לעבוד עדיין' ? (
+                                              <span className="text-xs text-red-700">טרם התחיל</span>
                                             ) : null}
-                                        </div>
+                                          </div>
+                                        )}
+
+                                        {showNoRateWarning && summaryText !== '-' && (
+                                          <div className="text-xs text-red-700">לא הוגדר תעריף</div>
                                         )}
 
                                         {summaryPayment > 0 && (
-                                        <div className="text-xs text-green-700">₪{summaryPayment.toLocaleString()}</div>
+                                          <div className="text-xs text-green-700">₪{summaryPayment.toLocaleString()}</div>
                                         )}
                                     </TableCell>
                                     );

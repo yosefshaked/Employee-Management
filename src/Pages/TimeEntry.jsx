@@ -308,11 +308,10 @@ export default function TimeEntry() {
           </TabsContent>
 
           <TabsContent value="table">
-            <TimeEntryTable 
+            <TimeEntryTable
               employees={employees}
               workSessions={workSessions}
               services={services}
-              rateHistories={rateHistories}
               getRateForDate={getRateForDate}
               onTableSubmit={handleTableSubmit}
             />
