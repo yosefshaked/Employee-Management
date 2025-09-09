@@ -99,15 +99,17 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                 }
 
                                 if (dailySessions.length > 0) {
-                                summaryPayment = dailySessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
-                                
-                                if (emp.employee_type === 'instructor') {
+                                  if (emp.employee_type === 'instructor') {
+                                    summaryPayment = dailySessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
                                     const sessionCount = dailySessions.reduce((sum, s) => sum + (s.sessions_count || 0), 0);
                                     summaryText = `${sessionCount} מפגשים`;
-                                } else { // Hourly or Global
+                                  } else { // Hourly or Global
                                     const hoursCount = dailySessions.reduce((sum, s) => sum + (s.hours || 0), 0);
                                     summaryText = `${hoursCount.toFixed(1)} שעות`;
-                                }
+                                    if (emp.employee_type === 'hourly' && rateInfo?.rate > 0) {
+                                      summaryPayment = hoursCount * rateInfo.rate;
+                                    }
+                                  }
                                 }
                 
                                 return (
