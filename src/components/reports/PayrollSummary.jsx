@@ -88,20 +88,16 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
 
         // Calculate totals based on session data first
         const sessionTotals = employeeSessions.reduce((acc, session) => {
-        // Always add the payment part from the session itself
-        acc.sessionPayment += session.total_payment || 0;
-
-        // Handle activity totals based on employee type and entry type
-        if (employee.employee_type === 'instructor') {
-          acc.totalSessions += session.sessions_count || 0;
-        } else if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
-          if (session.entry_type === 'adjustment') {
-            acc.totalAdjustments += session.total_payment || 0;
-          } else { // It's an 'hours' entry, or an old entry without a type
+        if (session.entry_type === 'adjustment') {
+          acc.totalAdjustments += session.total_payment || 0;
+        } else {
+          acc.sessionPayment += session.total_payment || 0;
+          if (employee.employee_type === 'instructor') {
+            acc.totalSessions += session.sessions_count || 0;
+          } else if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
             acc.totalHours += session.hours || 0;
           }
         }
-
         return acc;
       }, { sessionPayment: 0, totalHours: 0, totalSessions: 0, totalAdjustments: 0 });
 

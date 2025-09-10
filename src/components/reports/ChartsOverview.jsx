@@ -85,12 +85,12 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     );
 
     const sessionTotals = employeeSessions.reduce((acc, session) => {
-      acc.sessionPayment += session.total_payment || 0;
-      if (employee.employee_type === 'instructor') {
-        acc.totalSessions += session.sessions_count || 0;
-      } else if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
-        if (session.entry_type === 'adjustment') {
-          acc.totalAdjustments += session.total_payment || 0;
+      if (session.entry_type === 'adjustment') {
+        acc.totalAdjustments += session.total_payment || 0;
+      } else {
+        acc.sessionPayment += session.total_payment || 0;
+        if (employee.employee_type === 'instructor') {
+          acc.totalSessions += session.sessions_count || 0;
         }
       }
       return acc;
