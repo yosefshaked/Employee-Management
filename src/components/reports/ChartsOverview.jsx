@@ -125,18 +125,41 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
   // Payment by employee (active employees only)
   const paymentByEmployee = employees.filter(e => e.is_active).map(employee => {
     const employeeSessions = sessions.filter(s => s.employee_id === employee.id);
-    
-    let totalPayment = employeeSessions.reduce((sum, s) => sum + calculateSessionPayment(s), 0);
 
-    // Add base salary for global employees
+    // Calculate totals based on session data first
+    const sessionTotals = employeeSessions.reduce((acc, session) => {
+      const payment = calculateSessionPayment(session);
+      if (session.entry_type === 'adjustment') {
+        acc.totalAdjustments += payment;
+      } else {
+        acc.sessionPayment += payment;
+      }
+      return acc;
+    }, { sessionPayment: 0, totalAdjustments: 0 });
+
+    // Build month set covered by the current filtered sessions range (exclude adjustments)
+    const monthsSet = new Set(
+      sessions
+        .filter(s => s.entry_type !== 'adjustment')
+        .map(s => format(parseISO(s.date), 'yyyy-MM'))
+    );
+
+    // Month-aware extra adjustments (outside exact range but within same months)
+    const filteredIds = new Set(employeeSessions.map(s => s.id));
+    const extraAdjustments = (workSessions || [])
+      .filter(s => s.employee_id === employee.id && s.entry_type === 'adjustment')
+      .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM')))
+      .filter(s => !filteredIds.has(s.id))
+      .reduce((sum, s) => sum + calculateSessionPayment(s), 0);
+
+    const totalAdjustments = sessionTotals.totalAdjustments + extraAdjustments;
+
+    let totalPayment = 0;
     if (employee.employee_type === 'global') {
-      // Month-aware rule across the filter's full months:
-      // Count base once for each calendar month covered by [dateFrom, dateTo]
-      // if this employee has any entry anywhere in that same month (using all workSessions).
+      // Count base once for each calendar month with non-adjustment activity
       let start = dateFrom ? startOfMonth(new Date(dateFrom)) : undefined;
       let end = dateTo ? endOfMonth(new Date(dateTo)) : undefined;
       if (!start || !end) {
-        // Fallback to months derived from filtered sessions
         if (sessions.length > 0) {
           const dates = sessions.map(s => parseISO(s.date));
           start = startOfMonth(new Date(Math.min(...dates)));
@@ -149,14 +172,17 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       }
       const monthsInRange = eachMonthOfInterval({ start, end });
       const monthsKeysInRange = new Set(monthsInRange.map(m => format(m, 'yyyy-MM')));
-      const employeeMonthsAll = new Set((workSessions.length ? workSessions : sessions)
-        .filter(s => s.employee_id === employee.id)
+      const employeeMonthsAll = new Set((workSessions || [])
+        .filter(s => s.employee_id === employee.id && s.entry_type !== 'adjustment')
         .map(s => format(parseISO(s.date), 'yyyy-MM')));
       let monthsCount = 0;
       monthsKeysInRange.forEach(k => { if (employeeMonthsAll.has(k)) monthsCount++; });
-      if (monthsCount > 0) totalPayment += getBaseSalary(employee.id) * monthsCount;
+      totalPayment = (getBaseSalary(employee.id) * monthsCount) + totalAdjustments;
+    } else {
+      // For hourly and instructors, final pay is session payments plus adjustments
+      totalPayment = sessionTotals.sessionPayment + totalAdjustments;
     }
-    
+
     return {
       name: employee.name,
       payment: totalPayment,
@@ -180,6 +206,10 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     const monthStart = startOfMonth(month);
     const monthEnd = endOfMonth(month);
     const monthSessions = sessions.filter(session => {
+      const sessionDate = parseISO(session.date);
+      return sessionDate >= monthStart && sessionDate <= monthEnd;
+    });
+    const monthAllSessions = (workSessions.length ? workSessions : sessions).filter(session => {
       const sessionDate = parseISO(session.date);
       return sessionDate >= monthStart && sessionDate <= monthEnd;
     });
@@ -222,12 +252,20 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
         });
       }
     });
-    
-    // Add base salary for active global employees who had activity this month
+
+    // Include adjustments outside the filtered range but within this month
+    const monthSessionIds = new Set(monthSessions.map(s => s.id));
+    const extraAdjustments = monthAllSessions
+      .filter(s => s.entry_type === 'adjustment' && !monthSessionIds.has(s.id))
+      .reduce((sum, s) => sum + calculateSessionPayment(s), 0);
+    payment += extraAdjustments;
+
+    // Add base salary for active global employees who had non-adjustment activity this month
     const activeGlobalEmployeeIdsInMonth = [...new Set(
-      monthSessions
-        .map(s => employees.find(e => e.id === s.employee_id))
-        .filter(e => e && e.is_active && e.employee_type === 'global')
+      monthAllSessions
+        .filter(s => s.entry_type !== 'adjustment')
+        .map(s => employees.find(e => e.id === s.employee_id && e.is_active && e.employee_type === 'global'))
+        .filter(Boolean)
         .map(e => e.id)
     )];
     activeGlobalEmployeeIdsInMonth.forEach(employeeId => {

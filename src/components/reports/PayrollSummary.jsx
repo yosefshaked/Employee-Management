@@ -127,19 +127,19 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
 
         // Calculate totals based on session data first
         const sessionTotals = employeeSessions.reduce((acc, session) => {
-        const payment = calculateSessionPayment(session, employee);
-        acc.sessionPayment += payment;
-
-        if (session.entry_type === 'adjustment') {
-          acc.totalAdjustments += payment;
-        } else if (employee.employee_type === 'instructor') {
-          acc.totalSessions += session.sessions_count || 0;
-        } else if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
-          acc.totalHours += session.hours || 0;
-        }
-
-        return acc;
-      }, { sessionPayment: 0, totalHours: 0, totalSessions: 0, totalAdjustments: 0 });
+          const payment = calculateSessionPayment(session, employee);
+          if (session.entry_type === 'adjustment') {
+            acc.totalAdjustments += payment;
+          } else {
+            acc.sessionPayment += payment;
+            if (employee.employee_type === 'instructor') {
+              acc.totalSessions += session.sessions_count || 0;
+            } else if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
+              acc.totalHours += session.hours || 0;
+            }
+          }
+          return acc;
+        }, { sessionPayment: 0, totalHours: 0, totalSessions: 0, totalAdjustments: 0 });
 
         let finalPayment = 0;
         let baseSalary = null;
@@ -173,8 +173,8 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
           monthsSet.forEach(m => { if (employeeMonthsAll.has(m)) monthsCount++; });
           finalPayment = (baseSalary * monthsCount) + totalAdjustments;
         } else {
-          // For hourly and instructors, final pay is sessions plus any extra adjustments
-          finalPayment = sessionTotals.sessionPayment + extraAdjustments;
+          // For hourly and instructors, final pay is session payments plus adjustments
+          finalPayment = sessionTotals.sessionPayment + totalAdjustments;
         }
         
         // Instructor service details logic (remains the same)

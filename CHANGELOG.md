@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 ## [2025-09-10]
 - Fixed ChartsOverview to include hours and salary adjustments for hourly and instructor employees.
 - Corrected PayrollSummary and ChartsOverview to derive session payments from rate history so non-global employees show accurate totals.
+- Applied month-aware logic in ChartsOverview and PayrollSummary so global salaries are added only when non-adjustment work exists and extra adjustments within the same months are included.
 
 ## [1.3.0] - 2025-09-09
  ## Added
