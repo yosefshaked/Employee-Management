@@ -13,12 +13,18 @@ All notable changes to this project will be documented in this file.
   - **Current Page Signal:** Have a color/signal of sort to tell within which page we are.
   - **Deployment in Web Hosting:** Deploying under thepcrunners.com domain, think of an option of showing the domain portal.havat-tut.co.il for Havat Tut's portal.
   - **Vacation Days and Bonuses (UI & Logic):** Implementing the user interface and logic for managing vacation days and bonuses for all employee types (the database table `LeaveBalances` is ready).
-    - **Check Possible Future Clash:** In TimeEntryForm.jsx there's   id: Math.random(), - does it mean that it randomly generate the ID? Does it make sure the ID doesn't already exist? What will happen if the ID exist? Will it fail or will it reroll?
+  - **Check Possible Future Clash:** In TimeEntryForm.jsx there's   id: Math.random(), - does it mean that it randomly generate the ID? Does it make sure the ID doesn't already exist? What will happen if the ID exist? Will it fail or will it reroll?
+  - **Time Entry Table:** Salary adjustments are no longer included when editing sessions from the table view.
+  - **Time Entry Table:** Monthly totals use current rate history so same-day rate changes are reflected immediately.
+  - **Time Entry Table:** Clicking a cell that contains only salary adjustments now opens a fresh hours entry instead of editing the adjustment.
+
 
 ## [2025-09-10]
 - Fixed ChartsOverview to include hours and salary adjustments for hourly and instructor employees.
 - Corrected PayrollSummary and ChartsOverview to derive session payments from rate history so non-global employees show accurate totals.
 - Applied month-aware logic in ChartsOverview and PayrollSummary so global salaries are added only when non-adjustment work exists and extra adjustments within the same months are included.
+- Resolved report calculations that ignored salary adjustments by counting adjustments separately from regular sessions.
+- Unified report calculations with time-entry table logic so expected payroll totals for all employee types include adjustments and month-aware global salaries.
 
 ## [1.3.0] - 2025-09-09
  ## Added

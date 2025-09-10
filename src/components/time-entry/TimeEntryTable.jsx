@@ -47,7 +47,7 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
 
       if (emp.employee_type === 'instructor') {
         const service = services.find(se => se.id === s.service_id);
-        let rate = s.rate_used || getRateForDate(emp.id, sessionDate, s.service_id).rate;
+        const rate = getRateForDate(emp.id, sessionDate, s.service_id).rate;
         let payment = 0;
         if (service && service.payment_model === 'per_student') {
           payment = (s.sessions_count || 0) * (s.students_count || 0) * rate;
@@ -57,7 +57,7 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
         empTotals.payment += payment;
         empTotals.sessions += s.sessions_count || 0;
       } else if (emp.employee_type === 'hourly') {
-        const rate = s.rate_used || getRateForDate(emp.id, sessionDate).rate;
+        const rate = getRateForDate(emp.id, sessionDate).rate;
         empTotals.payment += (s.hours || 0) * rate;
         empTotals.hours += s.hours || 0;
       } else if (emp.employee_type === 'global') {
@@ -149,8 +149,14 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                 s.employee_id === emp.id &&
                                 format(parseISO(s.date), 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd')
                                 );
-                                const adjustments = dailySessions.filter(s => s.entry_type === 'adjustment');
-                                const regularSessions = dailySessions.filter(s => s.entry_type !== 'adjustment');
+                                const adjustments = dailySessions.filter(s =>
+                                  s.entry_type === 'adjustment' ||
+                                  ((s.hours ?? 0) === 0 && (s.sessions_count ?? 0) === 0)
+                                );
+                                const regularSessions = dailySessions.filter(s =>
+                                  s.entry_type !== 'adjustment' &&
+                                  ((s.hours ?? 0) > 0 || (s.sessions_count ?? 0) > 0)
+                                );
                                 const adjustmentTotal = adjustments.reduce((sum, s) => sum + (s.total_payment || 0), 0);
 
                                 let summaryText = '-';
@@ -182,7 +188,7 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                     <TableCell
                                         key={emp.id}
                                         className="text-center cursor-pointer hover:bg-blue-50 transition-colors p-2"
-                                        onClick={() => setEditingCell({ day, employee: emp, existingSessions: dailySessions })}
+                                        onClick={() => setEditingCell({ day, employee: emp, existingSessions: regularSessions })}
                                     >
                                         <div className="font-semibold text-sm">{summaryText}</div>
 

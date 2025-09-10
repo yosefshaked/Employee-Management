@@ -2,72 +2,110 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Users, Clock, TrendingUp, DollarSign } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { format, startOfMonth, endOfMonth, parseISO, isSameMonth } from "date-fns";
+import { format, startOfMonth, parseISO, isSameMonth } from "date-fns";
 import { he } from "date-fns/locale";
 import { InfoTooltip } from "../InfoTooltip";
 
+const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+
 export default function QuickStats({ employees, workSessions, services, currentDate, isLoading, rateHistories = [] }) {
 
-  // === שינוי 1: הלוגיקה כולה רוכזה בפונקציה אחת ברורה ===
+  const getRateForDate = (employeeId, date, serviceId = null) => {
+    const employee = employees.find(e => e.id === employeeId);
+    if (!employee) return { rate: 0, reason: 'אין עובד כזה' };
+
+    const targetServiceId = (employee.employee_type === 'hourly' || employee.employee_type === 'global')
+      ? GENERIC_RATE_SERVICE_ID
+      : serviceId;
+
+    const dateStr = format(new Date(date), 'yyyy-MM-dd');
+
+    if (employee.start_date && employee.start_date > dateStr) {
+      return { rate: 0, reason: 'לא התחילו לעבוד עדיין' };
+    }
+
+    const relevantRates = rateHistories
+      .filter(r =>
+        r.employee_id === employeeId &&
+        r.service_id === targetServiceId &&
+        r.effective_date <= dateStr
+      )
+      .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
+
+    if (relevantRates.length > 0) {
+      return {
+        rate: relevantRates[0].rate,
+        effectiveDate: relevantRates[0].effective_date
+      };
+    }
+
+    return { rate: 0, reason: 'לא הוגדר תעריף' };
+  };
+
   const calculateMonthlyStats = () => {
     if (!workSessions || !employees || !services) {
       return { totalPayment: 0, totalHours: 0, uniqueWorkDays: 0, activeEmployees: 0 };
     }
-    
-    // סינון הרישומים הרלוונטיים לחודש הנוכחי
-    const currentMonthSessions = workSessions.filter(session => 
-      isSameMonth(parseISO(session.date), currentDate)
+
+    const currentMonthSessions = workSessions.filter(session => {
+      if (!isSameMonth(parseISO(session.date), currentDate)) return false;
+      const emp = employees.find(e => e.id === session.employee_id);
+      if (emp && emp.start_date && session.date < emp.start_date) return false;
+      return true;
+    });
+
+    let totalPayment = 0;
+    let totalHours = 0;
+
+    currentMonthSessions.forEach(session => {
+      const employee = employees.find(e => e.id === session.employee_id);
+      if (!employee) return;
+
+      if (session.entry_type === 'adjustment') {
+        totalPayment += session.total_payment || 0;
+        return;
+      }
+
+      if (employee.employee_type === 'instructor') {
+        const service = services.find(s => s.id === session.service_id);
+        const rate = getRateForDate(employee.id, session.date, session.service_id).rate;
+        let sessionPay = 0;
+        if (service && service.payment_model === 'per_student') {
+          sessionPay = (session.sessions_count || 0) * (session.students_count || 0) * rate;
+        } else {
+          sessionPay = (session.sessions_count || 0) * rate;
+        }
+        totalPayment += sessionPay;
+        if (service && service.duration_minutes) {
+          totalHours += (service.duration_minutes / 60) * (session.sessions_count || 0);
+        }
+      } else if (employee.employee_type === 'hourly') {
+        const rate = getRateForDate(employee.id, session.date).rate;
+        totalPayment += (session.hours || 0) * rate;
+        totalHours += session.hours || 0;
+      } else if (employee.employee_type === 'global') {
+        totalHours += session.hours || 0;
+      }
+    });
+
+    const globalWithWork = new Set(
+      currentMonthSessions
+        .filter(s => s.entry_type !== 'adjustment')
+        .map(s => s.employee_id)
+        .filter(id => {
+          const emp = employees.find(e => e.id === id);
+          return emp && emp.employee_type === 'global';
+        })
     );
 
-    // Helper: base salary for global employees from RateHistory
-    const getBaseSalary = (employeeId) => {
-      const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
-      if (rateHistories && rateHistories.length > 0) {
-        const relevantRates = rateHistories
-          .filter(r => r.employee_id === employeeId && r.service_id === GENERIC_RATE_SERVICE_ID)
-          .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
-        if (relevantRates.length > 0) return relevantRates[0].rate;
-      }
-      // Fallback to employee.current_rate if available
-      const emp = employees.find(e => e.id === employeeId);
-      if (emp && emp.employee_type === 'global' && typeof emp.current_rate === 'number') {
-        return emp.current_rate;
-      }
-      return 0;
-    };
+    globalWithWork.forEach(empId => {
+      totalPayment += getRateForDate(empId, startOfMonth(currentDate)).rate;
+    });
 
-    let totalPayment = currentMonthSessions.reduce((sum, session) => sum + (session.total_payment || 0), 0);
-    
-    // חישוב שעות משולב ומדויק
-    const totalHours = currentMonthSessions.reduce((sum, session) => {
-      const employee = employees.find(e => e.id === session.employee_id);
-      if (employee?.employee_type === 'hourly' || employee?.employee_type === 'global') {
-        return sum + (session.hours || 0);
-      } else if (employee?.employee_type === 'instructor') {
-        const service = services.find(s => s.id === session.service_id);
-        if (service?.duration_minutes) {
-          return sum + (service.duration_minutes / 60) * (session.sessions_count || 0);
-        }
-      }
-      return sum;
-    }, 0);
-
-    // === שינוי 2: הלוגיקה החדשה לספירת ימי עבודה ייחודיים ===
     const workDaySet = new Set(
       currentMonthSessions.map(session => `${session.employee_id}-${session.date}`)
     );
     const uniqueWorkDays = workDaySet.size;
-
-    // Rule: if a global employee has any entry in the month, include full base for the month
-    const globalEmployeeIdsWithEntries = [...new Set(
-      currentMonthSessions
-        .map(s => employees.find(e => e.id === s.employee_id))
-        .filter(e => e && e.employee_type === 'global')
-        .map(e => e.id)
-    )];
-    globalEmployeeIdsWithEntries.forEach(employeeId => {
-      totalPayment += getBaseSalary(employeeId);
-    });
 
     return {
       totalPayment,
