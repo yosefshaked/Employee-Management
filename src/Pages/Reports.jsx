@@ -56,7 +56,9 @@ export default function Reports() {
       const sessionDate = new Date(session.date);
       const fromDate = new Date(filters.dateFrom);
       const toDate = new Date(filters.dateTo);
-      return sessionDate >= fromDate && sessionDate <= toDate;
+      if (sessionDate < fromDate || sessionDate > toDate) return false;
+      const emp = employees.find(e => e.id === session.employee_id);
+      return !emp || !emp.start_date || session.date >= emp.start_date;
     });
     setFilteredSessions(filtered);
   }, [workSessions, filters, employees]);
@@ -179,7 +181,8 @@ export default function Reports() {
     globals.forEach(emp => {
       const monthsWithEntries = new Set(
         (workSessions || [])
-          .filter(s => s.employee_id === emp.id)
+          .filter(s => s.employee_id === emp.id && s.entry_type !== 'adjustment')
+          .filter(s => !emp.start_date || s.date >= emp.start_date)
           .map(s => format(parseISO(s.date), 'yyyy-MM'))
       );
       let monthsCount = 0;
@@ -198,6 +201,10 @@ export default function Reports() {
       .filter(s => s.entry_type === 'adjustment')
       .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM')))
       .filter(s => !filteredIds.has(s.id))
+      .filter(s => {
+        const emp = employees.find(e => e.id === s.employee_id);
+        return !emp || !emp.start_date || s.date >= emp.start_date;
+      })
       .reduce((sum, s) => sum + (s.total_payment || 0), 0);
     payment += extraAdjustmentsTotal;
 

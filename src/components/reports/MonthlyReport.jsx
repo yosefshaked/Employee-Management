@@ -43,7 +43,9 @@ export default function MonthlyReport({ sessions, employees, services, rateHisto
     const monthEnd = endOfMonth(month);
     const monthSessions = sessions.filter(session => {
       const sessionDate = parseISO(session.date);
-      return sessionDate >= monthStart && sessionDate <= monthEnd;
+      if (sessionDate < monthStart || sessionDate > monthEnd) return false;
+      const employee = employees.find(e => e.id === session.employee_id);
+      return !employee || !employee.start_date || session.date >= employee.start_date;
     });
 
     let totalPayment = 0;
@@ -54,6 +56,7 @@ export default function MonthlyReport({ sessions, employees, services, rateHisto
     monthSessions.forEach(session => {
       const employee = employees.find(e => e.id === session.employee_id);
       if (!employee) return;
+      if (employee.start_date && session.date < employee.start_date) return;
 
       // Always add the payment
       totalPayment += session.total_payment || 0;
@@ -78,9 +81,12 @@ export default function MonthlyReport({ sessions, employees, services, rateHisto
 
     const activeGlobalEmployeeIdsInMonth = [...new Set(
       monthSessions
-        .map(s => employees.find(e => e.id === s.employee_id))
-        .filter(e => e && e.employee_type === 'global')
-        .map(e => e.id)
+        .filter(s => s.entry_type !== 'adjustment')
+        .filter(s => {
+          const emp = employees.find(e => e.id === s.employee_id && e.employee_type === 'global');
+          return emp && (!emp.start_date || s.date >= emp.start_date);
+        })
+        .map(s => s.employee_id)
     )];
     
     activeGlobalEmployeeIdsInMonth.forEach(employeeId => {

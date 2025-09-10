@@ -6,17 +6,17 @@ import { he } from "date-fns/locale";
 
 const COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#06B6D4'];
 
-export default function ChartsOverview({ sessions, employees, isLoading, services, rateHistories, workSessions = [], dateFrom, dateTo }) {
+export default function ChartsOverview({ sessions, employees, isLoading, services, rateHistories, workSessions = [] }) {
   const [pieType, setPieType] = React.useState('count');
 
   const getBaseSalary = (employeeId) => {
-  if (!rateHistories) return 0;
-  const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
-  const relevantRates = rateHistories
-    .filter(r => r.employee_id === employeeId && r.service_id === GENERIC_RATE_SERVICE_ID)
-    .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
-  return relevantRates.length > 0 ? relevantRates[0].rate : 0;
-};
+    if (!rateHistories) return 0;
+    const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+    const relevantRates = rateHistories
+      .filter(r => r.employee_id === employeeId && r.service_id === GENERIC_RATE_SERVICE_ID)
+      .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
+    return relevantRates.length > 0 ? relevantRates[0].rate : 0;
+  };
 
   const [trendType, setTrendType] = React.useState('payment');
   
@@ -76,52 +76,66 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     );
   }
 
-  const getEmployeeName = (employeeId) => {
-    const employee = employees.find(emp => emp.id === employeeId);
-    return employee ? employee.name : 'לא ידוע';
-  };
+  // No rate calculations needed for chart totals; rely on stored session payments
 
   // Payment by employee (active employees only)
   const paymentByEmployee = employees.filter(e => e.is_active).map(employee => {
-    const employeeSessions = sessions.filter(s => s.employee_id === employee.id);
-    
-    let totalPayment = employeeSessions.reduce((sum, s) => sum + s.total_payment, 0);
+    const employeeSessions = sessions.filter(
+      s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
+    );
 
-    // Add base salary for global employees
-    if (employee.employee_type === 'global') {
-      // Month-aware rule across the filter's full months:
-      // Count base once for each calendar month covered by [dateFrom, dateTo]
-      // if this employee has any entry anywhere in that same month (using all workSessions).
-      let start = dateFrom ? startOfMonth(new Date(dateFrom)) : undefined;
-      let end = dateTo ? endOfMonth(new Date(dateTo)) : undefined;
-      if (!start || !end) {
-        // Fallback to months derived from filtered sessions
-        if (sessions.length > 0) {
-          const dates = sessions.map(s => parseISO(s.date));
-          start = startOfMonth(new Date(Math.min(...dates)));
-          end = endOfMonth(new Date(Math.max(...dates)));
-        } else {
-          const now = new Date();
-          start = startOfMonth(new Date(now.getFullYear(), now.getMonth(), 1));
-          end = endOfMonth(now);
+    const sessionTotals = employeeSessions.reduce((acc, session) => {
+      acc.sessionPayment += session.total_payment || 0;
+      if (employee.employee_type === 'instructor') {
+        acc.totalSessions += session.sessions_count || 0;
+      } else if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
+        if (session.entry_type === 'adjustment') {
+          acc.totalAdjustments += session.total_payment || 0;
         }
       }
-      const monthsInRange = eachMonthOfInterval({ start, end });
-      const monthsKeysInRange = new Set(monthsInRange.map(m => format(m, 'yyyy-MM')));
-      const employeeMonthsAll = new Set((workSessions.length ? workSessions : sessions)
-        .filter(s => s.employee_id === employee.id)
-        .map(s => format(parseISO(s.date), 'yyyy-MM')));
+      return acc;
+    }, { sessionPayment: 0, totalSessions: 0, totalAdjustments: 0 });
+
+    const monthsSet = new Set(sessions.map(s => format(parseISO(s.date), 'yyyy-MM')));
+
+    const filteredIds = new Set(employeeSessions.map(s => s.id));
+    const extraAdjustments = (workSessions || [])
+      .filter(
+        s =>
+          s.employee_id === employee.id &&
+          s.entry_type === 'adjustment' &&
+          (!employee.start_date || s.date >= employee.start_date)
+      )
+      .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM')))
+      .filter(s => !filteredIds.has(s.id))
+      .reduce((sum, s) => sum + (s.total_payment || 0), 0);
+
+    let totalPayment = 0;
+    if (employee.employee_type === 'global') {
+      const baseSalary = getBaseSalary(employee.id);
+      const employeeMonthsAll = new Set(
+        (workSessions || [])
+          .filter(
+            s =>
+              s.employee_id === employee.id &&
+              s.entry_type !== 'adjustment' &&
+              (!employee.start_date || s.date >= employee.start_date)
+          )
+          .map(s => format(parseISO(s.date), 'yyyy-MM'))
+      );
       let monthsCount = 0;
-      monthsKeysInRange.forEach(k => { if (employeeMonthsAll.has(k)) monthsCount++; });
-      if (monthsCount > 0) totalPayment += getBaseSalary(employee.id) * monthsCount;
+      monthsSet.forEach(m => { if (employeeMonthsAll.has(m)) monthsCount++; });
+      totalPayment = (baseSalary * monthsCount) + sessionTotals.totalAdjustments + extraAdjustments;
+    } else {
+      totalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments + extraAdjustments;
     }
-    
+
     return {
       name: employee.name,
       payment: totalPayment,
       sessions: employeeSessions.length
     };
-  }).filter(item => item.payment > 0);
+  }).filter(item => item.payment !== 0);
 
   // Monthly trend based on filtered range (fallback to last 6 months)
   let startDate, endDate;
@@ -142,13 +156,18 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       const sessionDate = parseISO(session.date);
       return sessionDate >= monthStart && sessionDate <= monthEnd;
     });
+    const monthAllSessions = (workSessions.length ? workSessions : sessions).filter(session => {
+      const sessionDate = parseISO(session.date);
+      return sessionDate >= monthStart && sessionDate <= monthEnd;
+    });
     let payment = 0, hours = 0, sessionsCount = 0;
     const countedSessions = [];
     monthSessions.forEach(session => {
       const employee = employees.find(e => e.id === session.employee_id);
       if (!employee || !employee.is_active) return;
+      if (employee.start_date && session.date < employee.start_date) return;
 
-      // Sum payment for all employees (hourly, instructor, global). Adjustments included.
+      // Sum payment using stored totals. Adjustments included.
       payment += session.total_payment || 0;
 
       // Hours: for hours entries (not adjustments) or estimate for instructor sessions
@@ -181,13 +200,27 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
         });
       }
     });
-    
-    // Add base salary for active global employees who had activity this month
+
+    // Include adjustments outside the filtered range but within this month
+    const monthSessionIds = new Set(monthSessions.map(s => s.id));
+    const extraAdjustments = monthAllSessions
+      .filter(s => s.entry_type === 'adjustment' && !monthSessionIds.has(s.id))
+      .filter(s => {
+        const emp = employees.find(e => e.id === s.employee_id);
+        return !emp || !emp.start_date || s.date >= emp.start_date;
+      })
+      .reduce((sum, s) => sum + (s.total_payment || 0), 0);
+    payment += extraAdjustments;
+
+    // Add base salary for active global employees who had non-adjustment activity this month
     const activeGlobalEmployeeIdsInMonth = [...new Set(
-      monthSessions
-        .map(s => employees.find(e => e.id === s.employee_id))
-        .filter(e => e && e.is_active && e.employee_type === 'global')
-        .map(e => e.id)
+      monthAllSessions
+        .filter(s => s.entry_type !== 'adjustment')
+        .filter(s => {
+          const emp = employees.find(e => e.id === s.employee_id && e.is_active && e.employee_type === 'global');
+          return emp && (!emp.start_date || s.date >= emp.start_date);
+        })
+        .map(s => s.employee_id)
     )];
     activeGlobalEmployeeIdsInMonth.forEach(employeeId => {
       payment += getBaseSalary(employeeId);
