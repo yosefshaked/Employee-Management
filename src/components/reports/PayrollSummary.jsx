@@ -49,49 +49,6 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
   return relevantRates.length > 0 ? relevantRates[0].rate : 0;
 };
 
-  const getRateForDate = (employeeId, date, serviceId) => {
-    if (!rateHistories) return 0;
-    const dateStr = format(new Date(date), 'yyyy-MM-dd');
-    const relevantRates = rateHistories
-      .filter(r => r.employee_id === employeeId && r.service_id === serviceId && r.effective_date <= dateStr)
-      .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
-    return relevantRates.length > 0 ? relevantRates[0].rate : 0;
-  };
-
-  const calculateSessionPayment = (session, employee) => {
-    const stored = parseFloat(session.total_payment);
-    if (!Number.isNaN(stored)) return stored;
-
-    if (session.entry_type === 'adjustment') {
-      return parseFloat(session.adjustment_amount) || 0;
-    }
-
-    const serviceIdForRate = (employee.employee_type === 'hourly' || employee.employee_type === 'global')
-      ? '00000000-0000-0000-0000-000000000000'
-      : session.service_id;
-
-    let rate = parseFloat(session.rate_used);
-    if (Number.isNaN(rate) || rate === 0) {
-      rate = getRateForDate(employee.id, session.date, serviceIdForRate);
-    }
-
-    if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
-      return (parseFloat(session.hours) || 0) * rate;
-    }
-
-    if (employee.employee_type === 'instructor') {
-      const service = services.find(s => s.id === session.service_id);
-      const sessionsCount = parseInt(session.sessions_count, 10) || 0;
-      if (service && service.payment_model === 'per_student') {
-        const students = parseInt(session.students_count, 10) || 0;
-        return sessionsCount * students * rate;
-      }
-      return sessionsCount * rate;
-    }
-
-    return 0;
-  };
-
   const EMPLOYEE_TYPE_CONFIG = {
     hourly: {
       label: 'שעתי',
@@ -110,7 +67,7 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
     }
   };
 
-  if (isLoading) { 
+  if (isLoading) {
     return (
       <div className="space-y-2">
         {Array(5).fill(0).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
@@ -127,29 +84,28 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
 
         // Calculate totals based on session data first
         const sessionTotals = employeeSessions.reduce((acc, session) => {
-          const payment = calculateSessionPayment(session, employee);
+        // Always add the payment part from the session itself
+        acc.sessionPayment += session.total_payment || 0;
+
+        // Handle activity totals based on employee type and entry type
+        if (employee.employee_type === 'instructor') {
+          acc.totalSessions += session.sessions_count || 0;
+        } else if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
           if (session.entry_type === 'adjustment') {
-            acc.totalAdjustments += payment;
-          } else {
-            acc.sessionPayment += payment;
-            if (employee.employee_type === 'instructor') {
-              acc.totalSessions += session.sessions_count || 0;
-            } else if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
-              acc.totalHours += session.hours || 0;
-            }
+            acc.totalAdjustments += session.total_payment || 0;
+          } else { // It's an 'hours' entry, or an old entry without a type
+            acc.totalHours += session.hours || 0;
           }
-          return acc;
-        }, { sessionPayment: 0, totalHours: 0, totalSessions: 0, totalAdjustments: 0 });
+        }
+
+        return acc;
+      }, { sessionPayment: 0, totalHours: 0, totalSessions: 0, totalAdjustments: 0 });
 
         let finalPayment = 0;
         let baseSalary = null;
 
-        // Build month set covered by the current filtered sessions range (exclude adjustments)
-        const monthsSet = new Set(
-          sessions
-            .filter(s => s.entry_type !== 'adjustment')
-            .map(s => format(parseISO(s.date), 'yyyy-MM'))
-        );
+        // Build month set covered by the current filtered sessions range
+        const monthsSet = new Set(sessions.map(s => format(parseISO(s.date), 'yyyy-MM')));
 
         // Month-aware extra adjustments (outside exact range but within same months)
         const filteredIds = new Set(employeeSessions.map(s => s.id));
@@ -157,26 +113,24 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
           .filter(s => s.employee_id === employee.id && s.entry_type === 'adjustment')
           .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM')))
           .filter(s => !filteredIds.has(s.id))
-          .reduce((sum, s) => sum + calculateSessionPayment(s, employee), 0);
-
-        const totalAdjustments = sessionTotals.totalAdjustments + extraAdjustments;
+          .reduce((sum, s) => sum + (s.total_payment || 0), 0);
 
         if (employee.employee_type === 'global') {
           baseSalary = getBaseSalary(employee.id);
-          // Count months in range where this employee has any non-adjustment entry (use all sessions)
+          // Count months in range where this employee has any entry (use all sessions)
           const employeeMonthsAll = new Set(
             (workSessions || [])
-              .filter(s => s.employee_id === employee.id && s.entry_type !== 'adjustment')
+              .filter(s => s.employee_id === employee.id)
               .map(s => format(parseISO(s.date), 'yyyy-MM'))
           );
           let monthsCount = 0;
           monthsSet.forEach(m => { if (employeeMonthsAll.has(m)) monthsCount++; });
-          finalPayment = (baseSalary * monthsCount) + totalAdjustments;
+          finalPayment = (baseSalary * monthsCount) + sessionTotals.totalAdjustments + extraAdjustments;
         } else {
-          // For hourly and instructors, final pay is session payments plus adjustments
-          finalPayment = sessionTotals.sessionPayment + totalAdjustments;
+          // For hourly and instructors, final pay is sessions + adjustments (including month-aware extra)
+          finalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments + extraAdjustments;
         }
-        
+
         // Instructor service details logic (remains the same)
         let serviceDetails = {};
         if (employee.employee_type === 'instructor') {
@@ -191,7 +145,7 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
                 };
               }
               serviceDetails[session.service_id].sessionsCount += session.sessions_count || 0;
-              serviceDetails[session.service_id].totalPayment += calculateSessionPayment(session, employee);
+              serviceDetails[session.service_id].totalPayment += session.total_payment || 0;
             }
           });
           Object.values(serviceDetails).forEach(detail => {
@@ -202,7 +156,7 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
         return {
           id: employee.id, name: employee.name, employeeType: employee.employee_type,
           baseSalary,
-          totalAdjustments,
+          totalAdjustments: sessionTotals.totalAdjustments,
           isActive: employee.is_active,
           totalPayment: finalPayment,
           totalHours: Math.round(sessionTotals.totalHours * 10) / 10,
@@ -217,7 +171,7 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
           if (emp.totalSessions > 0) return true;
           return false;
       }).sort((a, b) => (b.totalPayment || 0) - (a.totalPayment || 0));
-    
+
   return (
     <Card className="border-0 shadow-lg">
       <Table>
