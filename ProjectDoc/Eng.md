@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.0.0**
-**Last Updated: 2025-09-07**
+**Version: 1.1.0**
+**Last Updated: 2025-09-10**
 
 ## 1. Vision & Purpose
 
@@ -117,6 +117,9 @@ Several key decisions were made during development that shaped the system:
 4.  **Prioritizing User Experience (UX):** We debated extensively about form behavior, especially when switching between employee types.
     *   **The Decision:** Instead of a full form reset, we implemented a "smart partial reset" and added a styled `AlertDialog` to give the user full control over actions that could cause data loss.
     *   **Lesson:** A good user experience requires thinking about edge cases and avoiding automatic behaviors that might frustrate the user.
+
+5.  **Centralized rate history management:** A dedicated `RateHistoryManager` component lets admins add or edit historical rates directly from an employee's form; deletion is intentionally disabled to preserve audit history.
+    *   **Lesson:** Consolidating rate edits in one place keeps payroll data consistent and transparent.
 
 ---
 

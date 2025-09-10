@@ -61,7 +61,7 @@ export default function Employees() {
   useEffect(() => { loadData(); }, []);
   useEffect(() => { filterEmployees(); }, [filterEmployees]);
 
-  const handleSubmit = async ({ employeeData, serviceRates }) => {
+  const handleSubmit = async ({ employeeData, serviceRates, rateHistory }) => {
     try {
       // Separate the rate from the main employee data to avoid saving it in the Employees table
       const { current_rate, ...employeeDetails } = employeeData;
@@ -121,6 +121,21 @@ export default function Employees() {
       if (rateUpdates.length > 0) {
         const { error } = await supabase.from('RateHistory').upsert(rateUpdates, { onConflict: 'employee_id,service_id,effective_date' });
         if (error) throw error;
+      }
+
+      // Step 3b: Handle manual rate history edits for existing employees
+      if (!isNewEmployee && rateHistory) {
+        const entriesToUpsert = rateHistory.map(({ id, ...rest }) => ({
+          ...rest,
+          employee_id: employeeId,
+          ...(id ? { id } : {}),
+        }));
+        if (entriesToUpsert.length > 0) {
+          const { error } = await supabase
+            .from('RateHistory')
+            .upsert(entriesToUpsert, { onConflict: 'id' });
+          if (error) throw error;
+        }
       }
 
       // Step 4: Cleanup and reload

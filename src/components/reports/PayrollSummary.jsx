@@ -81,54 +81,57 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
 
       const employeesSummary = employees.map(employee => {
         const employeeSessions = sessions.filter(s => s.employee_id === employee.id);
-        
+
         // Calculate totals based on session data first
         const sessionTotals = employeeSessions.reduce((acc, session) => {
         // Always add the payment part from the session itself
         acc.sessionPayment += session.total_payment || 0;
-        
-        // Handle activity totals based on employee type and entry type
-        if (employee.employee_type === 'instructor') {
+
+        if (session.entry_type === 'adjustment') {
+          acc.totalAdjustments += session.total_payment || 0;
+        } else if (employee.employee_type === 'instructor') {
           acc.totalSessions += session.sessions_count || 0;
         } else if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
-          if (session.entry_type === 'adjustment') {
-            acc.totalAdjustments += session.total_payment || 0;
-          } else { // It's an 'hours' entry, or an old entry without a type
-            acc.totalHours += session.hours || 0;
-          }
+          acc.totalHours += session.hours || 0;
         }
-        
+
         return acc;
       }, { sessionPayment: 0, totalHours: 0, totalSessions: 0, totalAdjustments: 0 });
 
         let finalPayment = 0;
         let baseSalary = null;
 
-        // Build month set covered by the current filtered sessions range
-        const monthsSet = new Set(sessions.map(s => format(parseISO(s.date), 'yyyy-MM')));
+        // Build month set covered by the current filtered sessions range (exclude adjustments)
+        const monthsSet = new Set(
+          sessions
+            .filter(s => s.entry_type !== 'adjustment')
+            .map(s => format(parseISO(s.date), 'yyyy-MM'))
+        );
 
         // Month-aware extra adjustments (outside exact range but within same months)
         const filteredIds = new Set(employeeSessions.map(s => s.id));
         const extraAdjustments = (workSessions || [])
           .filter(s => s.employee_id === employee.id && s.entry_type === 'adjustment')
-          .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM'))) 
+          .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM')))
           .filter(s => !filteredIds.has(s.id))
           .reduce((sum, s) => sum + (s.total_payment || 0), 0);
 
+        const totalAdjustments = sessionTotals.totalAdjustments + extraAdjustments;
+
         if (employee.employee_type === 'global') {
           baseSalary = getBaseSalary(employee.id);
-          // Count months in range where this employee has any entry (use all sessions)
+          // Count months in range where this employee has any non-adjustment entry (use all sessions)
           const employeeMonthsAll = new Set(
             (workSessions || [])
-              .filter(s => s.employee_id === employee.id)
+              .filter(s => s.employee_id === employee.id && s.entry_type !== 'adjustment')
               .map(s => format(parseISO(s.date), 'yyyy-MM'))
           );
           let monthsCount = 0;
           monthsSet.forEach(m => { if (employeeMonthsAll.has(m)) monthsCount++; });
-          finalPayment = (baseSalary * monthsCount) + sessionTotals.totalAdjustments + extraAdjustments;
+          finalPayment = (baseSalary * monthsCount) + totalAdjustments;
         } else {
-          // For hourly and instructors, final pay is sessions + adjustments (including month-aware extra)
-          finalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments + extraAdjustments;
+          // For hourly and instructors, final pay is sessions plus any extra adjustments
+          finalPayment = sessionTotals.sessionPayment + extraAdjustments;
         }
         
         // Instructor service details logic (remains the same)
@@ -156,10 +159,10 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
         return {
           id: employee.id, name: employee.name, employeeType: employee.employee_type,
           baseSalary,
-          totalAdjustments: sessionTotals.totalAdjustments,
+          totalAdjustments,
           isActive: employee.is_active,
-          totalPayment: finalPayment, 
-          totalHours: Math.round(sessionTotals.totalHours * 10) / 10, 
+          totalPayment: finalPayment,
+          totalHours: Math.round(sessionTotals.totalHours * 10) / 10,
           totalSessions: sessionTotals.totalSessions,
           details: Object.values(serviceDetails)
         };

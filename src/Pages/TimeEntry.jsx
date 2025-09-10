@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { format, formatDuration, parseISO } from "date-fns"; 
+import { format } from "date-fns";
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -61,16 +61,18 @@ export default function TimeEntry() {
       ? GENERIC_RATE_SERVICE_ID
       : serviceId;
 
+    const dateStr = format(new Date(date), 'yyyy-MM-dd');
+
     // Check if the employee's start date is after the requested date
-    if (employee.start_date && new Date(date) < new Date(employee.start_date)) {
+    if (employee.start_date && employee.start_date > dateStr) {
       return { rate: 0, reason: 'לא התחילו לעבוד עדיין' };
     }
 
     const relevantRates = rateHistories
-      .filter(r => 
-        r.employee_id === employeeId && 
-        r.service_id === targetServiceId && 
-        new Date(r.effective_date) <= new Date(date)
+      .filter(r =>
+        r.employee_id === employeeId &&
+        r.service_id === targetServiceId &&
+        r.effective_date <= dateStr
       )
       .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
     
@@ -93,7 +95,7 @@ export default function TimeEntry() {
         const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
         const serviceIdForRate = isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : row.service_id;
         
-        const rateUsed = getRateForDate(employee.id, row.date, serviceIdForRate);
+        const { rate: rateUsed } = getRateForDate(employee.id, row.date, serviceIdForRate);
         let totalPayment = 0;
         
         if (employee.employee_type === 'hourly') {
@@ -308,11 +310,10 @@ export default function TimeEntry() {
           </TabsContent>
 
           <TabsContent value="table">
-            <TimeEntryTable 
+            <TimeEntryTable
               employees={employees}
               workSessions={workSessions}
               services={services}
-              rateHistories={rateHistories}
               getRateForDate={getRateForDate}
               onTableSubmit={handleTableSubmit}
             />

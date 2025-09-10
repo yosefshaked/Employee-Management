@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Save, X, User, DollarSign } from "lucide-react";
+import RateHistoryManager from './RateHistoryManager';
 import { supabase } from '@/supabaseClient';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
@@ -109,6 +110,7 @@ useEffect(() => {
       await onSubmit({
         employeeData: formData,
         serviceRates,
+        rateHistory,
       });
     } catch (error) {
       console.error("Form submission error", error);
@@ -223,6 +225,16 @@ useEffect(() => {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+          {employee && (
+            <div className="space-y-4 pt-4 border-t">
+              <RateHistoryManager
+                rateHistory={rateHistory}
+                services={services}
+                employeeType={formData.employee_type}
+                onChange={setRateHistory}
+              />
             </div>
           )}
           <div className="flex gap-3 pt-4">
