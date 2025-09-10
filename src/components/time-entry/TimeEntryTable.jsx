@@ -32,19 +32,36 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
 
     workSessions.forEach(s => {
       const sessionDate = parseISO(s.date);
-      if (sessionDate >= start && sessionDate <= end && totals[s.employee_id]) {
-        const empTotals = totals[s.employee_id];
-        if (s.entry_type === 'adjustment') {
-          empTotals.adjustments += s.total_payment || 0;
-          return;
-        }
-        empTotals.hasEntry = true;
-        empTotals.payment += s.total_payment || 0;
-        if (s.entry_type === 'hours') {
-          empTotals.hours += s.hours || 0;
+      if (sessionDate < start || sessionDate > end) return;
+      const empTotals = totals[s.employee_id];
+      if (!empTotals) return;
+      const emp = employees.find(e => e.id === s.employee_id);
+      if (!emp) return;
+
+      if (s.entry_type === 'adjustment') {
+        empTotals.adjustments += s.total_payment || 0;
+        return;
+      }
+
+      empTotals.hasEntry = true;
+
+      if (emp.employee_type === 'instructor') {
+        const service = services.find(se => se.id === s.service_id);
+        let rate = s.rate_used || getRateForDate(emp.id, sessionDate, s.service_id).rate;
+        let payment = 0;
+        if (service && service.payment_model === 'per_student') {
+          payment = (s.sessions_count || 0) * (s.students_count || 0) * rate;
         } else {
-          empTotals.sessions += s.sessions_count || 0;
+          payment = (s.sessions_count || 0) * rate;
         }
+        empTotals.payment += payment;
+        empTotals.sessions += s.sessions_count || 0;
+      } else if (emp.employee_type === 'hourly') {
+        const rate = s.rate_used || getRateForDate(emp.id, sessionDate).rate;
+        empTotals.payment += (s.hours || 0) * rate;
+        empTotals.hours += s.hours || 0;
+      } else if (emp.employee_type === 'global') {
+        empTotals.hours += s.hours || 0;
       }
     });
 
@@ -55,17 +72,16 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
       if (emp.employee_type === 'global') {
         if (empTotals.hasEntry) {
           const { rate } = getRateForDate(emp.id, start);
-          empTotals.payment = rate + empTotals.adjustments;
+          empTotals.payment = rate;
         } else {
-          empTotals.payment = empTotals.adjustments;
+          empTotals.payment = 0;
         }
-      } else {
-        empTotals.payment += empTotals.adjustments;
       }
+      empTotals.payment += empTotals.adjustments;
     });
 
     return totals;
-  }, [workSessions, employees, currentMonth, getRateForDate]);
+  }, [workSessions, employees, currentMonth, getRateForDate, services]);
 
   return (
     <> {/* Using a Fragment (<>) instead of a div to avoid extra wrappers */}
