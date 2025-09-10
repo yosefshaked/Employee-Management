@@ -149,8 +149,14 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                 s.employee_id === emp.id &&
                                 format(parseISO(s.date), 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd')
                                 );
-                                const adjustments = dailySessions.filter(s => s.entry_type === 'adjustment');
-                                const regularSessions = dailySessions.filter(s => s.entry_type !== 'adjustment');
+                                const adjustments = dailySessions.filter(s =>
+                                  s.entry_type === 'adjustment' ||
+                                  ((s.hours ?? 0) === 0 && (s.sessions_count ?? 0) === 0)
+                                );
+                                const regularSessions = dailySessions.filter(s =>
+                                  s.entry_type !== 'adjustment' &&
+                                  ((s.hours ?? 0) > 0 || (s.sessions_count ?? 0) > 0)
+                                );
                                 const adjustmentTotal = adjustments.reduce((sum, s) => sum + (s.total_payment || 0), 0);
 
                                 let summaryText = '-';

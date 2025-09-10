@@ -16,6 +16,7 @@ All notable changes to this project will be documented in this file.
     - **Check Possible Future Clash:** In TimeEntryForm.jsx there's   id: Math.random(), - does it mean that it randomly generate the ID? Does it make sure the ID doesn't already exist? What will happen if the ID exist? Will it fail or will it reroll?
   - **Time Entry Table:** Salary adjustments are no longer included when editing sessions from the table view.
   - **Time Entry Table:** Monthly totals use current rate history so same-day rate changes are reflected immediately.
+  - **Time Entry Table:** Clicking a cell that contains only salary adjustments now opens a fresh hours entry instead of editing the adjustment.
 
 ## [2025-09-10]
 - Fixed ChartsOverview to include hours and salary adjustments for hourly and instructor employees.
