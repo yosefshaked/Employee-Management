@@ -11,4 +11,4 @@
 
 ## Documentation
 - When editing files in `ProjectDoc/`, keep `Eng.md` and `Heb.md` in sync and update their version and last-updated fields.
-- Use `ProjectDoc/` to understand the system's guidelines and vision.
+- Use `ProjectDoc/` to understand the system's guidelines and vision. 
