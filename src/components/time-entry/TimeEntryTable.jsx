@@ -47,7 +47,7 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
 
       if (emp.employee_type === 'instructor') {
         const service = services.find(se => se.id === s.service_id);
-        let rate = s.rate_used || getRateForDate(emp.id, sessionDate, s.service_id).rate;
+        const rate = getRateForDate(emp.id, sessionDate, s.service_id).rate;
         let payment = 0;
         if (service && service.payment_model === 'per_student') {
           payment = (s.sessions_count || 0) * (s.students_count || 0) * rate;
@@ -57,7 +57,7 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
         empTotals.payment += payment;
         empTotals.sessions += s.sessions_count || 0;
       } else if (emp.employee_type === 'hourly') {
-        const rate = s.rate_used || getRateForDate(emp.id, sessionDate).rate;
+        const rate = getRateForDate(emp.id, sessionDate).rate;
         empTotals.payment += (s.hours || 0) * rate;
         empTotals.hours += s.hours || 0;
       } else if (emp.employee_type === 'global') {

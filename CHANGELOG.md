@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
   - **Vacation Days and Bonuses (UI & Logic):** Implementing the user interface and logic for managing vacation days and bonuses for all employee types (the database table `LeaveBalances` is ready).
     - **Check Possible Future Clash:** In TimeEntryForm.jsx there's   id: Math.random(), - does it mean that it randomly generate the ID? Does it make sure the ID doesn't already exist? What will happen if the ID exist? Will it fail or will it reroll?
   - **Time Entry Table:** Salary adjustments are no longer included when editing sessions from the table view.
+  - **Time Entry Table:** Monthly totals use current rate history so same-day rate changes are reflected immediately.
 
 ## [2025-09-10]
 - Fixed ChartsOverview to include hours and salary adjustments for hourly and instructor employees.
