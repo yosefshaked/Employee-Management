@@ -49,6 +49,49 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
   return relevantRates.length > 0 ? relevantRates[0].rate : 0;
 };
 
+  const getRateForDate = (employeeId, date, serviceId) => {
+    if (!rateHistories) return 0;
+    const dateStr = format(new Date(date), 'yyyy-MM-dd');
+    const relevantRates = rateHistories
+      .filter(r => r.employee_id === employeeId && r.service_id === serviceId && r.effective_date <= dateStr)
+      .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
+    return relevantRates.length > 0 ? relevantRates[0].rate : 0;
+  };
+
+  const calculateSessionPayment = (session, employee) => {
+    const stored = parseFloat(session.total_payment);
+    if (!Number.isNaN(stored)) return stored;
+
+    if (session.entry_type === 'adjustment') {
+      return parseFloat(session.adjustment_amount) || 0;
+    }
+
+    const serviceIdForRate = (employee.employee_type === 'hourly' || employee.employee_type === 'global')
+      ? '00000000-0000-0000-0000-000000000000'
+      : session.service_id;
+
+    let rate = parseFloat(session.rate_used);
+    if (Number.isNaN(rate) || rate === 0) {
+      rate = getRateForDate(employee.id, session.date, serviceIdForRate);
+    }
+
+    if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
+      return (parseFloat(session.hours) || 0) * rate;
+    }
+
+    if (employee.employee_type === 'instructor') {
+      const service = services.find(s => s.id === session.service_id);
+      const sessionsCount = parseInt(session.sessions_count, 10) || 0;
+      if (service && service.payment_model === 'per_student') {
+        const students = parseInt(session.students_count, 10) || 0;
+        return sessionsCount * students * rate;
+      }
+      return sessionsCount * rate;
+    }
+
+    return 0;
+  };
+
   const EMPLOYEE_TYPE_CONFIG = {
     hourly: {
       label: 'שעתי',
@@ -84,11 +127,11 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
 
         // Calculate totals based on session data first
         const sessionTotals = employeeSessions.reduce((acc, session) => {
-        // Always add the payment part from the session itself
-        acc.sessionPayment += session.total_payment || 0;
+        const payment = calculateSessionPayment(session, employee);
+        acc.sessionPayment += payment;
 
         if (session.entry_type === 'adjustment') {
-          acc.totalAdjustments += session.total_payment || 0;
+          acc.totalAdjustments += payment;
         } else if (employee.employee_type === 'instructor') {
           acc.totalSessions += session.sessions_count || 0;
         } else if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
@@ -114,7 +157,7 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
           .filter(s => s.employee_id === employee.id && s.entry_type === 'adjustment')
           .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM')))
           .filter(s => !filteredIds.has(s.id))
-          .reduce((sum, s) => sum + (s.total_payment || 0), 0);
+          .reduce((sum, s) => sum + calculateSessionPayment(s, employee), 0);
 
         const totalAdjustments = sessionTotals.totalAdjustments + extraAdjustments;
 
@@ -141,14 +184,14 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
             if (session.service_id) {
               if (!serviceDetails[session.service_id]) {
                 const service = services.find(s => s.id === session.service_id);
-                serviceDetails[session.service_id] = { 
+                serviceDetails[session.service_id] = {
                   serviceName: service ? service.name : 'שירות לא ידוע',
-                  sessionsCount: 0, 
-                  totalPayment: 0 
+                  sessionsCount: 0,
+                  totalPayment: 0
                 };
               }
               serviceDetails[session.service_id].sessionsCount += session.sessions_count || 0;
-              serviceDetails[session.service_id].totalPayment += session.total_payment || 0;
+              serviceDetails[session.service_id].totalPayment += calculateSessionPayment(session, employee);
             }
           });
           Object.values(serviceDetails).forEach(detail => {

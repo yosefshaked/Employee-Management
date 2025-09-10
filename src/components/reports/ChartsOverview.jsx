@@ -18,6 +18,15 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
   return relevantRates.length > 0 ? relevantRates[0].rate : 0;
 };
 
+  const getRateForDate = (employeeId, date, serviceId) => {
+    if (!rateHistories) return 0;
+    const dateStr = format(new Date(date), 'yyyy-MM-dd');
+    const relevantRates = rateHistories
+      .filter(r => r.employee_id === employeeId && r.service_id === serviceId && r.effective_date <= dateStr)
+      .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
+    return relevantRates.length > 0 ? relevantRates[0].rate : 0;
+  };
+
   const [trendType, setTrendType] = React.useState('payment');
   
   // Aggregate sessions by type for the pie chart (count vs time)
@@ -84,10 +93,17 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     if (!employee) return 0;
 
     if (session.entry_type === 'adjustment') {
-      return 0;
+      return parseFloat(session.adjustment_amount) || 0;
     }
 
-    const rate = parseFloat(session.rate_used) || 0;
+    const serviceIdForRate = (employee.employee_type === 'hourly' || employee.employee_type === 'global')
+      ? '00000000-0000-0000-0000-000000000000'
+      : session.service_id;
+
+    let rate = parseFloat(session.rate_used);
+    if (Number.isNaN(rate) || rate === 0) {
+      rate = getRateForDate(employee.id, session.date, serviceIdForRate);
+    }
 
     if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
       return (parseFloat(session.hours) || 0) * rate;
