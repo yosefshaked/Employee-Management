@@ -23,6 +23,9 @@ All notable changes to this project will be documented in this file.
 - Applied month-aware logic in ChartsOverview and PayrollSummary so global salaries are added only when non-adjustment work exists and extra adjustments within the same months are included.
 - Resolved report calculations that ignored salary adjustments by counting adjustments separately from regular sessions.
 
+## [2025-09-11]
+- Unified report calculations with time-entry table logic so expected payroll totals for all employee types include adjustments and month-aware global salaries.
+
 ## [1.3.0] - 2025-09-09
  ## Added
   - **Table View and Ability to Edit** Added the ability to see in Table view and allowed making changes to existing רישומים.

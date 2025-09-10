@@ -14,6 +14,8 @@ import MonthlyReport from "../components/reports/MonthlyReport";
 import PayrollSummary from "../components/reports/PayrollSummary";
 import ChartsOverview from "../components/reports/ChartsOverview";
 
+const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+
 export default function Reports() {
   const [employees, setEmployees] = useState([]);
   const [workSessions, setWorkSessions] = useState([]);
@@ -23,6 +25,38 @@ export default function Reports() {
   const location = useLocation(); // מאפשר לנו לגשת למידע על הכתובת הנוכחית
   const [activeTab, setActiveTab] = useState(location.state?.openTab || "overview");
   const [rateHistories, setRateHistories] = useState([]);
+
+  const getRateForDate = (employeeId, date, serviceId = null) => {
+    const employee = employees.find(e => e.id === employeeId);
+    if (!employee) return { rate: 0, reason: 'אין עובד כזה' };
+
+    const targetServiceId = (employee.employee_type === 'hourly' || employee.employee_type === 'global')
+      ? GENERIC_RATE_SERVICE_ID
+      : serviceId;
+
+    const dateStr = format(new Date(date), 'yyyy-MM-dd');
+
+    if (employee.start_date && employee.start_date > dateStr) {
+      return { rate: 0, reason: 'לא התחילו לעבוד עדיין' };
+    }
+
+    const relevantRates = rateHistories
+      .filter(r =>
+        r.employee_id === employeeId &&
+        r.service_id === targetServiceId &&
+        r.effective_date <= dateStr
+      )
+      .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
+
+    if (relevantRates.length > 0) {
+      return {
+        rate: relevantRates[0].rate,
+        effectiveDate: relevantRates[0].effective_date
+      };
+    }
+
+    return { rate: 0, reason: 'לא הוגדר תעריף' };
+  };
 
   const formatDateLocal = (d) => {
     const y = d.getFullYear();
@@ -138,63 +172,63 @@ export default function Reports() {
     };
 
   const getTotals = () => {
-    // Helper function defined inside getTotals to have access to rateHistories
-    const getBaseSalary = (employeeId) => {
-      if (!rateHistories) return 0;
-      const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
-      const relevantRates = rateHistories
-        .filter(r => r.employee_id === employeeId && r.service_id === GENERIC_RATE_SERVICE_ID)
-        .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
-      return relevantRates.length > 0 ? relevantRates[0].rate : 0;
-    };
-
     let payment = 0;
     let hours = 0;
     let sessionsCount = 0;
 
-    // Calculate totals from session records first
     filteredSessions.forEach(session => {
       const employee = employees.find(e => e.id === session.employee_id);
       if (!employee) return;
 
-      payment += session.total_payment || 0;
+      if (session.entry_type === 'adjustment') {
+        payment += session.total_payment || 0;
+        return;
+      }
 
       if (employee.employee_type === 'instructor') {
-        sessionsCount += session.sessions_count || 0;
         const service = services.find(s => s.id === session.service_id);
+        const rate = getRateForDate(employee.id, session.date, session.service_id).rate;
+        let sessionPay = 0;
+        if (service && service.payment_model === 'per_student') {
+          sessionPay = (session.sessions_count || 0) * (session.students_count || 0) * rate;
+        } else {
+          sessionPay = (session.sessions_count || 0) * rate;
+        }
+        payment += sessionPay;
+        sessionsCount += session.sessions_count || 0;
         if (service && service.duration_minutes) {
           hours += (service.duration_minutes / 60) * (session.sessions_count || 0);
         }
-      } else { // Hourly and Global
-        if (session.entry_type !== 'adjustment') {
-          hours += session.hours || 0;
-        }
+      } else if (employee.employee_type === 'hourly') {
+        const rate = getRateForDate(employee.id, session.date).rate;
+        payment += (session.hours || 0) * rate;
+        hours += session.hours || 0;
+      } else if (employee.employee_type === 'global') {
+        hours += session.hours || 0;
       }
     });
 
-    // Global base rule across full months in filter using all sessions
     const fromDate = new Date(filters.dateFrom);
     const toDate = new Date(filters.dateTo);
     const monthsInRange = eachMonthOfInterval({ start: startOfMonth(fromDate), end: endOfMonth(toDate) });
 
     const globals = employees.filter(e => e.employee_type === 'global');
     globals.forEach(emp => {
-      const monthsWithEntries = new Set(
-        (workSessions || [])
-          .filter(s => s.employee_id === emp.id && s.entry_type !== 'adjustment')
-          .filter(s => !emp.start_date || s.date >= emp.start_date)
-          .map(s => format(parseISO(s.date), 'yyyy-MM'))
-      );
-      let monthsCount = 0;
       monthsInRange.forEach(m => {
         const key = format(m, 'yyyy-MM');
-        if (monthsWithEntries.has(key)) monthsCount += 1;
+        const hasEntry = (workSessions || []).some(s =>
+          s.employee_id === emp.id &&
+          s.entry_type !== 'adjustment' &&
+          format(parseISO(s.date), 'yyyy-MM') === key &&
+          (!emp.start_date || s.date >= emp.start_date)
+        );
+        if (hasEntry) {
+          const baseRate = getRateForDate(emp.id, m).rate;
+          payment += baseRate;
+        }
       });
-      if (monthsCount > 0) payment += getBaseSalary(emp.id) * monthsCount;
     });
 
-    // Month-aware adjustments: include all adjustments that fall in months covered by the filter,
-    // even if their specific day is outside the exact from/to range. Avoid double-counting ones already included.
     const filteredIds = new Set(filteredSessions.map(s => s.id));
     const monthsSet = new Set(monthsInRange.map(m => format(m, 'yyyy-MM')));
     const extraAdjustmentsTotal = (workSessions || [])
@@ -277,10 +311,10 @@ export default function Reports() {
                 <TabsTrigger value="monthly">דוח חודשי</TabsTrigger>
                 <TabsTrigger value="payroll">דוח שכר</TabsTrigger>
               </TabsList>
-              <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} workSessions={workSessions} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} getRateForDate={getRateForDate} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
               <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} workSessions={workSessions} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} getRateForDate={getRateForDate} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} getRateForDate={getRateForDate} isLoading={isLoading} /></TabsContent>
             </Tabs>
           </CardContent>
         </Card>
