@@ -8,7 +8,6 @@ const COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#06B6D4'
 
 export default function ChartsOverview({ sessions, employees, isLoading, services, workSessions = [], getRateForDate }) {
   const [pieType, setPieType] = React.useState('count');
-
   const [trendType, setTrendType] = React.useState('payment');
   
   // Aggregate sessions by type for the pie chart (count vs time)
@@ -94,6 +93,7 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
         } else if (employee.employee_type === 'hourly') {
           const rate = getRateForDate(employee.id, sessionDate).rate;
           acc.sessionPayment += (session.hours || 0) * rate;
+
         }
       }
       return acc;
