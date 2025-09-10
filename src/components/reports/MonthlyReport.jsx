@@ -78,6 +78,7 @@ export default function MonthlyReport({ sessions, employees, services, rateHisto
 
     const activeGlobalEmployeeIdsInMonth = [...new Set(
       monthSessions
+        .filter(s => s.entry_type !== 'adjustment')
         .map(s => employees.find(e => e.id === s.employee_id))
         .filter(e => e && e.employee_type === 'global')
         .map(e => e.id)

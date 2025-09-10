@@ -179,7 +179,7 @@ export default function Reports() {
     globals.forEach(emp => {
       const monthsWithEntries = new Set(
         (workSessions || [])
-          .filter(s => s.employee_id === emp.id)
+          .filter(s => s.employee_id === emp.id && s.entry_type !== 'adjustment')
           .map(s => format(parseISO(s.date), 'yyyy-MM'))
       );
       let monthsCount = 0;

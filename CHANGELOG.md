@@ -13,7 +13,12 @@ All notable changes to this project will be documented in this file.
   - **Current Page Signal:** Have a color/signal of sort to tell within which page we are.
   - **Deployment in Web Hosting:** Deploying under thepcrunners.com domain, think of an option of showing the domain portal.havat-tut.co.il for Havat Tut's portal.
   - **Vacation Days and Bonuses (UI & Logic):** Implementing the user interface and logic for managing vacation days and bonuses for all employee types (the database table `LeaveBalances` is ready).
-  - **Check Possible Future Clash:** In TimeEntryForm.jsx there's   id: Math.random(), - does it mean that it randomly generate the ID? Does it make sure the ID doesn't already exist? What will happen if the ID exist? Will it fail or will it reroll?
+    - **Check Possible Future Clash:** In TimeEntryForm.jsx there's   id: Math.random(), - does it mean that it randomly generate the ID? Does it make sure the ID doesn't already exist? What will happen if the ID exist? Will it fail or will it reroll?
+
+## [2025-09-10]
+- Fixed ChartsOverview to include hours and salary adjustments for hourly and instructor employees.
+- Corrected PayrollSummary and ChartsOverview to derive session payments from rate history so non-global employees show accurate totals.
+- Applied month-aware logic in ChartsOverview and PayrollSummary so global salaries are added only when non-adjustment work exists and extra adjustments within the same months are included.
 
 ## [1.3.0] - 2025-09-09
  ## Added
