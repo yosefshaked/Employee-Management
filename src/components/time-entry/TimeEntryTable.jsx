@@ -27,7 +27,7 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
     const totals = {};
 
     employees.forEach(emp => {
-      totals[emp.id] = { hours: 0, sessions: 0, payment: 0, hasEntry: false };
+      totals[emp.id] = { hours: 0, sessions: 0, payment: 0, adjustments: 0, hasEntry: false };
     });
 
     workSessions.forEach(s => {
@@ -35,7 +35,7 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
       if (sessionDate >= start && sessionDate <= end && totals[s.employee_id]) {
         const empTotals = totals[s.employee_id];
         if (s.entry_type === 'adjustment') {
-          empTotals.payment += s.total_payment || 0;
+          empTotals.adjustments += s.total_payment || 0;
           return;
         }
         empTotals.hasEntry = true;
@@ -51,9 +51,16 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
     // For global employees, if they have any entry this month, show their monthly rate
     employees.forEach(emp => {
       const empTotals = totals[emp.id];
-      if (emp.employee_type === 'global' && empTotals.hasEntry) {
-        const { rate } = getRateForDate(emp.id, start);
-        empTotals.payment = rate;
+      if (!empTotals) return;
+      if (emp.employee_type === 'global') {
+        if (empTotals.hasEntry) {
+          const { rate } = getRateForDate(emp.id, start);
+          empTotals.payment = rate + empTotals.adjustments;
+        } else {
+          empTotals.payment = empTotals.adjustments;
+        }
+      } else {
+        empTotals.payment += empTotals.adjustments;
       }
     });
 
