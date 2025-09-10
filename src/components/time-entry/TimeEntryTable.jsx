@@ -34,6 +34,10 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
       const sessionDate = parseISO(s.date);
       if (sessionDate >= start && sessionDate <= end && totals[s.employee_id]) {
         const empTotals = totals[s.employee_id];
+        if (s.entry_type === 'adjustment') {
+          empTotals.payment += s.total_payment || 0;
+          return;
+        }
         empTotals.hasEntry = true;
         empTotals.payment += s.total_payment || 0;
         if (s.entry_type === 'hours') {
@@ -122,6 +126,10 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                 s.employee_id === emp.id &&
                                 format(parseISO(s.date), 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd')
                                 );
+                                const adjustments = dailySessions.filter(s => s.entry_type === 'adjustment');
+                                const regularSessions = dailySessions.filter(s => s.entry_type !== 'adjustment');
+                                const adjustmentTotal = adjustments.reduce((sum, s) => sum + (s.total_payment || 0), 0);
+
                                 let summaryText = '-';
                                 let summaryPayment = 0;
                                 let rateInfo = null; // Will hold the entire rate object
@@ -130,16 +138,16 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                 if (emp.employee_type === 'hourly' || emp.employee_type === 'global') {
                                 rateInfo = getRateForDate(emp.id, day);
                                 } else {
-                                showNoRateWarning = dailySessions.some(s => s.rate_used === 0);
+                                showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
                                 }
 
-                                if (dailySessions.length > 0) {
+                                if (regularSessions.length > 0) {
                                   if (emp.employee_type === 'instructor') {
-                                    summaryPayment = dailySessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
-                                    const sessionCount = dailySessions.reduce((sum, s) => sum + (s.sessions_count || 0), 0);
+                                    summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
+                                    const sessionCount = regularSessions.reduce((sum, s) => sum + (s.sessions_count || 0), 0);
                                     summaryText = `${sessionCount} מפגשים`;
                                   } else { // Hourly or Global
-                                    const hoursCount = dailySessions.reduce((sum, s) => sum + (s.hours || 0), 0);
+                                    const hoursCount = regularSessions.reduce((sum, s) => sum + (s.hours || 0), 0);
                                     summaryText = `${hoursCount.toFixed(1)} שעות`;
                                     if (emp.employee_type === 'hourly' && rateInfo?.rate > 0) {
                                       summaryPayment = hoursCount * rateInfo.rate;
@@ -166,6 +174,12 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
 
                                         {summaryPayment > 0 && (
                                           <div className="text-xs text-green-700">₪{summaryPayment.toLocaleString()}</div>
+                                        )}
+
+                                        {adjustmentTotal !== 0 && (
+                                          <div className={`text-xs ${adjustmentTotal > 0 ? 'text-green-700' : 'text-red-700'}`}>
+                                            {adjustmentTotal > 0 ? '+' : '-'}₪{Math.abs(adjustmentTotal).toLocaleString()}
+                                          </div>
                                         )}
                                     </TableCell>
                                     );
