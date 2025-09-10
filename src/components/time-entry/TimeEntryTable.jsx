@@ -182,7 +182,7 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                     <TableCell
                                         key={emp.id}
                                         className="text-center cursor-pointer hover:bg-blue-50 transition-colors p-2"
-                                        onClick={() => setEditingCell({ day, employee: emp, existingSessions: dailySessions })}
+                                        onClick={() => setEditingCell({ day, employee: emp, existingSessions: regularSessions })}
                                     >
                                         <div className="font-semibold text-sm">{summaryText}</div>
 
