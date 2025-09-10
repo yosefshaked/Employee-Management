@@ -76,16 +76,41 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     );
   }
 
-  const getEmployeeName = (employeeId) => {
-    const employee = employees.find(emp => emp.id === employeeId);
-    return employee ? employee.name : 'לא ידוע';
+  const calculateSessionPayment = (session) => {
+    const stored = parseFloat(session.total_payment);
+    if (!Number.isNaN(stored)) return stored;
+
+    const employee = employees.find(e => e.id === session.employee_id);
+    if (!employee) return 0;
+
+    if (session.entry_type === 'adjustment') {
+      return 0;
+    }
+
+    const rate = parseFloat(session.rate_used) || 0;
+
+    if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
+      return (parseFloat(session.hours) || 0) * rate;
+    }
+
+    if (employee.employee_type === 'instructor') {
+      const service = services.find(s => s.id === session.service_id);
+      const sessionsCount = parseInt(session.sessions_count, 10) || 0;
+      if (service && service.payment_model === 'per_student') {
+        const students = parseInt(session.students_count, 10) || 0;
+        return sessionsCount * students * rate;
+      }
+      return sessionsCount * rate;
+    }
+
+    return 0;
   };
 
   // Payment by employee (active employees only)
   const paymentByEmployee = employees.filter(e => e.is_active).map(employee => {
     const employeeSessions = sessions.filter(s => s.employee_id === employee.id);
     
-    let totalPayment = employeeSessions.reduce((sum, s) => sum + s.total_payment, 0);
+    let totalPayment = employeeSessions.reduce((sum, s) => sum + calculateSessionPayment(s), 0);
 
     // Add base salary for global employees
     if (employee.employee_type === 'global') {
@@ -121,7 +146,7 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       payment: totalPayment,
       sessions: employeeSessions.length
     };
-  }).filter(item => item.payment > 0);
+  }).filter(item => item.payment !== 0);
 
   // Monthly trend based on filtered range (fallback to last 6 months)
   let startDate, endDate;
@@ -149,7 +174,7 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       if (!employee || !employee.is_active) return;
 
       // Sum payment for all employees (hourly, instructor, global). Adjustments included.
-      payment += session.total_payment || 0;
+      payment += calculateSessionPayment(session);
 
       // Hours: for hours entries (not adjustments) or estimate for instructor sessions
       if (session.hours != null) {
