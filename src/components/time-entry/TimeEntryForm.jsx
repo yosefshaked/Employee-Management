@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,7 +34,7 @@ const calculateRowPayment = (row, employee, services, getRateForDate) => {
   return 0;
 };
 
-export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate, initialRows = null, selectedDate }) {
+export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate, initialRows = null, selectedDate, allowAddRow = true }) {
   
   const createNewRow = (dateToUse) => ({
     id: crypto.randomUUID(),
@@ -129,10 +129,12 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
         </AlertDescription>
       </Alert>
       
-      <div className="flex justify-between items-center pt-4">
-        <Button type="button" variant="outline" onClick={addRow}><Plus className="w-4 h-4 ml-2" />הוסף רישום</Button>
-        <Button type="submit" className="bg-gradient-to-r from-green-500 to-blue-500 text-white"><Save className="w-4 h-4 ml-2" />שמור רישומים</Button>
-      </div>
+        <div className={`flex ${allowAddRow ? 'justify-between' : 'justify-end'} items-center pt-4`}>
+          {allowAddRow && (
+            <Button type="button" variant="outline" onClick={addRow}><Plus className="w-4 h-4 ml-2" />הוסף רישום</Button>
+          )}
+          <Button type="submit" className="bg-gradient-to-r from-green-500 to-blue-500 text-white"><Save className="w-4 h-4 ml-2" />שמור רישומים</Button>
+        </div>
     </form>
   );
 }

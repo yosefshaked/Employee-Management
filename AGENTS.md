@@ -12,3 +12,6 @@
 ## Documentation
 - When editing files in `ProjectDoc/`, keep `Eng.md` and `Heb.md` in sync and update their version and last-updated fields.
 
+## Notes
+- WorkSessions inserts should omit `id` so the database can generate it; include `id` only when updating existing records.
+
