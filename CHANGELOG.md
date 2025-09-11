@@ -19,7 +19,8 @@ All notable changes to this project will be documented in this file.
   - **Time Entry Table:** Clicking a cell that contains only salary adjustments now opens a fresh hours entry instead of editing the adjustment.
   - **Initial Rate Start Date:** New employee rates now default to the employee's start date instead of today's date.
   - **Rate History Duplication:** Editing an employee only adds a new rate entry when the rate value changes.
-  - **Same-Day Rate Update:** Fixed an issue where updating an employee's rate twice on the same day showed success but kept the old rate.
+    - **Same-Day Rate Update:** Fixed an issue where updating an employee's rate twice on the same day showed success but kept the old rate.
+    - **Simultaneous Rate Edits:** Adjusted current-rate detection so editing historical rates and the current rate together creates a new entry.
 
 
 ## [2025-09-10]

@@ -91,9 +91,7 @@ export default function Employees() {
 
       let latestRates = {};
       if (!isNewEmployee) {
-        const history = rateHistory && rateHistory.length > 0
-          ? rateHistory
-          : rateHistories.filter(r => r.employee_id === employeeId);
+        const history = rateHistories.filter(r => r.employee_id === employeeId);
         history.forEach(r => {
           if (!latestRates[r.service_id] || new Date(r.effective_date) > new Date(latestRates[r.service_id].effective_date)) {
             latestRates[r.service_id] = r;
