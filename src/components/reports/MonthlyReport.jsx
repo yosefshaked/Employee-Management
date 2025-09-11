@@ -5,7 +5,7 @@ import { Calendar, TrendingUp } from "lucide-react";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { he } from "date-fns/locale";
 
-export default function MonthlyReport({ sessions, employees, services, workSessions = [], getRateForDate, visibleEmployeeIds, dateFrom, dateTo, isLoading }) {
+export default function MonthlyReport({ sessions, employees, services, workSessions = [], getRateForDate, scopedEmployeeIds, dateFrom, dateTo, isLoading }) {
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -84,7 +84,7 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
       })
       .reduce((sum, s) => sum + (s.total_payment || 0), 0);
 
-    const globalEmployees = employees.filter(e => e.employee_type === 'global' && visibleEmployeeIds.has(e.id));
+    const globalEmployees = employees.filter(e => e.employee_type === 'global' && scopedEmployeeIds.has(e.id));
     globalEmployees.forEach(emp => {
       const hasSession = monthAllSessions.some(s => s.employee_id === emp.id && s.entry_type !== 'adjustment');
       if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(monthStart))) {

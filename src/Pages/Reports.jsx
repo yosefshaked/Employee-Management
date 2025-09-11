@@ -176,6 +176,14 @@ export default function Reports() {
     [workSessions, visibleEmployeeIds]
   );
 
+  const scopedEmployeeIds = useMemo(() => {
+    const ids = new Set(filteredWorkSessions.map(ws => ws.employee_id));
+    if (filters.selectedEmployee) {
+      ids.add(filters.selectedEmployee);
+    }
+    return ids;
+  }, [filteredWorkSessions, filters.selectedEmployee]);
+
   const getTotals = () => {
     let payment = 0;
     let hours = 0;
@@ -217,7 +225,7 @@ export default function Reports() {
     const toDate = new Date(filters.dateTo);
     const monthsInRange = eachMonthOfInterval({ start: startOfMonth(fromDate), end: endOfMonth(toDate) });
 
-    const globals = employees.filter(e => e.employee_type === 'global' && visibleEmployeeIds.has(e.id));
+    const globals = employees.filter(e => e.employee_type === 'global' && scopedEmployeeIds.has(e.id));
     globals.forEach(emp => {
       monthsInRange.forEach(m => {
         const hasSession = filteredWorkSessions.some(ws =>
@@ -235,6 +243,7 @@ export default function Reports() {
     const filteredIds = new Set(filteredSessions.map(s => s.id));
     const monthsSet = new Set(monthsInRange.map(m => format(m, 'yyyy-MM')));
     const extraAdjustmentsTotal = filteredWorkSessions
+      .filter(s => scopedEmployeeIds.has(s.employee_id))
       .filter(s => s.entry_type === 'adjustment')
       .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM')))
       .filter(s => !filteredIds.has(s.id))
@@ -314,10 +323,10 @@ export default function Reports() {
                 <TabsTrigger value="monthly">דוח חודשי</TabsTrigger>
                 <TabsTrigger value="payroll">דוח שכר</TabsTrigger>
               </TabsList>
-              <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} workSessions={filteredWorkSessions} getRateForDate={getRateForDate} dateFrom={filters.dateFrom} dateTo={filters.dateTo} visibleEmployeeIds={visibleEmployeeIds} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} workSessions={filteredWorkSessions} getRateForDate={getRateForDate} dateFrom={filters.dateFrom} dateTo={filters.dateTo} scopedEmployeeIds={scopedEmployeeIds} isLoading={isLoading} /></TabsContent>
               <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} workSessions={filteredWorkSessions} getRateForDate={getRateForDate} visibleEmployeeIds={visibleEmployeeIds} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} workSessions={filteredWorkSessions} getRateForDate={getRateForDate} visibleEmployeeIds={visibleEmployeeIds} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} workSessions={filteredWorkSessions} getRateForDate={getRateForDate} scopedEmployeeIds={scopedEmployeeIds} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} workSessions={filteredWorkSessions} getRateForDate={getRateForDate} scopedEmployeeIds={scopedEmployeeIds} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
             </Tabs>
           </CardContent>
         </Card>

@@ -38,7 +38,7 @@ const InstructorDetailsRow = ({ details }) => (
   </TableRow>
 );
 
-export default function PayrollSummary({ sessions, employees, services, isLoading, workSessions = [], getRateForDate, visibleEmployeeIds, dateFrom, dateTo }) {
+export default function PayrollSummary({ sessions, employees, services, isLoading, workSessions = [], getRateForDate, scopedEmployeeIds, dateFrom, dateTo }) {
   const [expandedRows, setExpandedRows] = useState({});
 
   const EMPLOYEE_TYPE_CONFIG = {
@@ -78,7 +78,7 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
         }).map(m => format(m, 'yyyy-MM'))
       );
 
-      const employeesSummary = employees.filter(e => visibleEmployeeIds.has(e.id)).map(employee => {
+      const employeesSummary = employees.filter(e => scopedEmployeeIds.has(e.id)).map(employee => {
         const employeeSessions = sessions.filter(
           s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
         );

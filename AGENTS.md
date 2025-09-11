@@ -17,3 +17,5 @@
 - WorkSessions inserts should omit `id` so the database can generate it; include `id` only when updating existing records.
 - Global employees earn base pay only for months where they have at least one work session; include their salary only for months with activity.
 
+- When filtering reports, apply global base salaries only to employees included in the filtered results.
+

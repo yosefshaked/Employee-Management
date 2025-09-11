@@ -6,7 +6,7 @@ import { he } from "date-fns/locale";
 
 const COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#06B6D4'];
 
-export default function ChartsOverview({ sessions, employees, isLoading, services, workSessions = [], getRateForDate, dateFrom, dateTo, visibleEmployeeIds }) {
+export default function ChartsOverview({ sessions, employees, isLoading, services, workSessions = [], getRateForDate, dateFrom, dateTo, scopedEmployeeIds }) {
   const [pieType, setPieType] = React.useState('count');
   const [trendType, setTrendType] = React.useState('payment');
 
@@ -75,7 +75,7 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
   // No rate calculations needed for chart totals; rely on stored session payments
 
   // Payment by employee (active employees only)
-  const paymentByEmployee = employees.filter(e => e.is_active && visibleEmployeeIds.has(e.id)).map(employee => {
+  const paymentByEmployee = employees.filter(e => e.is_active && scopedEmployeeIds.has(e.id)).map(employee => {
     const employeeSessions = sessions.filter(
       s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
     );
@@ -217,7 +217,7 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       .reduce((sum, s) => sum + (s.total_payment || 0), 0);
     payment += extraAdjustments;
 
-    const globalEmployees = employees.filter(e => e.employee_type === 'global' && visibleEmployeeIds.has(e.id));
+    const globalEmployees = employees.filter(e => e.employee_type === 'global' && scopedEmployeeIds.has(e.id));
     globalEmployees.forEach(emp => {
       const hasSession = monthAllSessions.some(s => s.employee_id === emp.id && s.entry_type !== 'adjustment');
       if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(monthStart))) {
