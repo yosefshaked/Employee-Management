@@ -21,6 +21,7 @@ All notable changes to this project will be documented in this file.
   - **Rate History Duplication:** Editing an employee only adds a new rate entry when the rate value changes.
     - **Same-Day Rate Update:** Fixed an issue where updating an employee's rate twice on the same day showed success but kept the old rate.
     - **Simultaneous Rate Edits:** Adjusted current-rate detection so editing historical rates and the current rate together creates a new entry.
+    - **Duplicate Day Warning:** Prevented adding multiple rate changes for the same day and guided users to edit the existing entry instead.
 
 
 ## [2025-09-10]
