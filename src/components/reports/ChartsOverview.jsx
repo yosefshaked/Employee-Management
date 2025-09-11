@@ -6,9 +6,15 @@ import { he } from "date-fns/locale";
 
 const COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#06B6D4'];
 
-export default function ChartsOverview({ sessions, employees, isLoading, services, workSessions = [], getRateForDate }) {
+export default function ChartsOverview({ sessions, employees, isLoading, services, workSessions = [], getRateForDate, dateFrom, dateTo, visibleEmployeeIds }) {
   const [pieType, setPieType] = React.useState('count');
   const [trendType, setTrendType] = React.useState('payment');
+
+  const monthsInRange = React.useMemo(() => eachMonthOfInterval({
+    start: startOfMonth(parseISO(dateFrom)),
+    end: endOfMonth(parseISO(dateTo))
+  }), [dateFrom, dateTo]);
+  const monthsSet = React.useMemo(() => new Set(monthsInRange.map(m => format(m, 'yyyy-MM'))), [monthsInRange]);
   
   // Aggregate sessions by type for the pie chart (count vs time)
   // Must be declared before any early returns to preserve hook order
@@ -69,7 +75,7 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
   // No rate calculations needed for chart totals; rely on stored session payments
 
   // Payment by employee (active employees only)
-  const paymentByEmployee = employees.filter(e => e.is_active).map(employee => {
+  const paymentByEmployee = employees.filter(e => e.is_active && visibleEmployeeIds.has(e.id)).map(employee => {
     const employeeSessions = sessions.filter(
       s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
     );
@@ -99,8 +105,6 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       return acc;
     }, { sessionPayment: 0, totalSessions: 0, totalAdjustments: 0 });
 
-    const monthsSet = new Set(sessions.map(s => format(parseISO(s.date), 'yyyy-MM')));
-
     const filteredIds = new Set(employeeSessions.map(s => s.id));
     const extraAdjustments = (workSessions || [])
       .filter(
@@ -116,16 +120,9 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     let totalPayment = 0;
     if (employee.employee_type === 'global') {
       let baseTotal = 0;
-      monthsSet.forEach(m => {
-        const hasEntry = (workSessions || []).some(ws =>
-          ws.employee_id === employee.id &&
-          ws.entry_type !== 'adjustment' &&
-          format(parseISO(ws.date), 'yyyy-MM') === m &&
-          (!employee.start_date || ws.date >= employee.start_date)
-        );
-        if (hasEntry) {
-          const monthDate = parseISO(`${m}-01`);
-          baseTotal += getRateForDate(employee.id, monthDate).rate;
+      monthsInRange.forEach(m => {
+        if (!employee.start_date || parseISO(employee.start_date) <= endOfMonth(m)) {
+          baseTotal += getRateForDate(employee.id, m).rate;
         }
       });
       totalPayment = baseTotal + sessionTotals.totalAdjustments + extraAdjustments;
@@ -141,17 +138,7 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
   }).filter(item => item.payment !== 0);
 
   // Monthly trend based on filtered range (fallback to last 6 months)
-  let startDate, endDate;
-  if (sessions.length > 0) {
-    const dates = sessions.map(s => parseISO(s.date));
-    startDate = startOfMonth(new Date(Math.min(...dates)));
-    endDate = endOfMonth(new Date(Math.max(...dates)));
-  } else {
-    const now = new Date();
-    endDate = now;
-    startDate = new Date(now.getFullYear(), now.getMonth() - 5, 1);
-  }
-  const months = eachMonthOfInterval({ start: startDate, end: endDate });
+  const months = monthsInRange;
   const monthlyData = months.map(month => {
     const monthStart = startOfMonth(month);
     const monthEnd = endOfMonth(month);
@@ -228,18 +215,11 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       .reduce((sum, s) => sum + (s.total_payment || 0), 0);
     payment += extraAdjustments;
 
-    // Add base salary for active global employees who had non-adjustment activity this month
-    const activeGlobalEmployeeIdsInMonth = [...new Set(
-      monthAllSessions
-        .filter(s => s.entry_type !== 'adjustment')
-        .filter(s => {
-          const emp = employees.find(e => e.id === s.employee_id && e.is_active && e.employee_type === 'global');
-          return emp && (!emp.start_date || s.date >= emp.start_date);
-        })
-        .map(s => s.employee_id)
-    )];
-    activeGlobalEmployeeIdsInMonth.forEach(employeeId => {
-      payment += getRateForDate(employeeId, monthStart).rate;
+    const globalEmployees = employees.filter(e => e.employee_type === 'global' && visibleEmployeeIds.has(e.id));
+    globalEmployees.forEach(emp => {
+      if (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(monthStart)) {
+        payment += getRateForDate(emp.id, monthStart).rate;
+      }
     });
     if (typeof window !== 'undefined') {
       console.log('ChartsOverview - Counted instructor sessions for month', format(month, 'MMM yyyy', { locale: he }), countedSessions);

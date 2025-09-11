@@ -5,7 +5,7 @@ import { Calendar, TrendingUp } from "lucide-react";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { he } from "date-fns/locale";
 
-export default function MonthlyReport({ sessions, employees, services, workSessions = [], getRateForDate, isLoading }) {
+export default function MonthlyReport({ sessions, employees, services, workSessions = [], getRateForDate, visibleEmployeeIds, dateFrom, dateTo, isLoading }) {
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -16,17 +16,10 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
 
   const getEmployeeName = (employeeId) => employees.find(emp => emp.id === employeeId)?.name || 'לא ידוע';
   
-  // Logic to determine date range from filtered sessions or default to last 6 months
-  let startDate, endDate;
-  if (sessions.length > 0) {
-    const dates = sessions.map(s => parseISO(s.date));
-    startDate = new Date(Math.min(...dates));
-    endDate = new Date(Math.max(...dates));
-  } else {
-    endDate = new Date();
-    startDate = new Date(endDate.getFullYear(), endDate.getMonth() - 5, 1);
-  }
-  const months = eachMonthOfInterval({ start: startDate, end: endDate });
+  const months = eachMonthOfInterval({
+    start: startOfMonth(parseISO(dateFrom)),
+    end: endOfMonth(parseISO(dateTo))
+  });
 
   const monthlyData = months.map(month => {
     const monthStart = startOfMonth(month);
@@ -91,18 +84,11 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
       })
       .reduce((sum, s) => sum + (s.total_payment || 0), 0);
 
-    const activeGlobalEmployeeIdsInMonth = [...new Set(
-      monthAllSessions
-        .filter(s => s.entry_type !== 'adjustment')
-        .filter(s => {
-          const emp = employees.find(e => e.id === s.employee_id && e.employee_type === 'global');
-          return emp && (!emp.start_date || s.date >= emp.start_date);
-        })
-        .map(s => s.employee_id)
-    )];
-
-    activeGlobalEmployeeIdsInMonth.forEach(employeeId => {
-      sessionPayment += getRateForDate(employeeId, monthStart).rate;
+    const globalEmployees = employees.filter(e => e.employee_type === 'global' && visibleEmployeeIds.has(e.id));
+    globalEmployees.forEach(emp => {
+      if (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(monthStart)) {
+        sessionPayment += getRateForDate(emp.id, monthStart).rate;
+      }
     });
 
     const totalPayment = sessionPayment + adjustments + extraAdjustments;
@@ -128,8 +114,10 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
       }
       employeePayments[session.employee_id] = (employeePayments[session.employee_id] || 0) + amt;
     });
-    activeGlobalEmployeeIdsInMonth.forEach(employeeId => {
-      employeePayments[employeeId] = (employeePayments[employeeId] || 0) + getRateForDate(employeeId, monthStart).rate;
+    globalEmployees.forEach(emp => {
+      if (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(monthStart)) {
+        employeePayments[emp.id] = (employeePayments[emp.id] || 0) + getRateForDate(emp.id, monthStart).rate;
+      }
     });
     const topEmployeeId = Object.keys(employeePayments).reduce((a, b) => 
       employeePayments[a] > employeePayments[b] ? a : b, null

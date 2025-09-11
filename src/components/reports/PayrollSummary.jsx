@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { format, parseISO } from "date-fns";
+import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,7 +38,7 @@ const InstructorDetailsRow = ({ details }) => (
   </TableRow>
 );
 
-export default function PayrollSummary({ sessions, employees, services, isLoading, workSessions = [], getRateForDate }) {
+export default function PayrollSummary({ sessions, employees, services, isLoading, workSessions = [], getRateForDate, visibleEmployeeIds, dateFrom, dateTo }) {
   const [expandedRows, setExpandedRows] = useState({});
 
   const EMPLOYEE_TYPE_CONFIG = {
@@ -71,9 +71,14 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
     setExpandedRows(prev => ({...prev, [employeeId]: !prev[employeeId]}));
   };
 
-      const reportMonths = new Set(sessions.map(s => format(parseISO(s.date), 'yyyy-MM')));
+      const reportMonths = new Set(
+        eachMonthOfInterval({
+          start: startOfMonth(parseISO(dateFrom)),
+          end: endOfMonth(parseISO(dateTo))
+        }).map(m => format(m, 'yyyy-MM'))
+      );
 
-      const employeesSummary = employees.map(employee => {
+      const employeesSummary = employees.filter(e => visibleEmployeeIds.has(e.id)).map(employee => {
         const employeeSessions = sessions.filter(
           s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
         );
@@ -109,10 +114,8 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
         let finalPayment = 0;
         let baseSalary = null;
 
-        // Build month set covered by the current filtered sessions range
         const monthsSet = reportMonths;
 
-        // Month-aware extra adjustments (outside exact range but within same months)
         const filteredIds = new Set(employeeSessions.map(s => s.id));
         const extraAdjustments = (workSessions || [])
           .filter(
@@ -127,20 +130,10 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
 
         if (employee.employee_type === 'global') {
           baseSalary = getRateForDate(employee.id, new Date()).rate;
-          const employeeMonthsAll = new Set(
-            (workSessions || [])
-              .filter(
-                s =>
-                  s.employee_id === employee.id &&
-                  s.entry_type !== 'adjustment' &&
-                  (!employee.start_date || s.date >= employee.start_date)
-              )
-              .map(s => format(parseISO(s.date), 'yyyy-MM'))
-          );
           let baseTotal = 0;
           monthsSet.forEach(m => {
-            if (employeeMonthsAll.has(m)) {
-              const monthDate = parseISO(`${m}-01`);
+            const monthDate = parseISO(`${m}-01`);
+            if (!employee.start_date || parseISO(employee.start_date) <= endOfMonth(monthDate)) {
               baseTotal += getRateForDate(employee.id, monthDate).rate;
             }
           });

@@ -15,4 +15,5 @@
 
 ## Notes
 - WorkSessions inserts should omit `id` so the database can generate it; include `id` only when updating existing records.
+- Global employees receive monthly base pay even without recorded sessions; include their base salary whenever those employees are part of the filtered set.
 
