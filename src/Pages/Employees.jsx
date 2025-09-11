@@ -84,17 +84,17 @@ export default function Employees() {
 
       // Step 2: Prepare the rate updates for the 'RateHistory' table only when rates change
       const rateUpdates = [];
+      const today = new Date().toISOString().split('T')[0];
       const effective_date = isNewEmployee
-        ? (employeeDetails.start_date || new Date().toISOString().split('T')[0])
-        : new Date().toISOString().split('T')[0];
+        ? (employeeDetails.start_date || today)
+        : today;
       const notes = isNewEmployee ? 'תעריף התחלתי' : 'שינוי תעריף';
 
       let latestRates = {};
+      let existingHistory = [];
       if (!isNewEmployee) {
-        const history = rateHistory && rateHistory.length > 0
-          ? rateHistory
-          : rateHistories.filter(r => r.employee_id === employeeId);
-        history.forEach(r => {
+        existingHistory = rateHistory || rateHistories.filter(r => r.employee_id === employeeId);
+        existingHistory.forEach(r => {
           if (!latestRates[r.service_id] || new Date(r.effective_date) > new Date(latestRates[r.service_id].effective_date)) {
             latestRates[r.service_id] = r;
           }
@@ -108,6 +108,10 @@ export default function Employees() {
           ? parseFloat(latestRates[GENERIC_RATE_SERVICE_ID].rate)
           : null;
         if (!isNaN(rateValue) && (isNewEmployee || existingRate === null || rateValue !== existingRate)) {
+          if (existingHistory.some(r => r.service_id === GENERIC_RATE_SERVICE_ID && r.effective_date === today)) {
+            toast.error("כבר קיים שינוי תעריף להיום. ניתן לערוך אותו באזור היסטוריית התעריפים.");
+            return;
+          }
           rateUpdates.push({
             employee_id: employeeId,
             service_id: GENERIC_RATE_SERVICE_ID,
@@ -120,12 +124,16 @@ export default function Employees() {
 
       // Handle instructor employees
       if (employeeData.employee_type === 'instructor') {
-        Object.keys(serviceRates).forEach(serviceId => {
+        for (const serviceId of Object.keys(serviceRates)) {
           const rateValue = parseFloat(serviceRates[serviceId]);
           const existingRate = latestRates[serviceId]
             ? parseFloat(latestRates[serviceId].rate)
             : null;
           if (!isNaN(rateValue) && (isNewEmployee || existingRate === null || rateValue !== existingRate)) {
+            if (existingHistory.some(r => r.service_id === serviceId && r.effective_date === today)) {
+              toast.error("כבר קיים שינוי תעריף להיום. ניתן לערוך אותו באזור היסטוריית התעריפים.");
+              return;
+            }
             rateUpdates.push({
               employee_id: employeeId,
               service_id: serviceId,
@@ -134,7 +142,7 @@ export default function Employees() {
               notes,
             });
           }
-        });
+        }
       }
 
       // Step 3: Upsert all prepared rate updates into 'RateHistory'
@@ -145,11 +153,16 @@ export default function Employees() {
 
       // Step 3b: Handle manual rate history edits for existing employees
       if (!isNewEmployee && rateHistory) {
-        const entriesToUpsert = rateHistory.map(({ id, ...rest }) => ({
-          ...rest,
-          employee_id: employeeId,
-          ...(id ? { id } : {}),
-        }));
+        const rateUpdateKeys = new Set(
+          rateUpdates.map(r => `${r.service_id}-${r.effective_date}`)
+        );
+        const entriesToUpsert = rateHistory
+          .filter(r => !rateUpdateKeys.has(`${r.service_id}-${r.effective_date}`))
+          .map(({ id, ...rest }) => ({
+            ...rest,
+            employee_id: employeeId,
+            ...(id ? { id } : {}),
+          }));
         if (entriesToUpsert.length > 0) {
           const { error } = await supabase
             .from('RateHistory')
