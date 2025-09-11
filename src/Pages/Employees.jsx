@@ -82,18 +82,35 @@ export default function Employees() {
         toast.success("פרטי העובד עודכנו בהצלחה!");
       }
 
-      // Step 2: Prepare the rate updates for the 'RateHistory' table for ALL types
+      // Step 2: Prepare the rate updates for the 'RateHistory' table only when rates change
       const rateUpdates = [];
-      const effective_date = new Date().toISOString().split('T')[0];
+      const effective_date = isNewEmployee
+        ? (employeeDetails.start_date || new Date().toISOString().split('T')[0])
+        : new Date().toISOString().split('T')[0];
       const notes = isNewEmployee ? 'תעריף התחלתי' : 'שינוי תעריף';
+
+      let latestRates = {};
+      if (!isNewEmployee) {
+        const history = rateHistory && rateHistory.length > 0
+          ? rateHistory
+          : rateHistories.filter(r => r.employee_id === employeeId);
+        history.forEach(r => {
+          if (!latestRates[r.service_id] || new Date(r.effective_date) > new Date(latestRates[r.service_id].effective_date)) {
+            latestRates[r.service_id] = r;
+          }
+        });
+      }
 
       // Handle hourly and global employees
       if (employeeData.employee_type === 'hourly' || employeeData.employee_type === 'global') {
         const rateValue = parseFloat(current_rate);
-        if (!isNaN(rateValue)) {
+        const existingRate = latestRates[GENERIC_RATE_SERVICE_ID]
+          ? parseFloat(latestRates[GENERIC_RATE_SERVICE_ID].rate)
+          : null;
+        if (!isNaN(rateValue) && (isNewEmployee || existingRate === null || rateValue !== existingRate)) {
           rateUpdates.push({
             employee_id: employeeId,
-            service_id: GENERIC_RATE_SERVICE_ID, 
+            service_id: GENERIC_RATE_SERVICE_ID,
             effective_date,
             rate: rateValue,
             notes,
@@ -105,7 +122,10 @@ export default function Employees() {
       if (employeeData.employee_type === 'instructor') {
         Object.keys(serviceRates).forEach(serviceId => {
           const rateValue = parseFloat(serviceRates[serviceId]);
-          if (!isNaN(rateValue)) {
+          const existingRate = latestRates[serviceId]
+            ? parseFloat(latestRates[serviceId].rate)
+            : null;
+          if (!isNaN(rateValue) && (isNewEmployee || existingRate === null || rateValue !== existingRate)) {
             rateUpdates.push({
               employee_id: employeeId,
               service_id: serviceId,
