@@ -130,10 +130,19 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
 
         if (employee.employee_type === 'global') {
           baseSalary = getRateForDate(employee.id, new Date()).rate;
+          const monthsWithSessions = new Set(
+            (workSessions.length ? workSessions : sessions)
+              .filter(s =>
+                s.employee_id === employee.id &&
+                s.entry_type !== 'adjustment' &&
+                monthsSet.has(format(parseISO(s.date), 'yyyy-MM'))
+              )
+              .map(s => format(parseISO(s.date), 'yyyy-MM'))
+          );
           let baseTotal = 0;
           monthsSet.forEach(m => {
             const monthDate = parseISO(`${m}-01`);
-            if (!employee.start_date || parseISO(employee.start_date) <= endOfMonth(monthDate)) {
+            if (monthsWithSessions.has(m) && (!employee.start_date || parseISO(employee.start_date) <= endOfMonth(monthDate))) {
               baseTotal += getRateForDate(employee.id, monthDate).rate;
             }
           });

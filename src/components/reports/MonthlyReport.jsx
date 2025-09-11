@@ -86,7 +86,8 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
 
     const globalEmployees = employees.filter(e => e.employee_type === 'global' && visibleEmployeeIds.has(e.id));
     globalEmployees.forEach(emp => {
-      if (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(monthStart)) {
+      const hasSession = monthAllSessions.some(s => s.employee_id === emp.id && s.entry_type !== 'adjustment');
+      if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(monthStart))) {
         sessionPayment += getRateForDate(emp.id, monthStart).rate;
       }
     });
@@ -115,7 +116,8 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
       employeePayments[session.employee_id] = (employeePayments[session.employee_id] || 0) + amt;
     });
     globalEmployees.forEach(emp => {
-      if (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(monthStart)) {
+      const hasSession = monthAllSessions.some(s => s.employee_id === emp.id && s.entry_type !== 'adjustment');
+      if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(monthStart))) {
         employeePayments[emp.id] = (employeePayments[emp.id] || 0) + getRateForDate(emp.id, monthStart).rate;
       }
     });

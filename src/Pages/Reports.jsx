@@ -220,7 +220,13 @@ export default function Reports() {
     const globals = employees.filter(e => e.employee_type === 'global' && visibleEmployeeIds.has(e.id));
     globals.forEach(emp => {
       monthsInRange.forEach(m => {
-        if (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(m)) {
+        const hasSession = filteredWorkSessions.some(ws =>
+          ws.employee_id === emp.id &&
+          ws.entry_type !== 'adjustment' &&
+          parseISO(ws.date) >= startOfMonth(m) &&
+          parseISO(ws.date) <= endOfMonth(m)
+        );
+        if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(m))) {
           payment += getRateForDate(emp.id, m).rate;
         }
       });

@@ -119,9 +119,19 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
 
     let totalPayment = 0;
     if (employee.employee_type === 'global') {
+      const monthsWithSessions = new Set(
+        (workSessions.length ? workSessions : sessions)
+          .filter(s =>
+            s.employee_id === employee.id &&
+            s.entry_type !== 'adjustment' &&
+            monthsSet.has(format(parseISO(s.date), 'yyyy-MM'))
+          )
+          .map(s => format(parseISO(s.date), 'yyyy-MM'))
+      );
       let baseTotal = 0;
       monthsInRange.forEach(m => {
-        if (!employee.start_date || parseISO(employee.start_date) <= endOfMonth(m)) {
+        const key = format(m, 'yyyy-MM');
+        if (monthsWithSessions.has(key) && (!employee.start_date || parseISO(employee.start_date) <= endOfMonth(m))) {
           baseTotal += getRateForDate(employee.id, m).rate;
         }
       });
@@ -151,7 +161,6 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       return sessionDate >= monthStart && sessionDate <= monthEnd;
     });
     let payment = 0, hours = 0, sessionsCount = 0;
-    const countedSessions = [];
     monthSessions.forEach(session => {
       const employee = employees.find(e => e.id === session.employee_id);
       if (!employee || !employee.is_active) return;
@@ -194,13 +203,6 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
           hours += inc;
           sessionsCount += (session.sessions_count || 0);
         }
-        countedSessions.push({
-          id: session.id,
-          employee_id: session.employee_id,
-          date: session.date,
-          sessions_count: session.sessions_count,
-          service_id: session.service_id
-        });
       }
     });
 
@@ -217,13 +219,11 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
 
     const globalEmployees = employees.filter(e => e.employee_type === 'global' && visibleEmployeeIds.has(e.id));
     globalEmployees.forEach(emp => {
-      if (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(monthStart)) {
+      const hasSession = monthAllSessions.some(s => s.employee_id === emp.id && s.entry_type !== 'adjustment');
+      if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(monthStart))) {
         payment += getRateForDate(emp.id, monthStart).rate;
       }
     });
-    if (typeof window !== 'undefined') {
-      console.log('ChartsOverview - Counted instructor sessions for month', format(month, 'MMM yyyy', { locale: he }), countedSessions);
-    }
     return {
       month: format(month, 'MMM', { locale: he }),
       payment,
