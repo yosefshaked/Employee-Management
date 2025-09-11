@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isToday, parseISO } from "date-fns";
 import { he } from "date-fns/locale";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import TimeEntryForm from './TimeEntryForm'; // Assuming it's in the same folder
 
 export default function TimeEntryTable({ employees, workSessions, services, getRateForDate, onTableSubmit }) {
@@ -260,23 +261,46 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
             </DialogDescription>
             </DialogHeader>
             {editingCell && (
-            <TimeEntryForm
-                employee={editingCell.employee}
-                services={services}
-                initialRows={editingCell.existingSessions}
-                selectedDate={editingCell.day}
-                getRateForDate={getRateForDate}
-                
-                onSubmit={(updatedRows) => {
-                    onTableSubmit({
-                    employee: editingCell.employee,
-                    day: editingCell.day,
-                    updatedRows,
-                    existingSessions: editingCell.existingSessions,
-                    });
-                    setEditingCell(null);
-                }}
-            />
+              <Tabs defaultValue={editingCell.existingSessions.length ? 'edit' : 'add'}>
+                <TabsList className="grid w-full grid-cols-2 mb-4">
+                  <TabsTrigger value="add">הוספת רישום חדש</TabsTrigger>
+                  <TabsTrigger value="edit" disabled={!editingCell.existingSessions.length}>עריכת רישומים קיימים</TabsTrigger>
+                </TabsList>
+                <TabsContent value="add">
+                  <TimeEntryForm
+                    employee={editingCell.employee}
+                    services={services}
+                    selectedDate={editingCell.day}
+                    getRateForDate={getRateForDate}
+                    onSubmit={(updatedRows) => {
+                      onTableSubmit({
+                        employee: editingCell.employee,
+                        day: editingCell.day,
+                        updatedRows,
+                      });
+                      setEditingCell(null);
+                    }}
+                  />
+                </TabsContent>
+                <TabsContent value="edit">
+                  <TimeEntryForm
+                    employee={editingCell.employee}
+                    services={services}
+                    initialRows={editingCell.existingSessions}
+                    selectedDate={editingCell.day}
+                    getRateForDate={getRateForDate}
+                    allowAddRow={false}
+                    onSubmit={(updatedRows) => {
+                      onTableSubmit({
+                        employee: editingCell.employee,
+                        day: editingCell.day,
+                        updatedRows,
+                      });
+                      setEditingCell(null);
+                    }}
+                  />
+                </TabsContent>
+              </Tabs>
             )}
         </DialogContent>
         </Dialog>

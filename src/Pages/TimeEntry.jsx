@@ -148,7 +148,7 @@ export default function TimeEntry() {
   const handleTableSubmit = async ({ employee, day, updatedRows }) => {
     setIsLoading(true);
     try {
-      const sessionsToUpsert = updatedRows.map(row => {
+      const sessionsToProcess = updatedRows.map(row => {
         const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
           const hoursValue = parseFloat(row.hours);
           const studentsValue = parseInt(row.students_count, 10);
@@ -193,13 +193,14 @@ export default function TimeEntry() {
 
         // Build the final object for Supabase
         const sessionData = {
-            employee_id: employee.id,
-            date: format(row.date, 'yyyy-MM-dd'),
-            notes: row.notes || '',
-            rate_used: rateUsed,
-            total_payment: totalPayment,
+          employee_id: employee.id,
+          date: format(row.date, 'yyyy-MM-dd'),
+          notes: row.notes || '',
+          rate_used: rateUsed,
+          total_payment: totalPayment,
         };
-        if (!row.isNew) {
+
+        if (!row.isNew && row.id) {
           sessionData.id = row.id;
         }
 
@@ -221,22 +222,29 @@ export default function TimeEntry() {
 
       }).filter(Boolean);
 
-      if (sessionsToUpsert.includes('validation_error')) {
+      if (sessionsToProcess.includes('validation_error')) {
         setIsLoading(false);
         return; // Stop the entire submission process
       }
-      
-      if (sessionsToUpsert.length === 0) {
+
+      if (sessionsToProcess.length === 0) {
           toast.info("לא נמצאו רישומים חדשים או שינויים לשמירה.");
           setIsLoading(false);
           return;
       }
 
-      const { error } = await supabase.from('WorkSessions').upsert(sessionsToUpsert, {
-        onConflict: 'id',
-      });
+      const sessionsToInsert = sessionsToProcess.filter(s => !s.id);
+      const sessionsToUpdate = sessionsToProcess.filter(s => s.id);
 
-      if (error) throw error;
+      if (sessionsToInsert.length > 0) {
+        const { error: insertError } = await supabase.from('WorkSessions').insert(sessionsToInsert);
+        if (insertError) throw insertError;
+      }
+
+      if (sessionsToUpdate.length > 0) {
+        const { error: updateError } = await supabase.from('WorkSessions').upsert(sessionsToUpdate, { onConflict: 'id' });
+        if (updateError) throw updateError;
+      }
 
       toast.success(`הרישומים עודכנו בהצלחה!`);
       loadInitialData();
