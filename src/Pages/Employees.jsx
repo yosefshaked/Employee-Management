@@ -84,7 +84,9 @@ export default function Employees() {
 
       // Step 2: Prepare the rate updates for the 'RateHistory' table for ALL types
       const rateUpdates = [];
-      const effective_date = new Date().toISOString().split('T')[0];
+      const effective_date = isNewEmployee
+        ? (employeeDetails.start_date || new Date().toISOString().split('T')[0])
+        : new Date().toISOString().split('T')[0];
       const notes = isNewEmployee ? 'תעריף התחלתי' : 'שינוי תעריף';
 
       // Handle hourly and global employees

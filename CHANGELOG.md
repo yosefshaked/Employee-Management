@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file.
   - **Time Entry Table:** Salary adjustments are no longer included when editing sessions from the table view.
   - **Time Entry Table:** Monthly totals use current rate history so same-day rate changes are reflected immediately.
   - **Time Entry Table:** Clicking a cell that contains only salary adjustments now opens a fresh hours entry instead of editing the adjustment.
+  - **Initial Rate Start Date:** New employee rates now default to the employee's start date instead of today's date.
 
 
 ## [2025-09-10]
