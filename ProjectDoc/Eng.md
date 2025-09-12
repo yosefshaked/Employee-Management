@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.2.0**
-**Last Updated: 2025-09-12**
+**Version: 1.3.1**
+**Last Updated: 2025-09-13**
 
 ## 1. Vision & Purpose
 
@@ -53,8 +53,9 @@ Contains general information about each employee.
 | :--- | :--- | :--- | :--- |
 | `id` | `uuid` | Auto-generated unique identifier | **Primary Key** |
 | `name` | `text` | Employee's full name | Not NULL |
-| `employee_type`| `text` | Employee type ('hourly' or 'instructor') | Not NULL |
-| `current_rate` | `numeric` | General hourly rate (relevant **only** for hourly employees) | |
+| `employee_type`| `text` | Employee type ('hourly', 'instructor', 'global') | Not NULL |
+| `current_rate` | `numeric` | General hourly or monthly rate snapshot | |
+| `working_days` | `jsonb` | Array of working day codes (e.g., `["SUN","MON"]`) | Default: `["SUN","MON","TUE","WED","THU"]` |
 | `is_active` | `boolean`| Whether the employee is currently active | Default: `true` |
 | ... | ... | Additional fields: `employee_id`, `phone`, `email`, `start_date`, `notes` | |
 
@@ -91,7 +92,8 @@ The work log. Each row represents a completed work session.
 | `employee_id` | `uuid` | References the `Employees` table | **Foreign Key** |
 | `service_id` | `uuid` | References the `Services` table (for instructors) | **Foreign Key** |
 | `date` | `date` | The date the work was performed | Not NULL |
-| `hours` | `numeric` | Number of hours (for hourly employees) | |
+| `entry_type` | `text` | 'session', 'hours', 'adjustment', or 'paid_leave' | Not NULL |
+| `hours` | `numeric` | Number of hours or days (when relevant) | |
 | `sessions_count`| `int8` | Number of sessions (for instructors) | |
 | `students_count`| `int8` | Number of students (for `per_student` model) | |
 | `rate_used` | `numeric`| A "snapshot" of the rate used at the time of calculation | |
@@ -101,12 +103,24 @@ The work log. Each row represents a completed work session.
 
 - `rate_used` is loaded from `RateHistory` on each create/update. Instructors resolve it by `(employee_id, service_id, date)`; hourly and global employees resolve it by `(employee_id, date)`.
 - `service_id` is mandatory for instructor sessions. Saving is blocked if no matching rate exists for the date.
+- `effectiveWorkingDays(employee, month)` counts calendar days whose weekday exists in `employee.working_days`. If the result is `0`, saving is blocked.
 - `total_payment` is computed per row and stored:
   - Instructors: `sessions_count * students_count * rate_used` (or without students when not per-student).
   - Hourly employees: `hours * rate_used`.
-  - Global employees: `rate_used / daysInMonth(date)`.
+  - Global hours: `(monthly_rate / effectiveWorkingDays(employee, month)) * (days_count || 1)`.
+  - Paid leave: same daily rate as global hours, stored with `entry_type='paid_leave'` and `notes='paid_leave'`.
 - Monthly totals and reports sum `total_payment` from `WorkSessions` rows only; no external base salary is added.
-- Global employees are paid via daily prorated rows representing their monthly salary divided by the number of days in that month.
+- Unpaid absence = no row. Paid leave is explicitly recorded with an `entry_type='paid_leave'` row.
+
+### Multi-date Quick Entry UX
+
+Users can enable **"בחר תאריכים להזנה מרובה"** in the time-entry table to pick multiple date cells. After saving the first date, the app prompts: "להעתיק את מה שהזנת הרגע?". Confirming copies the values forward; declining opens a fresh form for the next date.
+
+### CSV Import (Hebrew Headers)
+
+An optional CSV paste modal accepts Hebrew headers and maps them to internal fields:
+`תאריך`→`date`, `סוג רישום`→`entry_type`, `שירות`→`service_name`, `שעות`→`hours`, `מספר שיעורים`→`sessions_count`, `מספר תלמידים`→`students_count`.
+Validated rows are inserted as standard `WorkSessions` records.
 
 ---
 

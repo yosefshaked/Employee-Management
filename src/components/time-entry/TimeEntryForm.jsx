@@ -6,9 +6,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Calendar as CalendarIcon, Save, Plus, Trash2 } from "lucide-react";
-import { format, getDaysInMonth } from "date-fns";
+import { format } from "date-fns";
 import { he } from "date-fns/locale";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 
 // This is our central calculation logic
 const calculateRowPayment = (row, employee, services, getRateForDate) => {
@@ -19,8 +20,13 @@ const calculateRowPayment = (row, employee, services, getRateForDate) => {
     return (parseFloat(row.hours) || 0) * rate;
   }
   if (employee.employee_type === 'global') {
-    const daysInMonth = getDaysInMonth(new Date(row.date));
-    return rate / daysInMonth;
+    try {
+      const dailyRate = calculateGlobalDailyRate(employee, row.date, rate);
+      const daysCount = row.entry_type === 'hours' ? (parseFloat(row.hours) || 1) : 1;
+      return dailyRate * daysCount;
+    } catch {
+      return 0;
+    }
   }
   if (employee.employee_type === 'instructor') {
     const service = services.find(s => s.id === row.service_id);
@@ -36,7 +42,7 @@ const calculateRowPayment = (row, employee, services, getRateForDate) => {
 };
 
 export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate, initialRows = null, selectedDate, allowAddRow = true }) {
-  
+
   const createNewRow = (dateToUse) => ({
     id: crypto.randomUUID(),
     isNew: true,
@@ -45,7 +51,8 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
     hours: '',
     sessions_count: '1',
     students_count: '',
-    notes: ''
+    notes: '',
+    entry_type: employee.employee_type === 'global' ? 'hours' : undefined,
   });
   
   const [rows, setRows] = useState(() => {
@@ -91,9 +98,18 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
             <div key={row.id} className="p-4 border rounded-lg bg-slate-50 relative space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1"><Label>תאריך</Label><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full justify-start text-right font-normal bg-white"><CalendarIcon className="ml-2 h-4 w-4" />{format(new Date(row.date), 'dd/MM/yyyy')}</Button></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={new Date(row.date)} onSelect={(date) => date && handleRowChange(row.id, 'date', format(date, 'yyyy-MM-dd'))} initialFocus locale={he} /></PopoverContent></Popover></div>
-                {(isHourlyOrGlobal) ? (
-                  <div className="space-y-1"><Label>שעות עבודה</Label><Input type="number" step="0.1" value={row.hours || ''} onChange={(e) => handleRowChange(row.id, 'hours', e.target.value)} required={employee.employee_type === 'hourly'} className="bg-white" /></div>
-                ) : (
+                {(employee.employee_type === 'hourly') && (
+                  <div className="space-y-1"><Label>שעות עבודה</Label><Input type="number" step="0.1" value={row.hours || ''} onChange={(e) => handleRowChange(row.id, 'hours', e.target.value)} required className="bg-white" /></div>
+                )}
+                {employee.employee_type === 'global' && (
+                  <>
+                    <div className="space-y-1"><Label>סוג יום</Label><Select value={row.entry_type} onValueChange={(v)=>handleRowChange(row.id,'entry_type',v)}><SelectTrigger className="bg-white"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="hours">יום רגיל</SelectItem><SelectItem value="paid_leave">חופשה בתשלום</SelectItem></SelectContent></Select></div>
+                    {row.entry_type === 'hours' && (
+                      <div className="space-y-1"><Label>מספר ימים</Label><Input type="number" step="1" value={row.hours || ''} onChange={(e) => handleRowChange(row.id, 'hours', e.target.value)} className="bg-white" /></div>
+                    )}
+                  </>
+                )}
+                {employee.employee_type === 'instructor' && (
                   <div className="space-y-1"><Label>שירות</Label><Select value={row.service_id} onValueChange={(serviceId) => handleRowChange(row.id, 'service_id', serviceId)} required><SelectTrigger className="bg-white"><SelectValue placeholder="בחר שירות..." /></SelectTrigger><SelectContent>{services.map(s => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}</SelectContent></Select></div>
                 )}
               </div>

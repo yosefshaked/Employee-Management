@@ -19,6 +19,7 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
   
   const getServiceName = (session) => {
     const employee = getEmployee(session.employee_id);
+    if (session.entry_type === 'paid_leave') return 'חופשה בתשלום';
     if (employee?.employee_type === 'hourly' || employee?.employee_type === 'global') return 'שעות עבודה';
     const service = services.find(s => s.id === session.service_id);
     return service ? service.name : 'שירות לא ידוע';

@@ -1,7 +1,7 @@
 # תיק פרויקט: מערכת ניהול שכר ועובדים
 
-**גרסה: 1.1.0**
-**תאריך עדכון אחרון: 2025-09-10**
+**גרסה: 1.3.1**
+**תאריך עדכון אחרון: 2025-09-13**
 
 ## 1. חזון ומטרה
 
@@ -53,8 +53,9 @@
 | :--- | :--- | :--- | :--- |
 | `id` | `uuid` | מזהה ייחודי אוטומטי | **Primary Key** |
 | `name` | `text` | שם מלא של העובד | Not NULL |
-| `employee_type`| `text` | סוג עובד ('hourly' או 'instructor') | Not NULL |
-| `current_rate`| `numeric`| תעריף שעתי כללי (רלוונטי **רק** לעובדים שעתיים) | |
+| `employee_type`| `text` | סוג עובד ('hourly', 'instructor', 'global') | Not NULL |
+| `current_rate`| `numeric`| תעריף שעתי או חודשי נוכחי | |
+| `working_days` | `jsonb` | מערך של ימי עבודה (למשל `["SUN","MON"]`) | ברירת מחדל: `["SUN","MON","TUE","WED","THU"]` |
 | `is_active` | `boolean`| האם העובד פעיל כרגע | Default: `true` |
 | ... | ... | שדות נוספים: `employee_id`, `phone`, `email`, `start_date`, `notes` | |
 
@@ -91,7 +92,8 @@
 | `employee_id` | `uuid` | מצביע לטבלת `Employees` | **Foreign Key** |
 | `service_id` | `uuid` | מצביע לטבלת `Services` (למדריכים) | **Foreign Key** |
 | `date` | `date` | תאריך ביצוע העבודה | Not NULL |
-| `hours` | `numeric` | מספר שעות (לעובדים שעתיים) | |
+| `entry_type` | `text` | 'session', 'hours', 'adjustment', 'paid_leave' | Not NULL |
+| `hours` | `numeric` | מספר שעות או ימים (כאשר רלוונטי) | |
 | `sessions_count`| `int8` | מספר מפגשים (למדריכים) | |
 | `students_count`| `int8` | מספר תלמידים (למודל `per_student`) | |
 | `rate_used` | `numeric`| "תמונת מצב" של התעריף שהיה בשימוש בזמן החישוב | |
@@ -99,14 +101,26 @@
 
 #### כללי חישוב ב-WorkSessions
 
-- `rate_used` נטען מטבלת `RateHistory` בכל יצירה או עדכון. למדריכים הוא נקבע לפי `(employee_id, service_id, date)` ולעובדים שעתיים או גלובליים לפי `(employee_id, date)`.
+- `rate_used` נטען מטבלת `RateHistory` בכל יצירה או עדכון. מדריכים מחשבים לפי `(employee_id, service_id, date)`; עובדים שעתיים וגלובליים לפי `(employee_id, date)`.
 - עבור רישומי מדריכים `service_id` הוא חובה. אם אין תעריף תקף לתאריך – הפעולה נחסמת עם הודעת שגיאה.
+- `effectiveWorkingDays(employee, month)` סופר את ימי החודש בהם היום בשבוע כלול ב-`employee.working_days`. אם התוצאה היא `0` – השמירה נחסמת עם הודעה ברורה.
 - `total_payment` מחושב ונשמר בכל שורה:
   - מדריכים: `sessions_count * students_count * rate_used` (או ללא תלמידים כאשר התשלום אינו פר תלמיד).
   - עובדים שעתיים: `hours * rate_used`.
-  - עובדים גלובליים: `rate_used / daysInMonth(date)`.
+  - עובדים גלובליים: `(rate_used / effectiveWorkingDays(employee, month)) * (days_count || 1)`.
+  - חופשה בתשלום: אותו תעריף יומי כמו לעובד גלובלי, נשמר עם `entry_type='paid_leave'` ו-`notes='paid_leave'`.
 - סיכומי חודש ודוחות מתבססים אך ורק על סכימת `total_payment` משורות `WorkSessions` ללא תוספות ידניות.
-- עובדים גלובליים מקבלים תשלום יומי יחסי לשכר החודשי (שכר חודשי חלקי מספר הימים בחודש).
+- היעדרות ללא תשלום = אין שורה. חופשה בתשלום נרשמת כשורה נפרדת מסוג `paid_leave`.
+
+### מצב הזנה מרובה
+
+ניתן להפעיל מצב **"בחר תאריכים להזנה מרובה"** בטבלת ההזנה ולסמן מספר תאים. לאחר הזנת התאריך הראשון תופיע שאלה: "להעתיק את מה שהזנת הרגע?". בחירה ב-"כן" תעתיק את הערכים ליום הבא; בחירה ב-"לא" תפתח טופס ריק.
+
+### ייבוא CSV בעברית
+
+מודל הדבקת CSV (אופציונלי) מקבל כותרות בעברית וממפה אותן לשדות הפנימיים:
+`תאריך`→`date`, `סוג רישום`→`entry_type`, `שירות`→`service_name`, `שעות`→`hours`, `מספר שיעורים`→`sessions_count`, `מספר תלמידים`→`students_count`.
+השורות עוברות ולידציה ונשמרות כרגיל בטבלת `WorkSessions`.
 
 ---
 

@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { format, getDaysInMonth } from "date-fns";
+import { format } from "date-fns";
+import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -131,7 +132,18 @@ export default function TimeEntry() {
         if (employee.employee_type === 'hourly') {
           totalPayment = (parseFloat(row.hours) || 0) * rateUsed;
         } else if (employee.employee_type === 'global') {
-          totalPayment = rateUsed / getDaysInMonth(new Date(row.date));
+          try {
+            const dailyRate = calculateGlobalDailyRate(employee, row.date, rateUsed);
+            const daysCount = row.entry_type === 'hours' ? (parseFloat(row.hours) || 1) : 1;
+            if (row.entry_type === 'hours' && daysCount <= 0) {
+              toast.error("יש להזין מספר ימים גדול מ-0.", { duration: 15000 });
+              return null;
+            }
+            totalPayment = dailyRate * daysCount;
+          } catch (err) {
+            toast.error(err.message, { duration: 15000 });
+            return null;
+          }
         } else {
           const service = services.find(s => s.id === row.service_id);
           if (!service) return null;
@@ -142,17 +154,19 @@ export default function TimeEntry() {
           }
         }
 
-        const entryType = isHourlyOrGlobal ? 'hours' : 'session';
+        const entryType = employee.employee_type === 'global'
+          ? row.entry_type
+          : (employee.employee_type === 'hourly' ? 'hours' : 'session');
 
         return {
           employee_id: employee.id,
           date: row.date,
           entry_type: entryType,
-          service_id: isHourlyOrGlobal ? null : row.service_id,
-          hours: isHourlyOrGlobal ? (parseFloat(row.hours) || null) : null,
+          service_id: (employee.employee_type === 'instructor') ? row.service_id : null,
+          hours: employee.employee_type === 'hourly' ? (parseFloat(row.hours) || null) : (employee.employee_type === 'global' && entryType === 'hours' ? (parseFloat(row.hours) || null) : null),
           sessions_count: employee.employee_type === 'instructor' ? (parseInt(row.sessions_count) || null) : null,
           students_count: employee.employee_type === 'instructor' ? (parseInt(row.students_count) || null) : null,
-          notes: row.notes,
+          notes: entryType === 'paid_leave' ? 'paid_leave' : row.notes,
           rate_used: rateUsed,
           total_payment: totalPayment,
         };
@@ -214,7 +228,18 @@ export default function TimeEntry() {
         if (employee.employee_type === 'hourly') {
           totalPayment = (parseFloat(row.hours) || 0) * rateUsed;
         } else if (employee.employee_type === 'global') {
-          totalPayment = rateUsed / getDaysInMonth(day);
+          try {
+            const dailyRate = calculateGlobalDailyRate(employee, day, rateUsed);
+            const daysCount = row.entry_type === 'hours' ? (parseFloat(row.hours) || 1) : 1;
+            if (row.entry_type === 'hours' && daysCount <= 0) {
+              toast.error("יש להזין מספר ימים גדול מ-0.", { duration: 15000 });
+              return 'validation_error';
+            }
+            totalPayment = dailyRate * daysCount;
+          } catch (err) {
+            toast.error(err.message, { duration: 15000 });
+            return 'validation_error';
+          }
         } else {
           const service = services.find(s => s.id === row.service_id);
           if (!service) return null;
@@ -228,7 +253,7 @@ export default function TimeEntry() {
         const sessionData = {
           employee_id: employee.id,
           date: format(row.date, 'yyyy-MM-dd'),
-          notes: row.notes || '',
+          notes: row.entry_type === 'paid_leave' ? 'paid_leave' : (row.notes || ''),
           rate_used: rateUsed,
           total_payment: totalPayment,
         };
@@ -237,10 +262,16 @@ export default function TimeEntry() {
           sessionData.id = row.id;
         }
 
-        if (isHourlyOrGlobal) {
+        if (employee.employee_type === 'hourly') {
           sessionData.entry_type = 'hours';
           sessionData.hours = parseFloat(row.hours) || 0;
           sessionData.service_id = GENERIC_RATE_SERVICE_ID;
+          sessionData.sessions_count = null;
+          sessionData.students_count = null;
+        } else if (employee.employee_type === 'global') {
+          sessionData.entry_type = row.entry_type;
+          sessionData.hours = row.entry_type === 'hours' ? (parseFloat(row.hours) || null) : null;
+          sessionData.service_id = null;
           sessionData.sessions_count = null;
           sessionData.students_count = null;
         } else {
@@ -250,7 +281,7 @@ export default function TimeEntry() {
           sessionData.sessions_count = parseInt(row.sessions_count, 10) || 1;
           sessionData.students_count = parseInt(row.students_count, 10) || null;
         }
-         
+
         return sessionData;
 
       }).filter(Boolean);
