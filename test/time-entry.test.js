@@ -1,35 +1,48 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { calculateGlobalDailyRate } from '../src/lib/payroll.js';
+import { copyFromPrevious, fillDown } from '../src/components/time-entry/multiDateUtils.js';
+import { useTimeEntry } from '../src/components/time-entry/useTimeEntry.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
-describe('multi-date row creation', () => {
-  it('creates rows per employee and date', () => {
-    const employees = ['e1','e2'];
-    const dates = ['2024-02-01','2024-02-02','2024-02-03'];
-    const rows = [];
-    for (const emp of employees) {
-      for (const d of dates) {
-        rows.push({ employee_id: emp, date: d });
-      }
-    }
-    assert.equal(rows.length, employees.length * dates.length);
+describe('multi-date save', () => {
+  it('creates a WorkSessions row for each employee-date combination', async () => {
+    const employees = [
+      { id: 'e1', employee_type: 'hourly' },
+      { id: 'e2', employee_type: 'hourly' }
+    ];
+    const services = [];
+    const dates = [new Date('2024-02-01'), new Date('2024-02-02')];
+    const rows = employees.flatMap(emp => dates.map(d => ({
+      employee_id: emp.id,
+      date: d.toISOString().slice(0,10),
+      entry_type: 'hours',
+      hours: '1'
+    })));
+    const fakeSupabase = { from: () => ({ insert: async () => ({}) }) };
+    const { saveRows } = useTimeEntry({ employees, services, getRateForDate: () => ({ rate: 100 }), supabaseClient: fakeSupabase });
+    const inserted = await saveRows(rows);
+    assert.equal(inserted.length, employees.length * dates.length);
   });
 });
 
-describe('copy-forward gating', () => {
-  const shouldPromptCopy = (selectedDates, selectedEmployees) => selectedDates.length * selectedEmployees.length > 1;
-  it('single date does not prompt', () => {
-    assert.equal(shouldPromptCopy(['2024-02-01'], ['e1']), false);
+describe('copy and fill utilities', () => {
+  it('copyFromPrevious copies only to current row', () => {
+    const rows = [{ hours: '1' }, { hours: '' }];
+    const result = copyFromPrevious(rows, 1, 'hours');
+    assert.equal(result[1].hours, '1');
   });
-  it('multi date prompts', () => {
-    assert.equal(shouldPromptCopy(['2024-02-01','2024-02-02'], ['e1']), true);
+  it('fillDown fills empty rows from first', () => {
+    const rows = [{ sessions_count: '2' }, { sessions_count: '' }, { sessions_count: '3' }];
+    const result = fillDown(rows, 'sessions_count');
+    assert.equal(result[1].sessions_count, '2');
+    assert.equal(result[2].sessions_count, '3');
   });
 });
 
 describe('global daily rate ignores hours', () => {
-  it('ignores hours when computing total payment', () => {
+  it('uses daily rate regardless of hours input', () => {
     const emp = { working_days: ['SUN','MON','TUE','WED','THU'] };
     const monthlyRate = 3000;
     const dailyRate = calculateGlobalDailyRate(emp, new Date('2024-02-05'), monthlyRate);
@@ -38,23 +51,9 @@ describe('global daily rate ignores hours', () => {
   });
 });
 
-describe('no days_count references', () => {
-  it('TimeEntryForm has no days_count', () => {
-    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'), 'utf8');
-    assert(!content.includes('days_count'));
-  });
-});
-
-describe('paid_leave counted like global day', () => {
-  it('totals paid leave like regular day', () => {
-    const emp = { working_days: ['SUN','MON','TUE','WED','THU'] };
-    const monthlyRate = 3000;
-    const dailyRate = calculateGlobalDailyRate(emp, new Date('2024-02-05'), monthlyRate);
-    const rows = [
-      { entry_type: 'hours', total_payment: dailyRate },
-      { entry_type: 'paid_leave', total_payment: dailyRate },
-    ];
-    const total = rows.reduce((sum, r) => sum + r.total_payment, 0);
-    assert.equal(total, dailyRate * 2);
+describe('no days text in table for globals', () => {
+  it('TimeEntryTable does not contain " ימים"', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryTable.jsx'), 'utf8');
+    assert(!content.includes(' ימים'));
   });
 });

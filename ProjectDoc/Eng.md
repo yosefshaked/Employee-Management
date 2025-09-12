@@ -1,6 +1,6 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.3.3**
+**Version: 1.3.4**
 **Last Updated: 2025-09-12**
 
 ## 1. Vision & Purpose
@@ -114,7 +114,8 @@ The work log. Each row represents a completed work session.
 
 ### Multi-date Quick Entry UX
 
-Users can enable **"בחר תאריכים להזנה מרובה"** in the time-entry table to select multiple dates and optionally filter employees via a popover list. A toolbar shows the chosen dates and an **"העתק מהתאריך הקודם"** button to copy values forward. The copy prompt appears only when advancing between dates in multi-date mode.
+Users can enable **"בחר תאריכים להזנה מרובה"** in the time-entry table to select multiple dates and employees. Clicking **"הזן"** opens a modal listing all selected dates as stacked mini-forms—one row per date and employee. Each field has an **"העתק מהרישום הקודם"** button to copy from the previous row, and top-level **"העתק מהראשון לכל השורות"** controls fill empty values down from the first row.
+Global employees see an hours field for reference only and a toggle between regular day and paid leave; pay is still one daily rate per row.
 
 ### Hebrew CSV Import
 
