@@ -7,7 +7,7 @@ import { getProratedBaseSalary } from "@/lib/salaryUtils";
 
 const COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#06B6D4'];
 
-export default function ChartsOverview({ sessions, employees, isLoading, services, workSessions = [], getRateForDate, dateFrom, dateTo, scopedEmployeeIds, rateHistories = [] }) {
+export default function ChartsOverview({ sessions, employees, isLoading, services, getRateForDate, dateFrom, dateTo, scopedEmployeeIds, rateHistories = [] }) {
   const [pieType, setPieType] = React.useState('count');
   const [trendType, setTrendType] = React.useState('payment');
 
@@ -15,7 +15,6 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     start: startOfMonth(parseISO(dateFrom)),
     end: endOfMonth(parseISO(dateTo))
   }), [dateFrom, dateTo]);
-  const monthsSet = React.useMemo(() => new Set(monthsInRange.map(m => format(m, 'yyyy-MM'))), [monthsInRange]);
   
   // Aggregate sessions by type for the pie chart (count vs time)
   // Must be declared before any early returns to preserve hook order
@@ -106,26 +105,13 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       return acc;
     }, { sessionPayment: 0, totalSessions: 0, totalAdjustments: 0 });
 
-    const filteredIds = new Set(employeeSessions.map(s => s.id));
-    const extraAdjustments = (workSessions || [])
-      .filter(
-        s =>
-          s.employee_id === employee.id &&
-          s.entry_type === 'adjustment' &&
-          (!employee.start_date || s.date >= employee.start_date)
-      )
-      .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM')))
-      .filter(s => !filteredIds.has(s.id))
-      .reduce((sum, s) => sum + (s.total_payment || 0), 0);
-
     let totalPayment = 0;
     if (employee.employee_type === 'global') {
       const monthsWithSessions = new Set(
-        (workSessions.length ? workSessions : sessions)
+        sessions
           .filter(s =>
             s.employee_id === employee.id &&
-            s.entry_type !== 'adjustment' &&
-            monthsSet.has(format(parseISO(s.date), 'yyyy-MM'))
+            s.entry_type !== 'adjustment'
           )
           .map(s => format(parseISO(s.date), 'yyyy-MM'))
       );
@@ -138,9 +124,9 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
           baseTotal += getProratedBaseSalary(employee, monthStart, monthEnd, rateHistories);
         }
       });
-      totalPayment = baseTotal + sessionTotals.totalAdjustments + extraAdjustments;
+      totalPayment = baseTotal + sessionTotals.totalAdjustments;
     } else {
-      totalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments + extraAdjustments;
+      totalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments;
     }
 
     return {
@@ -156,10 +142,6 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     const monthStart = startOfMonth(month);
     const monthEnd = endOfMonth(month);
     const monthSessions = sessions.filter(session => {
-      const sessionDate = parseISO(session.date);
-      return sessionDate >= monthStart && sessionDate <= monthEnd;
-    });
-    const monthAllSessions = (workSessions.length ? workSessions : sessions).filter(session => {
       const sessionDate = parseISO(session.date);
       return sessionDate >= monthStart && sessionDate <= monthEnd;
     });
@@ -209,20 +191,9 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       }
     });
 
-    // Include adjustments outside the filtered range but within this month
-    const monthSessionIds = new Set(monthSessions.map(s => s.id));
-    const extraAdjustments = monthAllSessions
-      .filter(s => s.entry_type === 'adjustment' && !monthSessionIds.has(s.id))
-      .filter(s => {
-        const emp = employees.find(e => e.id === s.employee_id);
-        return !emp || !emp.start_date || s.date >= emp.start_date;
-      })
-      .reduce((sum, s) => sum + (s.total_payment || 0), 0);
-    payment += extraAdjustments;
-
     const globalEmployees = employees.filter(e => e.employee_type === 'global' && scopedEmployeeIds.has(e.id));
     globalEmployees.forEach(emp => {
-      const hasSession = monthAllSessions.some(s => s.employee_id === emp.id && s.entry_type !== 'adjustment');
+      const hasSession = monthSessions.some(s => s.employee_id === emp.id && s.entry_type !== 'adjustment');
       if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= monthEnd)) {
         payment += getProratedBaseSalary(emp, monthStart, monthEnd, rateHistories);
       }
