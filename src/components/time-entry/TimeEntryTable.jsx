@@ -8,7 +8,7 @@ import { he } from "date-fns/locale";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import TimeEntryForm from './TimeEntryForm'; // Assuming it's in the same folder
-import CsvImportModal from './CsvImportModal.jsx';
+import CsvImportModal from '@/components/import/ImportCsvModal.jsx';
 import EmployeePicker from '../employees/EmployeePicker.jsx';
 import { MultiDateProvider, useMultiDate } from './MultiDateContext.jsx';
 function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported }) {

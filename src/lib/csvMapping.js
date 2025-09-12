@@ -59,3 +59,58 @@ export function parseHebrewCsv(text, services = []) {
   }
   return rows;
 }
+
+import { calculateGlobalDailyRate } from './payroll.js';
+
+const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+
+export function validateImportRow(row, employee, services, getRateForDate) {
+  const errors = [...row.errors];
+  const serviceIdForRate = (employee.employee_type === 'hourly' || employee.employee_type === 'global') ? GENERIC_RATE_SERVICE_ID : row.service_id;
+  if (row.entry_type === 'paid_leave' && employee.employee_type !== 'global') {
+    errors.push('paid_leave only for global employees');
+  }
+  const { rate: rateUsed, reason } = getRateForDate(employee.id, row.date, serviceIdForRate);
+  if (!rateUsed) {
+    errors.push(reason || 'לא נמצא תעריף');
+  }
+  let totalPayment = 0;
+  if (errors.length === 0) {
+    if (row.entry_type === 'session') {
+      if (!row.service_id) {
+        errors.push('service_id required');
+      } else {
+        const service = services.find(s => s.id === row.service_id);
+        if (service?.payment_model === 'per_student') {
+          const students = row.students_count;
+          if (!students) errors.push(`חובה להזין מספר תלמידים (גדול מ-0) עבור "${service.name}"`);
+          else totalPayment = (row.sessions_count || 1) * students * rateUsed;
+        } else {
+          totalPayment = (row.sessions_count || 1) * rateUsed;
+        }
+      }
+    } else if (row.entry_type === 'hours') {
+      if (employee.employee_type === 'hourly') {
+        if (!row.hours) errors.push('hours required');
+        else totalPayment = row.hours * rateUsed;
+      } else {
+        try {
+          const dailyRate = calculateGlobalDailyRate(employee, row.date, rateUsed);
+          totalPayment = dailyRate;
+        } catch (err) {
+          errors.push(err.message);
+        }
+      }
+    } else if (row.entry_type === 'paid_leave') {
+      try {
+        const dailyRate = calculateGlobalDailyRate(employee, row.date, rateUsed);
+        totalPayment = dailyRate;
+      } catch (err) {
+        errors.push(err.message);
+      }
+    } else if (row.entry_type === 'adjustment') {
+      totalPayment = row.hours || 0;
+    }
+  }
+  return { ...row, rate_used: errors.length ? null : rateUsed, total_payment: errors.length ? null : totalPayment, errors };
+}

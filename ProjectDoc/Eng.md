@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.3.2**
-**Last Updated: 2025-09-14**
+**Version: 1.3.3**
+**Last Updated: 2025-09-12**
 
 ## 1. Vision & Purpose
 
@@ -116,11 +116,39 @@ The work log. Each row represents a completed work session.
 
 Users can enable **"בחר תאריכים להזנה מרובה"** in the time-entry table to select multiple dates and optionally filter employees via a popover list. A toolbar shows the chosen dates and an **"העתק מהתאריך הקודם"** button to copy values forward. The copy prompt appears only when advancing between dates in multi-date mode.
 
-### CSV Import (Hebrew Headers)
+### Hebrew CSV Import
 
-An optional CSV paste modal accepts Hebrew headers and maps them to internal fields:
-`תאריך`→`date`, `סוג רישום`→`entry_type`, `שירות`→`service_name`, `שעות`→`hours`, `מספר שיעורים`→`sessions_count`, `מספר תלמידים`→`students_count`.
-Validated rows are inserted as standard `WorkSessions` records.
+A modal allows either pasting text or uploading a `.csv` file. The employee is chosen in the modal; the CSV should not include an employee column.
+
+**Header Mapping**
+
+| Hebrew           | Internal field |
+|-----------------|----------------|
+| תאריך          | `date` (DD/MM/YYYY → YYYY-MM-DD) |
+| סוג רישום      | `entry_type` (`שיעור`=`session`, `שעות`=`hours`, `התאמה`=`adjustment`, `חופשה בתשלום`=`paid_leave`) |
+| שירות          | `service_name` |
+| שעות           | `hours` |
+| מספר שיעורים   | `sessions_count` |
+| מספר תלמידים   | `students_count` |
+
+Up to 50 rows are previewed with per-row validation messages. Invalid rows can be downloaded as a separate CSV.
+
+**Template & Encoding**
+
+A "Download CSV template" button generates a UTF-8 **with BOM** file so Excel renders Hebrew correctly. The template includes three sample rows:
+1. שעות — `שעות=8`
+2. שיעור — `שירות="שם שירות לדוגמה"`, `מספר שיעורים=1`, `מספר תלמידים=1`
+3. חופשה בתשלום — other columns empty
+
+**Validation Rules**
+
+- `date` must parse to ISO format.
+- `entry_type` must be one of the allowed values.
+- `session` rows require a valid `service_name` and rate snapshot.
+- `hours` rows require a rate snapshot; for global employees the daily rate is computed automatically.
+- `paid_leave` rows are allowed only for global employees and use the global daily rate.
+
+Only valid rows are inserted into `WorkSessions`; a summary of inserted vs. failed rows is shown after import.
 
 ---
 
