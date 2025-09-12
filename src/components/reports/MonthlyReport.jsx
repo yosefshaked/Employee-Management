@@ -5,7 +5,7 @@ import { Calendar, TrendingUp } from "lucide-react";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { he } from "date-fns/locale";
 
-export default function MonthlyReport({ sessions, employees, services, workSessions = [], getRateForDate, isLoading }) {
+export default function MonthlyReport({ sessions, employees, services, workSessions = [], isLoading }) {
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -31,107 +31,35 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
   const monthlyData = months.map(month => {
     const monthStart = startOfMonth(month);
     const monthEnd = endOfMonth(month);
-    const monthSessions = sessions.filter(session => {
-      const sessionDate = parseISO(session.date);
-      if (sessionDate < monthStart || sessionDate > monthEnd) return false;
-      const employee = employees.find(e => e.id === session.employee_id);
-      return !employee || !employee.start_date || session.date >= employee.start_date;
-    });
-    const monthAllSessions = (workSessions.length ? workSessions : sessions).filter(session => {
+    const monthSessions = (workSessions.length ? workSessions : sessions).filter(session => {
       const sessionDate = parseISO(session.date);
       return sessionDate >= monthStart && sessionDate <= monthEnd;
     });
 
-    let sessionPayment = 0;
+    let totalPayment = 0;
     let totalHours = 0;
     let totalSessions = 0;
     let totalStudents = 0;
-    let adjustments = 0;
+    const employeePayments = {};
 
     monthSessions.forEach(session => {
-      const employee = employees.find(e => e.id === session.employee_id);
-      if (!employee) return;
-      if (employee.start_date && session.date < employee.start_date) return;
-
-      if (session.entry_type === 'adjustment') {
-        adjustments += session.total_payment || 0;
-        return;
-      }
-
-      if (employee.employee_type === 'instructor') {
+      const emp = employees.find(e => e.id === session.employee_id);
+      if (!emp || (emp.start_date && session.date < emp.start_date)) return;
+      totalPayment += session.total_payment || 0;
+      if (session.entry_type === 'session') {
         totalSessions += session.sessions_count || 0;
         totalStudents += (session.students_count || 0) * (session.sessions_count || 0);
         const service = services.find(s => s.id === session.service_id);
-        const rate = getRateForDate(employee.id, session.date, session.service_id).rate;
-        let pay = 0;
         if (service && service.duration_minutes) {
-          pay = (session.sessions_count || 0) * (service.payment_model === 'per_student'
-            ? (session.students_count || 0) * rate
-            : rate);
           totalHours += (service.duration_minutes / 60) * (session.sessions_count || 0);
-        } else {
-          pay = (session.sessions_count || 0) * rate;
         }
-        sessionPayment += pay;
-      } else if (employee.employee_type === 'hourly') {
-        const rate = getRateForDate(employee.id, session.date).rate;
-        sessionPayment += (session.hours || 0) * rate;
-        totalHours += session.hours || 0;
-      } else if (employee.employee_type === 'global') {
+      } else if (session.entry_type === 'hours') {
         totalHours += session.hours || 0;
       }
+      employeePayments[session.employee_id] = (employeePayments[session.employee_id] || 0) + (session.total_payment || 0);
     });
 
-    const monthSessionIds = new Set(monthSessions.map(s => s.id));
-    const extraAdjustments = monthAllSessions
-      .filter(s => s.entry_type === 'adjustment' && !monthSessionIds.has(s.id))
-      .filter(s => {
-        const emp = employees.find(e => e.id === s.employee_id);
-        return !emp || !emp.start_date || s.date >= emp.start_date;
-      })
-      .reduce((sum, s) => sum + (s.total_payment || 0), 0);
-
-    const activeGlobalEmployeeIdsInMonth = [...new Set(
-      monthAllSessions
-        .filter(s => s.entry_type !== 'adjustment')
-        .filter(s => {
-          const emp = employees.find(e => e.id === s.employee_id && e.employee_type === 'global');
-          return emp && (!emp.start_date || s.date >= emp.start_date);
-        })
-        .map(s => s.employee_id)
-    )];
-
-    activeGlobalEmployeeIdsInMonth.forEach(employeeId => {
-      sessionPayment += getRateForDate(employeeId, monthStart).rate;
-    });
-
-    const totalPayment = sessionPayment + adjustments + extraAdjustments;
-
-    const employeePayments = {};
-    monthAllSessions.forEach(session => {
-      const emp = employees.find(e => e.id === session.employee_id);
-      if (!emp || (emp.start_date && session.date < emp.start_date)) return;
-      let amt = 0;
-      if (session.entry_type === 'adjustment') {
-        amt = session.total_payment || 0;
-      } else if (emp.employee_type === 'instructor') {
-        const service = services.find(s => s.id === session.service_id);
-        const rate = getRateForDate(emp.id, session.date, session.service_id).rate;
-        if (service && service.payment_model === 'per_student') {
-          amt = (session.sessions_count || 0) * (session.students_count || 0) * rate;
-        } else {
-          amt = (session.sessions_count || 0) * rate;
-        }
-      } else if (emp.employee_type === 'hourly') {
-        const rate = getRateForDate(emp.id, session.date).rate;
-        amt = (session.hours || 0) * rate;
-      }
-      employeePayments[session.employee_id] = (employeePayments[session.employee_id] || 0) + amt;
-    });
-    activeGlobalEmployeeIdsInMonth.forEach(employeeId => {
-      employeePayments[employeeId] = (employeePayments[employeeId] || 0) + getRateForDate(employeeId, monthStart).rate;
-    });
-    const topEmployeeId = Object.keys(employeePayments).reduce((a, b) => 
+    const topEmployeeId = Object.keys(employeePayments).reduce((a, b) =>
       employeePayments[a] > employeePayments[b] ? a : b, null
     );
 
@@ -144,7 +72,7 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
       topEmployee: topEmployeeId ? getEmployeeName(topEmployeeId) : '-',
       topEmployeePayment: topEmployeeId ? employeePayments[topEmployeeId] : 0
     };
-  }).reverse(); // Show most recent month first
+  }).reverse();
 
   return (
     <div className="space-y-6">

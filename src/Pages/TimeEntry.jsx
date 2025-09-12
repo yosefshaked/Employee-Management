@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { format } from "date-fns";
+import { format, getDaysInMonth } from "date-fns";
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -94,15 +94,45 @@ export default function TimeEntry() {
       const sessionsToInsert = rows.map(row => {
         const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
         const serviceIdForRate = isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : row.service_id;
-        
-        const { rate: rateUsed } = getRateForDate(employee.id, row.date, serviceIdForRate);
+
+        if (employee.employee_type === 'hourly') {
+          const hoursValue = parseFloat(row.hours);
+          if (isNaN(hoursValue) || hoursValue <= 0) {
+            toast.error("יש להזין מספר שעות גדול מ-0.", { duration: 15000 });
+            return null;
+          }
+        } else if (employee.employee_type === 'instructor') {
+          if (!row.service_id) {
+            toast.error("חובה לבחור שירות.", { duration: 15000 });
+            return null;
+          }
+          const sessionsValue = parseInt(row.sessions_count, 10);
+          if (isNaN(sessionsValue) || sessionsValue <= 0) {
+            toast.error("יש להזין כמות מפגשים גדולה מ-0.", { duration: 15000 });
+            return null;
+          }
+          const service = services.find(s => s.id === row.service_id);
+          if (service && service.payment_model === 'per_student') {
+            const studentsValue = parseInt(row.students_count, 10);
+            if (isNaN(studentsValue) || studentsValue <= 0) {
+              toast.error(`חובה להזין מספר תלמידים (גדול מ-0) עבור "${service.name}"`, { duration: 15000 });
+              return null;
+            }
+          }
+        }
+
+        const { rate: rateUsed, reason } = getRateForDate(employee.id, row.date, serviceIdForRate);
+        if (!rateUsed) {
+          toast.error(reason || 'לא הוגדר תעריף עבור תאריך זה', { duration: 15000 });
+          return null;
+        }
+
         let totalPayment = 0;
-        
         if (employee.employee_type === 'hourly') {
           totalPayment = (parseFloat(row.hours) || 0) * rateUsed;
         } else if (employee.employee_type === 'global') {
-          totalPayment = 0; // Always save 0 for a global employee's time entry
-        } else { // Instructor
+          totalPayment = rateUsed / getDaysInMonth(new Date(row.date));
+        } else {
           const service = services.find(s => s.id === row.service_id);
           if (!service) return null;
           if (service.payment_model === 'per_student') {
@@ -111,14 +141,14 @@ export default function TimeEntry() {
             totalPayment = (parseInt(row.sessions_count) || 0) * rateUsed;
           }
         }
-        
+
         const entryType = isHourlyOrGlobal ? 'hours' : 'session';
 
         return {
           employee_id: employee.id,
           date: row.date,
           entry_type: entryType,
-          service_id: isHourlyOrGlobal ? null : row.service_id, // Save null for generic types in WorkSessions
+          service_id: isHourlyOrGlobal ? null : row.service_id,
           hours: isHourlyOrGlobal ? (parseFloat(row.hours) || null) : null,
           sessions_count: employee.employee_type === 'instructor' ? (parseInt(row.sessions_count) || null) : null,
           students_count: employee.employee_type === 'instructor' ? (parseInt(row.students_count) || null) : null,
@@ -132,7 +162,7 @@ export default function TimeEntry() {
         toast.error("לא נמצאו רישומים תקינים לשמירה.");
         return;
       }
-      
+
       const { error } = await supabase.from('WorkSessions').insert(sessionsToInsert);
       if (error) throw error;
 
@@ -150,40 +180,44 @@ export default function TimeEntry() {
     try {
       const sessionsToProcess = updatedRows.map(row => {
         const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
-          const hoursValue = parseFloat(row.hours);
-          const studentsValue = parseInt(row.students_count, 10);
-          const sessionsValue = parseInt(row.sessions_count, 10);
+        const hoursValue = parseFloat(row.hours);
+        const studentsValue = parseInt(row.students_count, 10);
+        const sessionsValue = parseInt(row.sessions_count, 10);
 
-          if (isHourlyOrGlobal) {
-            if (isNaN(hoursValue) || hoursValue <= 0) {
-              toast.error("יש להזין מספר שעות גדול מ-0.", { duration: 15000 });
-              return 'validation_error'; // Return error flag instead of null
-            }
-          } else { // Instructor
-            if (!row.service_id) return null;
-            
-            if (isNaN(sessionsValue) || sessionsValue <= 0) {
-              toast.error("יש להזין כמות מפגשים גדולה מ-0.", { duration: 15000 });
+        if (employee.employee_type === 'hourly') {
+          if (isNaN(hoursValue) || hoursValue <= 0) {
+            toast.error("יש להזין מספר שעות גדול מ-0.", { duration: 15000 });
+            return 'validation_error';
+          }
+        } else if (employee.employee_type === 'instructor') {
+          if (!row.service_id) return null;
+          if (isNaN(sessionsValue) || sessionsValue <= 0) {
+            toast.error("יש להזין כמות מפגשים גדולה מ-0.", { duration: 15000 });
+            return 'validation_error';
+          }
+          const service = services.find(s => s.id === row.service_id);
+          if (service && service.payment_model === 'per_student') {
+            if (isNaN(studentsValue) || studentsValue <= 0) {
+              toast.error(`חובה להזין מספר תלמידים (גדול מ-0) עבור "${service.name}"`, { duration: 15000 });
               return 'validation_error';
             }
-            
-            const service = services.find(s => s.id === row.service_id);
-            if (service && service.payment_model === 'per_student') {
-              if (isNaN(studentsValue) || studentsValue <= 0) {
-                toast.error(`חובה להזין מספר תלמידים (גדול מ-0) עבור "${service.name}"`, { duration: 15000 });
-                return 'validation_error';
-              }
-            }
           }
-        
-        const { rate: rateUsed } = getRateForDate(employee.id, day, isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : row.service_id);
+        }
+
+        const { rate: rateUsed, reason } = getRateForDate(employee.id, day, isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : row.service_id);
+        if (!rateUsed) {
+          toast.error(reason || 'לא הוגדר תעריף עבור תאריך זה', { duration: 15000 });
+          return 'validation_error';
+        }
         let totalPayment = 0;
 
-        if (isHourlyOrGlobal) {
-          totalPayment = employee.employee_type === 'global' ? 0 : (parseFloat(row.hours) || 0) * rateUsed;
-        } else { // Instructor
+        if (employee.employee_type === 'hourly') {
+          totalPayment = (parseFloat(row.hours) || 0) * rateUsed;
+        } else if (employee.employee_type === 'global') {
+          totalPayment = rateUsed / getDaysInMonth(day);
+        } else {
           const service = services.find(s => s.id === row.service_id);
-          if (!service) return null; // Skip if service is not selected
+          if (!service) return null;
           if (service.payment_model === 'per_student') {
             totalPayment = (parseInt(row.sessions_count, 10) || 1) * (parseInt(row.students_count, 10) || 0) * rateUsed;
           } else {
@@ -191,7 +225,6 @@ export default function TimeEntry() {
           }
         }
 
-        // Build the final object for Supabase
         const sessionData = {
           employee_id: employee.id,
           date: format(row.date, 'yyyy-MM-dd'),

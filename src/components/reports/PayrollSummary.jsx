@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { format, parseISO } from "date-fns";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,7 +37,7 @@ const InstructorDetailsRow = ({ details }) => (
   </TableRow>
 );
 
-export default function PayrollSummary({ sessions, employees, services, isLoading, workSessions = [], getRateForDate }) {
+export default function PayrollSummary({ sessions, employees, services, isLoading, getRateForDate }) {
   const [expandedRows, setExpandedRows] = useState({});
 
   const EMPLOYEE_TYPE_CONFIG = {
@@ -71,126 +70,67 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
     setExpandedRows(prev => ({...prev, [employeeId]: !prev[employeeId]}));
   };
 
-      const reportMonths = new Set(sessions.map(s => format(parseISO(s.date), 'yyyy-MM')));
+  const employeesSummary = employees.map(employee => {
+    const employeeSessions = sessions.filter(
+      s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
+    );
 
-      const employeesSummary = employees.map(employee => {
-        const employeeSessions = sessions.filter(
-          s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
-        );
+    const sessionTotals = employeeSessions.reduce((acc, session) => {
+      if (session.entry_type === 'adjustment') {
+        acc.totalAdjustments += session.total_payment || 0;
+      } else {
+        acc.sessionPayment += session.total_payment || 0;
+        if (session.entry_type === 'hours') {
+          acc.totalHours += session.hours || 0;
+        } else if (session.entry_type === 'session') {
+          acc.totalSessions += session.sessions_count || 0;
+        }
+      }
+      return acc;
+    }, { sessionPayment: 0, totalHours: 0, totalSessions: 0, totalAdjustments: 0 });
 
-        // Calculate totals based on session data first
-        const sessionTotals = employeeSessions.reduce((acc, session) => {
-        const sessionDate = parseISO(session.date);
-        if (session.entry_type === 'adjustment') {
-          acc.totalAdjustments += session.total_payment || 0;
-        } else {
-          if (employee.employee_type === 'instructor') {
+    const finalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments;
+    const baseSalary = employee.employee_type === 'global' ? getRateForDate(employee.id, new Date()).rate : null;
+
+    let serviceDetails = {};
+    if (employee.employee_type === 'instructor') {
+      employeeSessions.forEach(session => {
+        if (session.service_id) {
+          if (!serviceDetails[session.service_id]) {
             const service = services.find(s => s.id === session.service_id);
-            const rate = getRateForDate(employee.id, sessionDate, session.service_id).rate;
-            let payment = 0;
-            if (service && service.payment_model === 'per_student') {
-              payment = (session.sessions_count || 0) * (session.students_count || 0) * rate;
-            } else {
-              payment = (session.sessions_count || 0) * rate;
-            }
-            acc.sessionPayment += payment;
-            acc.totalSessions += session.sessions_count || 0;
-          } else if (employee.employee_type === 'hourly') {
-            const rate = getRateForDate(employee.id, sessionDate).rate;
-            acc.sessionPayment += (session.hours || 0) * rate;
-            acc.totalHours += session.hours || 0;
-          } else if (employee.employee_type === 'global') {
-            acc.totalHours += session.hours || 0;
+            serviceDetails[session.service_id] = {
+              serviceName: service ? service.name : 'שירות לא ידוע',
+              sessionsCount: 0,
+              totalPayment: 0
+            };
           }
+          serviceDetails[session.service_id].sessionsCount += session.sessions_count || 0;
+          serviceDetails[session.service_id].totalPayment += session.total_payment || 0;
         }
-        return acc;
-      }, { sessionPayment: 0, totalHours: 0, totalSessions: 0, totalAdjustments: 0 });
+      });
+      Object.values(serviceDetails).forEach(detail => {
+        detail.avgRate = detail.totalPayment / (detail.sessionsCount || 1);
+      });
+    }
 
-        let finalPayment = 0;
-        let baseSalary = null;
-
-        // Build month set covered by the current filtered sessions range
-        const monthsSet = reportMonths;
-
-        // Month-aware extra adjustments (outside exact range but within same months)
-        const filteredIds = new Set(employeeSessions.map(s => s.id));
-        const extraAdjustments = (workSessions || [])
-          .filter(
-            s =>
-              s.employee_id === employee.id &&
-              s.entry_type === 'adjustment' &&
-              (!employee.start_date || s.date >= employee.start_date)
-          )
-          .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM')))
-          .filter(s => !filteredIds.has(s.id))
-          .reduce((sum, s) => sum + (s.total_payment || 0), 0);
-
-        if (employee.employee_type === 'global') {
-          baseSalary = getRateForDate(employee.id, new Date()).rate;
-          const employeeMonthsAll = new Set(
-            (workSessions || [])
-              .filter(
-                s =>
-                  s.employee_id === employee.id &&
-                  s.entry_type !== 'adjustment' &&
-                  (!employee.start_date || s.date >= employee.start_date)
-              )
-              .map(s => format(parseISO(s.date), 'yyyy-MM'))
-          );
-          let baseTotal = 0;
-          monthsSet.forEach(m => {
-            if (employeeMonthsAll.has(m)) {
-              const monthDate = parseISO(`${m}-01`);
-              baseTotal += getRateForDate(employee.id, monthDate).rate;
-            }
-          });
-          finalPayment = baseTotal + sessionTotals.totalAdjustments + extraAdjustments;
-        } else {
-          finalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments + extraAdjustments;
-        }
-
-        // Instructor service details logic (remains the same)
-        let serviceDetails = {};
-        if (employee.employee_type === 'instructor') {
-          employeeSessions.forEach(session => {
-            if (session.service_id) {
-              if (!serviceDetails[session.service_id]) {
-                const service = services.find(s => s.id === session.service_id);
-                serviceDetails[session.service_id] = {
-                  serviceName: service ? service.name : 'שירות לא ידוע',
-                  sessionsCount: 0,
-                  totalPayment: 0
-                };
-              }
-              serviceDetails[session.service_id].sessionsCount += session.sessions_count || 0;
-              serviceDetails[session.service_id].totalPayment += session.total_payment || 0;
-            }
-          });
-          Object.values(serviceDetails).forEach(detail => {
-            detail.avgRate = detail.totalPayment / (detail.sessionsCount || 1);
-          });
-        }
-
-        return {
-          id: employee.id, name: employee.name, employeeType: employee.employee_type,
-          baseSalary,
-          totalAdjustments: sessionTotals.totalAdjustments,
-          isActive: employee.is_active,
-          totalPayment: finalPayment,
-          totalHours: Math.round(sessionTotals.totalHours * 10) / 10,
-          totalSessions: sessionTotals.totalSessions,
-          details: Object.values(serviceDetails)
-        };
-      }).filter(emp => {
-          const hasActivity = emp.totalPayment !== 0 || emp.totalHours > 0 || emp.totalSessions > 0;
-          if (hasActivity) return true;
-          const original = employees.find(e => e.id === emp.id);
-          if (original && original.is_active && original.start_date) {
-            const startMonth = format(parseISO(original.start_date), 'yyyy-MM');
-            if ([...reportMonths].some(m => m >= startMonth)) return true;
-          }
-          return false;
-      }).sort((a, b) => (b.totalPayment || 0) - (a.totalPayment || 0));
+    return {
+      id: employee.id,
+      name: employee.name,
+      employeeType: employee.employee_type,
+      baseSalary,
+      totalAdjustments: sessionTotals.totalAdjustments,
+      isActive: employee.is_active,
+      totalPayment: finalPayment,
+      totalHours: Math.round(sessionTotals.totalHours * 10) / 10,
+      totalSessions: sessionTotals.totalSessions,
+      details: Object.values(serviceDetails)
+    };
+  }).filter(emp => {
+    const hasActivity = emp.totalPayment !== 0 || emp.totalHours > 0 || emp.totalSessions > 0;
+    if (hasActivity) return true;
+    const original = employees.find(e => e.id === emp.id);
+    return original && original.is_active && original.start_date;
+  }).sort((a, b) => (b.totalPayment || 0) - (a.totalPayment || 0));
 
   return (
     <Card className="border-0 shadow-lg">

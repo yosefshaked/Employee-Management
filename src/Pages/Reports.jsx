@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTooltip } from "../components/InfoTooltip";
 import { Button } from "@/components/ui/button";
 import { BarChart3, Download, Calendar, TrendingUp } from "lucide-react";
-import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
+import { format, endOfMonth } from "date-fns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "../supabaseClient";
 
@@ -179,68 +179,17 @@ export default function Reports() {
     filteredSessions.forEach(session => {
       const employee = employees.find(e => e.id === session.employee_id);
       if (!employee) return;
-
-      if (session.entry_type === 'adjustment') {
-        payment += session.total_payment || 0;
-        return;
-      }
-
-      if (employee.employee_type === 'instructor') {
-        const service = services.find(s => s.id === session.service_id);
-        const rate = getRateForDate(employee.id, session.date, session.service_id).rate;
-        let sessionPay = 0;
-        if (service && service.payment_model === 'per_student') {
-          sessionPay = (session.sessions_count || 0) * (session.students_count || 0) * rate;
-        } else {
-          sessionPay = (session.sessions_count || 0) * rate;
-        }
-        payment += sessionPay;
+      payment += session.total_payment || 0;
+      if (session.entry_type === 'session') {
         sessionsCount += session.sessions_count || 0;
+        const service = services.find(s => s.id === session.service_id);
         if (service && service.duration_minutes) {
           hours += (service.duration_minutes / 60) * (session.sessions_count || 0);
         }
-      } else if (employee.employee_type === 'hourly') {
-        const rate = getRateForDate(employee.id, session.date).rate;
-        payment += (session.hours || 0) * rate;
-        hours += session.hours || 0;
-      } else if (employee.employee_type === 'global') {
+      } else if (session.entry_type === 'hours') {
         hours += session.hours || 0;
       }
     });
-
-    const fromDate = new Date(filters.dateFrom);
-    const toDate = new Date(filters.dateTo);
-    const monthsInRange = eachMonthOfInterval({ start: startOfMonth(fromDate), end: endOfMonth(toDate) });
-
-    const globals = employees.filter(e => e.employee_type === 'global');
-    globals.forEach(emp => {
-      monthsInRange.forEach(m => {
-        const key = format(m, 'yyyy-MM');
-        const hasEntry = (workSessions || []).some(s =>
-          s.employee_id === emp.id &&
-          s.entry_type !== 'adjustment' &&
-          format(parseISO(s.date), 'yyyy-MM') === key &&
-          (!emp.start_date || s.date >= emp.start_date)
-        );
-        if (hasEntry) {
-          const baseRate = getRateForDate(emp.id, m).rate;
-          payment += baseRate;
-        }
-      });
-    });
-
-    const filteredIds = new Set(filteredSessions.map(s => s.id));
-    const monthsSet = new Set(monthsInRange.map(m => format(m, 'yyyy-MM')));
-    const extraAdjustmentsTotal = (workSessions || [])
-      .filter(s => s.entry_type === 'adjustment')
-      .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM')))
-      .filter(s => !filteredIds.has(s.id))
-      .filter(s => {
-        const emp = employees.find(e => e.id === s.employee_id);
-        return !emp || !emp.start_date || s.date >= emp.start_date;
-      })
-      .reduce((sum, s) => sum + (s.total_payment || 0), 0);
-    payment += extraAdjustmentsTotal;
 
     return { payment, hours, sessionsCount };
   };
@@ -270,7 +219,7 @@ export default function Reports() {
 
         {isPartialRange && (
           <div className="mb-4 p-3 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-            שים לב: נבחר טווח חלקי של חודש. הסיכומים כוללים גם התאמות ושכר גלובלי לכל החודש/ים שבטווח המסונן.
+            שים לב: נבחר טווח חלקי של חודש. הסיכומים מתבססים רק על הרישומים שבטווח שנבחר.
           </div>
         )}
         <ReportsFilters filters={filters} setFilters={setFilters} employees={employees} services={services} isLoading={isLoading} />
@@ -311,10 +260,10 @@ export default function Reports() {
                 <TabsTrigger value="monthly">דוח חודשי</TabsTrigger>
                 <TabsTrigger value="payroll">דוח שכר</TabsTrigger>
               </TabsList>
-              <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} getRateForDate={getRateForDate} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
               <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} getRateForDate={getRateForDate} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} getRateForDate={getRateForDate} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} getRateForDate={getRateForDate} isLoading={isLoading} /></TabsContent>
             </Tabs>
           </CardContent>
         </Card>

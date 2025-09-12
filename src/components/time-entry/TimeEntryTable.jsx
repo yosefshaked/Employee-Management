@@ -28,7 +28,7 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
     const totals = {};
 
     employees.forEach(emp => {
-      totals[emp.id] = { hours: 0, sessions: 0, payment: 0, adjustments: 0, hasEntry: false };
+      totals[emp.id] = { hours: 0, sessions: 0, payment: 0 };
     });
 
     workSessions.forEach(s => {
@@ -36,53 +36,20 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
       if (sessionDate < start || sessionDate > end) return;
       const empTotals = totals[s.employee_id];
       if (!empTotals) return;
-      const emp = employees.find(e => e.id === s.employee_id);
-      if (!emp) return;
-
       if (s.entry_type === 'adjustment') {
-        empTotals.adjustments += s.total_payment || 0;
+        empTotals.payment += s.total_payment || 0;
         return;
       }
-
-      empTotals.hasEntry = true;
-
-      if (emp.employee_type === 'instructor') {
-        const service = services.find(se => se.id === s.service_id);
-        const rate = getRateForDate(emp.id, sessionDate, s.service_id).rate;
-        let payment = 0;
-        if (service && service.payment_model === 'per_student') {
-          payment = (s.sessions_count || 0) * (s.students_count || 0) * rate;
-        } else {
-          payment = (s.sessions_count || 0) * rate;
-        }
-        empTotals.payment += payment;
+      empTotals.payment += s.total_payment || 0;
+      if (s.entry_type === 'session') {
         empTotals.sessions += s.sessions_count || 0;
-      } else if (emp.employee_type === 'hourly') {
-        const rate = getRateForDate(emp.id, sessionDate).rate;
-        empTotals.payment += (s.hours || 0) * rate;
-        empTotals.hours += s.hours || 0;
-      } else if (emp.employee_type === 'global') {
+      } else if (s.entry_type === 'hours') {
         empTotals.hours += s.hours || 0;
       }
-    });
-
-    // For global employees, if they have any entry this month, show their monthly rate
-    employees.forEach(emp => {
-      const empTotals = totals[emp.id];
-      if (!empTotals) return;
-      if (emp.employee_type === 'global') {
-        if (empTotals.hasEntry) {
-          const { rate } = getRateForDate(emp.id, start);
-          empTotals.payment = rate;
-        } else {
-          empTotals.payment = 0;
-        }
-      }
-      empTotals.payment += empTotals.adjustments;
     });
 
     return totals;
-  }, [workSessions, employees, currentMonth, getRateForDate, services]);
+  }, [workSessions, employees, currentMonth]);
 
   return (
     <> {/* Using a Fragment (<>) instead of a div to avoid extra wrappers */}
@@ -162,26 +129,18 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
 
                                 let summaryText = '-';
                                 let summaryPayment = 0;
-                                let rateInfo = null; // Will hold the entire rate object
-                                let showNoRateWarning = false;
-
-                                if (emp.employee_type === 'hourly' || emp.employee_type === 'global') {
-                                rateInfo = getRateForDate(emp.id, day);
-                                } else {
-                                showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
-                                }
+                                const rateInfo = getRateForDate(emp.id, day);
+                                const showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
 
                                 if (regularSessions.length > 0) {
                                   if (emp.employee_type === 'instructor') {
                                     summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
                                     const sessionCount = regularSessions.reduce((sum, s) => sum + (s.sessions_count || 0), 0);
                                     summaryText = `${sessionCount} מפגשים`;
-                                  } else { // Hourly or Global
+                                  } else {
                                     const hoursCount = regularSessions.reduce((sum, s) => sum + (s.hours || 0), 0);
                                     summaryText = `${hoursCount.toFixed(1)} שעות`;
-                                    if (emp.employee_type === 'hourly' && rateInfo?.rate > 0) {
-                                      summaryPayment = hoursCount * rateInfo.rate;
-                                    }
+                                    summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
                                   }
                                 }
 

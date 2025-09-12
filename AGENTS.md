@@ -16,4 +16,5 @@
 
 ## Notes
 - WorkSessions inserts should omit `id` so the database can generate it; include `id` only when updating existing records.
+- Payroll calculations now rely solely on `WorkSessions.rate_used` and `total_payment`; avoid adding external salary adjustments in reports.
 

@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.1.0**
-**Last Updated: 2025-09-10**
+**Version: 1.2.0**
+**Last Updated: 2025-09-12**
 
 ## 1. Vision & Purpose
 
@@ -96,6 +96,17 @@ The work log. Each row represents a completed work session.
 | `students_count`| `int8` | Number of students (for `per_student` model) | |
 | `rate_used` | `numeric`| A "snapshot" of the rate used at the time of calculation | |
 | `total_payment`| `numeric`| A "snapshot" of the final calculated amount | |
+
+#### WorkSessions Calculation Rules
+
+- `rate_used` is loaded from `RateHistory` on each create/update. Instructors resolve it by `(employee_id, service_id, date)`; hourly and global employees resolve it by `(employee_id, date)`.
+- `service_id` is mandatory for instructor sessions. Saving is blocked if no matching rate exists for the date.
+- `total_payment` is computed per row and stored:
+  - Instructors: `sessions_count * students_count * rate_used` (or without students when not per-student).
+  - Hourly employees: `hours * rate_used`.
+  - Global employees: `rate_used / daysInMonth(date)`.
+- Monthly totals and reports sum `total_payment` from `WorkSessions` rows only; no external base salary is added.
+- Global employees are paid via daily prorated rows representing their monthly salary divided by the number of days in that month.
 
 ---
 
