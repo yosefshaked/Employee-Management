@@ -2,11 +2,10 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, TrendingUp } from "lucide-react";
-import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
+import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval, differenceInDays, getDaysInMonth } from "date-fns";
 import { he } from "date-fns/locale";
-import { getProratedBaseSalary } from "@/lib/salaryUtils";
 
-export default function MonthlyReport({ sessions, employees, services, workSessions = [], getRateForDate, scopedEmployeeIds, dateFrom, dateTo, isLoading, rateHistories = [] }) {
+export default function MonthlyReport({ sessions, employees, services, workSessions = [], getRateForDate, scopedEmployeeIds, dateFrom, dateTo, isLoading }) {
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -89,7 +88,17 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
     globalEmployees.forEach(emp => {
       const hasSession = monthAllSessions.some(s => s.employee_id === emp.id && s.entry_type !== 'adjustment');
       if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= monthEnd)) {
-        sessionPayment += getProratedBaseSalary(emp, monthStart, monthEnd, rateHistories);
+        const { rate: monthlyRate } = getRateForDate(emp.id, monthStart);
+        if (monthlyRate > 0) {
+          const employeeStartDate = emp.start_date ? parseISO(emp.start_date) : null;
+          const effectiveStartDateInMonth = employeeStartDate && employeeStartDate > monthStart ? employeeStartDate : monthStart;
+          const daysInMonth = getDaysInMonth(monthStart);
+          const daysWorked = differenceInDays(monthEnd, effectiveStartDateInMonth) + 1;
+          if (daysWorked > 0) {
+            const dailyRate = monthlyRate / daysInMonth;
+            sessionPayment += dailyRate * daysWorked;
+          }
+        }
       }
     });
 
@@ -119,7 +128,17 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
     globalEmployees.forEach(emp => {
       const hasSession = monthAllSessions.some(s => s.employee_id === emp.id && s.entry_type !== 'adjustment');
       if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= monthEnd)) {
-        employeePayments[emp.id] = (employeePayments[emp.id] || 0) + getProratedBaseSalary(emp, monthStart, monthEnd, rateHistories);
+        const { rate: monthlyRate } = getRateForDate(emp.id, monthStart);
+        if (monthlyRate > 0) {
+          const employeeStartDate = emp.start_date ? parseISO(emp.start_date) : null;
+          const effectiveStartDateInMonth = employeeStartDate && employeeStartDate > monthStart ? employeeStartDate : monthStart;
+          const daysInMonth = getDaysInMonth(monthStart);
+          const daysWorked = differenceInDays(monthEnd, effectiveStartDateInMonth) + 1;
+          if (daysWorked > 0) {
+            const dailyRate = monthlyRate / daysInMonth;
+            employeePayments[emp.id] = (employeePayments[emp.id] || 0) + dailyRate * daysWorked;
+          }
+        }
       }
     });
     const topEmployeeId = Object.keys(employeePayments).reduce((a, b) => 

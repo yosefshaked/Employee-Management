@@ -19,5 +19,5 @@
 
 - When filtering reports, apply global base salaries only to employees included in the filtered results.
 
-- Prorate global employees' base salaries when they start mid-month using `getProratedBaseSalary`.
+- Prorate global employees' base salaries by days worked in each month using `calculatePayrollSummary`.
 

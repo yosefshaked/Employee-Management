@@ -2,10 +2,9 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Users, Clock, TrendingUp, DollarSign } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { format, startOfMonth, endOfMonth, parseISO, isSameMonth } from "date-fns";
+import { format, startOfMonth, endOfMonth, parseISO, isSameMonth, differenceInDays, getDaysInMonth } from "date-fns";
 import { he } from "date-fns/locale";
 import { InfoTooltip } from "../InfoTooltip";
-import { getProratedBaseSalary } from "@/lib/salaryUtils";
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -102,7 +101,20 @@ export default function QuickStats({ employees, workSessions, services, currentD
     globalWithWork.forEach(empId => {
       const emp = employees.find(e => e.id === empId);
       if (emp) {
-        totalPayment += getProratedBaseSalary(emp, startOfMonth(currentDate), endOfMonth(currentDate), rateHistories);
+        const monthDate = startOfMonth(currentDate);
+        const { rate: monthlyRate } = getRateForDate(emp.id, monthDate);
+        if (monthlyRate > 0) {
+          const employeeStartDate = emp.start_date ? parseISO(emp.start_date) : null;
+          const monthStart = monthDate;
+          const monthEnd = endOfMonth(monthDate);
+          const effectiveStartDateInMonth = employeeStartDate && employeeStartDate > monthStart ? employeeStartDate : monthStart;
+          const daysInMonth = getDaysInMonth(monthDate);
+          const daysWorked = differenceInDays(monthEnd, effectiveStartDateInMonth) + 1;
+          if (daysWorked > 0) {
+            const dailyRate = monthlyRate / daysInMonth;
+            totalPayment += dailyRate * daysWorked;
+          }
+        }
       }
     });
 
