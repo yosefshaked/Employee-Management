@@ -3,10 +3,11 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, 
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { he } from "date-fns/locale";
+import { getProratedBaseSalary } from "@/lib/salaryUtils";
 
 const COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#06B6D4'];
 
-export default function ChartsOverview({ sessions, employees, isLoading, services, workSessions = [], getRateForDate, dateFrom, dateTo, scopedEmployeeIds }) {
+export default function ChartsOverview({ sessions, employees, isLoading, services, workSessions = [], getRateForDate, dateFrom, dateTo, scopedEmployeeIds, rateHistories = [] }) {
   const [pieType, setPieType] = React.useState('count');
   const [trendType, setTrendType] = React.useState('payment');
 
@@ -131,8 +132,10 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       let baseTotal = 0;
       monthsInRange.forEach(m => {
         const key = format(m, 'yyyy-MM');
-        if (monthsWithSessions.has(key) && (!employee.start_date || parseISO(employee.start_date) <= endOfMonth(m))) {
-          baseTotal += getRateForDate(employee.id, m).rate;
+        const monthStart = startOfMonth(m);
+        const monthEnd = endOfMonth(m);
+        if (monthsWithSessions.has(key) && (!employee.start_date || parseISO(employee.start_date) <= monthEnd)) {
+          baseTotal += getProratedBaseSalary(employee, monthStart, monthEnd, rateHistories);
         }
       });
       totalPayment = baseTotal + sessionTotals.totalAdjustments + extraAdjustments;
@@ -220,8 +223,8 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     const globalEmployees = employees.filter(e => e.employee_type === 'global' && scopedEmployeeIds.has(e.id));
     globalEmployees.forEach(emp => {
       const hasSession = monthAllSessions.some(s => s.employee_id === emp.id && s.entry_type !== 'adjustment');
-      if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(monthStart))) {
-        payment += getRateForDate(emp.id, monthStart).rate;
+      if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= monthEnd)) {
+        payment += getProratedBaseSalary(emp, monthStart, monthEnd, rateHistories);
       }
     });
     return {

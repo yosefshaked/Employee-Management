@@ -7,6 +7,7 @@ import { BarChart3, Download, Calendar, TrendingUp } from "lucide-react";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "../supabaseClient";
+import { getProratedBaseSalary } from "@/lib/salaryUtils";
 
 import ReportsFilters from "../components/reports/ReportsFilters";
 import DetailedEntriesReport from "../components/reports/DetailedEntriesReport";
@@ -228,14 +229,16 @@ export default function Reports() {
     const globals = employees.filter(e => e.employee_type === 'global' && scopedEmployeeIds.has(e.id));
     globals.forEach(emp => {
       monthsInRange.forEach(m => {
+        const monthStart = startOfMonth(m);
+        const monthEnd = endOfMonth(m);
         const hasSession = filteredWorkSessions.some(ws =>
           ws.employee_id === emp.id &&
           ws.entry_type !== 'adjustment' &&
-          parseISO(ws.date) >= startOfMonth(m) &&
-          parseISO(ws.date) <= endOfMonth(m)
+          parseISO(ws.date) >= monthStart &&
+          parseISO(ws.date) <= monthEnd
         );
-        if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(m))) {
-          payment += getRateForDate(emp.id, m).rate;
+        if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= monthEnd)) {
+          payment += getProratedBaseSalary(emp, monthStart, monthEnd, rateHistories);
         }
       });
     });
@@ -323,10 +326,10 @@ export default function Reports() {
                 <TabsTrigger value="monthly">דוח חודשי</TabsTrigger>
                 <TabsTrigger value="payroll">דוח שכר</TabsTrigger>
               </TabsList>
-              <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} workSessions={filteredWorkSessions} getRateForDate={getRateForDate} dateFrom={filters.dateFrom} dateTo={filters.dateTo} scopedEmployeeIds={scopedEmployeeIds} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} workSessions={filteredWorkSessions} getRateForDate={getRateForDate} dateFrom={filters.dateFrom} dateTo={filters.dateTo} scopedEmployeeIds={scopedEmployeeIds} isLoading={isLoading} rateHistories={rateHistories} /></TabsContent>
               <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} workSessions={filteredWorkSessions} getRateForDate={getRateForDate} scopedEmployeeIds={scopedEmployeeIds} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} workSessions={filteredWorkSessions} getRateForDate={getRateForDate} scopedEmployeeIds={scopedEmployeeIds} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} workSessions={filteredWorkSessions} getRateForDate={getRateForDate} scopedEmployeeIds={scopedEmployeeIds} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} rateHistories={rateHistories} /></TabsContent>
+              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} workSessions={filteredWorkSessions} getRateForDate={getRateForDate} scopedEmployeeIds={scopedEmployeeIds} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} rateHistories={rateHistories} /></TabsContent>
             </Tabs>
           </CardContent>
         </Card>

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
+import { getProratedBaseSalary } from "@/lib/salaryUtils";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,7 +39,7 @@ const InstructorDetailsRow = ({ details }) => (
   </TableRow>
 );
 
-export default function PayrollSummary({ sessions, employees, services, isLoading, workSessions = [], getRateForDate, scopedEmployeeIds, dateFrom, dateTo }) {
+export default function PayrollSummary({ sessions, employees, services, isLoading, workSessions = [], getRateForDate, scopedEmployeeIds, dateFrom, dateTo, rateHistories = [] }) {
   const [expandedRows, setExpandedRows] = useState({});
 
   const EMPLOYEE_TYPE_CONFIG = {
@@ -129,7 +130,6 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
           .reduce((sum, s) => sum + (s.total_payment || 0), 0);
 
         if (employee.employee_type === 'global') {
-          baseSalary = getRateForDate(employee.id, new Date()).rate;
           const monthsWithSessions = new Set(
             (workSessions.length ? workSessions : sessions)
               .filter(s =>
@@ -141,12 +141,14 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
           );
           let baseTotal = 0;
           monthsSet.forEach(m => {
-            const monthDate = parseISO(`${m}-01`);
-            if (monthsWithSessions.has(m) && (!employee.start_date || parseISO(employee.start_date) <= endOfMonth(monthDate))) {
-              baseTotal += getRateForDate(employee.id, monthDate).rate;
+            const monthStart = parseISO(`${m}-01`);
+            const monthEnd = endOfMonth(monthStart);
+            if (monthsWithSessions.has(m) && (!employee.start_date || parseISO(employee.start_date) <= monthEnd)) {
+              baseTotal += getProratedBaseSalary(employee, monthStart, monthEnd, rateHistories);
             }
           });
-          finalPayment = baseTotal + sessionTotals.totalAdjustments + extraAdjustments;
+          baseSalary = baseTotal;
+          finalPayment = baseSalary + sessionTotals.totalAdjustments + extraAdjustments;
         } else {
           finalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments + extraAdjustments;
         }

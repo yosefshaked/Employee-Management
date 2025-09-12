@@ -4,8 +4,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, TrendingUp } from "lucide-react";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { he } from "date-fns/locale";
+import { getProratedBaseSalary } from "@/lib/salaryUtils";
 
-export default function MonthlyReport({ sessions, employees, services, workSessions = [], getRateForDate, scopedEmployeeIds, dateFrom, dateTo, isLoading }) {
+export default function MonthlyReport({ sessions, employees, services, workSessions = [], getRateForDate, scopedEmployeeIds, dateFrom, dateTo, isLoading, rateHistories = [] }) {
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -87,8 +88,8 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
     const globalEmployees = employees.filter(e => e.employee_type === 'global' && scopedEmployeeIds.has(e.id));
     globalEmployees.forEach(emp => {
       const hasSession = monthAllSessions.some(s => s.employee_id === emp.id && s.entry_type !== 'adjustment');
-      if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(monthStart))) {
-        sessionPayment += getRateForDate(emp.id, monthStart).rate;
+      if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= monthEnd)) {
+        sessionPayment += getProratedBaseSalary(emp, monthStart, monthEnd, rateHistories);
       }
     });
 
@@ -117,8 +118,8 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
     });
     globalEmployees.forEach(emp => {
       const hasSession = monthAllSessions.some(s => s.employee_id === emp.id && s.entry_type !== 'adjustment');
-      if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= endOfMonth(monthStart))) {
-        employeePayments[emp.id] = (employeePayments[emp.id] || 0) + getRateForDate(emp.id, monthStart).rate;
+      if (hasSession && (!emp.start_date || parseISO(emp.start_date) <= monthEnd)) {
+        employeePayments[emp.id] = (employeePayments[emp.id] || 0) + getProratedBaseSalary(emp, monthStart, monthEnd, rateHistories);
       }
     });
     const topEmployeeId = Object.keys(employeePayments).reduce((a, b) => 

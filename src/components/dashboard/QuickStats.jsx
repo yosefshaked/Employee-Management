@@ -2,9 +2,10 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Users, Clock, TrendingUp, DollarSign } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { format, startOfMonth, parseISO, isSameMonth } from "date-fns";
+import { format, startOfMonth, endOfMonth, parseISO, isSameMonth } from "date-fns";
 import { he } from "date-fns/locale";
 import { InfoTooltip } from "../InfoTooltip";
+import { getProratedBaseSalary } from "@/lib/salaryUtils";
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -99,7 +100,10 @@ export default function QuickStats({ employees, workSessions, services, currentD
     );
 
     globalWithWork.forEach(empId => {
-      totalPayment += getRateForDate(empId, startOfMonth(currentDate)).rate;
+      const emp = employees.find(e => e.id === empId);
+      if (emp) {
+        totalPayment += getProratedBaseSalary(emp, startOfMonth(currentDate), endOfMonth(currentDate), rateHistories);
+      }
     });
 
     const workDaySet = new Set(
