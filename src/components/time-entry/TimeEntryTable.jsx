@@ -193,9 +193,25 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                     >
                                         <div className="font-semibold text-sm">{summaryText}</div>
 
-                                        {/* --- WARNINGS --- */}
-                                        {rateInfo?.reason === 'לא התחילו לעבוד עדיין' && (
-                                          <div className="text-xs text-red-700">טרם התחיל</div>
+                                        {rateInfo && (emp.employee_type === 'hourly' || emp.employee_type === 'global') && (
+                                          <div className="text-xs">
+                                            {rateInfo.rate > 0 ? (
+                                              <span
+                                                className="text-slate-500"
+                                                title={`Rate effective from ${format(parseISO(rateInfo.effectiveDate), 'dd/MM/yy')}`}
+                                              >
+                                                {emp.employee_type === 'hourly'
+                                                  ? `@${rateInfo.rate.toFixed(2)}₪`
+                                                  : `₪${rateInfo.rate.toLocaleString()} לחודש`}
+                                              </span>
+                                            ) : (
+                                              <span className="text-slate-500">
+                                                {rateInfo.reason === 'Not yet started'
+                                                  ? 'טרם התחיל'
+                                                  : (summaryText === '-' ? '' : 'לא הוגדר תעריף')}
+                                              </span>
+                                            )}
+                                          </div>
                                         )}
 
                                         {showNoRateWarning && summaryText !== '-' && (
