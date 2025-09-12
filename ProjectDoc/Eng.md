@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.3.1**
-**Last Updated: 2025-09-13**
+**Version: 1.3.2**
+**Last Updated: 2025-09-14**
 
 ## 1. Vision & Purpose
 
@@ -93,7 +93,7 @@ The work log. Each row represents a completed work session.
 | `service_id` | `uuid` | References the `Services` table (for instructors) | **Foreign Key** |
 | `date` | `date` | The date the work was performed | Not NULL |
 | `entry_type` | `text` | 'session', 'hours', 'adjustment', or 'paid_leave' | Not NULL |
-| `hours` | `numeric` | Number of hours or days (when relevant) | |
+| `hours` | `numeric` | Number of hours (display-only for globals) | |
 | `sessions_count`| `int8` | Number of sessions (for instructors) | |
 | `students_count`| `int8` | Number of students (for `per_student` model) | |
 | `rate_used` | `numeric`| A "snapshot" of the rate used at the time of calculation | |
@@ -107,14 +107,14 @@ The work log. Each row represents a completed work session.
 - `total_payment` is computed per row and stored:
   - Instructors: `sessions_count * students_count * rate_used` (or without students when not per-student).
   - Hourly employees: `hours * rate_used`.
-  - Global hours: `(monthly_rate / effectiveWorkingDays(employee, month)) * (days_count || 1)`.
+  - Global hours: `monthly_rate / effectiveWorkingDays(employee, month)` (each row represents one day; hours field is ignored).
   - Paid leave: same daily rate as global hours, stored with `entry_type='paid_leave'` and `notes='paid_leave'`.
 - Monthly totals and reports sum `total_payment` from `WorkSessions` rows only; no external base salary is added.
 - Unpaid absence = no row. Paid leave is explicitly recorded with an `entry_type='paid_leave'` row.
 
 ### Multi-date Quick Entry UX
 
-Users can enable **"בחר תאריכים להזנה מרובה"** in the time-entry table to pick multiple date cells. After saving the first date, the app prompts: "להעתיק את מה שהזנת הרגע?". Confirming copies the values forward; declining opens a fresh form for the next date.
+Users can enable **"בחר תאריכים להזנה מרובה"** in the time-entry table to select multiple dates and optionally filter employees via a popover list. A toolbar shows the chosen dates and an **"העתק מהתאריך הקודם"** button to copy values forward. The copy prompt appears only when advancing between dates in multi-date mode.
 
 ### CSV Import (Hebrew Headers)
 

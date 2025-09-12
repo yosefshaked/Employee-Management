@@ -9,12 +9,15 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import TimeEntryForm from './TimeEntryForm'; // Assuming it's in the same folder
 import CsvImportModal from './CsvImportModal.jsx';
-
-export default function TimeEntryTable({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported }) {
+import EmployeePicker from '../employees/EmployeePicker.jsx';
+import { MultiDateProvider, useMultiDate } from './MultiDateContext.jsx';
+function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported }) {
+  const { isMultiDateMode, setIsMultiDateMode, lastRows, setLastRows } = useMultiDate();
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
   const [multiMode, setMultiMode] = useState(false);
-  const [selectedCells, setSelectedCells] = useState([]);
+  const [selectedDates, setSelectedDates] = useState([]);
+  const [selectedEmployees, setSelectedEmployees] = useState(employees.map(e => e.id));
   const [multiQueue, setMultiQueue] = useState([]);
   const [importOpen, setImportOpen] = useState(false);
   const daysInMonth = useMemo(() => {
@@ -29,10 +32,12 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
 
   // Clear selections when month changes
   React.useEffect(() => {
-    setSelectedCells([]);
+    setSelectedDates([]);
+    setSelectedEmployees(employees.map(e => e.id));
     setMultiQueue([]);
     setMultiMode(false);
-  }, [currentMonth]);
+    setIsMultiDateMode(false);
+  }, [currentMonth, employees, setIsMultiDateMode]);
 
   const monthlyTotals = useMemo(() => {
     const start = startOfMonth(currentMonth);
@@ -63,35 +68,47 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
     return totals;
   }, [workSessions, employees, currentMonth]);
 
-  const toggleCellSelection = (day, employee) => {
-    setSelectedCells(prev => {
-      const exists = prev.find(c => c.day.getTime() === day.getTime() && c.employee.id === employee.id);
-      if (exists) return prev.filter(c => !(c.day.getTime() === day.getTime() && c.employee.id === employee.id));
-      return [...prev, { day, employee }];
+  const toggleDateSelection = (day) => {
+    setSelectedDates(prev => {
+      const exists = prev.find(d => d.getTime() === day.getTime());
+      return exists ? prev.filter(d => d.getTime() !== day.getTime()) : [...prev, day];
     });
   };
 
   const startMultiEntry = () => {
-    if (!selectedCells.length) return;
-    setMultiQueue(selectedCells);
-    const first = selectedCells[0];
+    if (!selectedDates.length || !selectedEmployees.length) return;
+    const dateQueue = [...selectedDates].sort((a, b) => a - b);
+    const empQueue = employees.filter(e => selectedEmployees.includes(e.id));
+    const queue = [];
+    dateQueue.forEach(day => {
+      empQueue.forEach(emp => queue.push({ day, employee: emp }));
+    });
+    setMultiQueue(queue);
+    setIsMultiDateMode(queue.length > 1);
+    const first = queue[0];
     setEditingCell({ day: first.day, employee: first.employee, existingSessions: [] });
   };
 
   const handleMultiSubmit = ({ employee, day, updatedRows }) => {
     onTableSubmit({ employee, day, updatedRows });
     const [, ...rest] = multiQueue;
+    setLastRows(updatedRows);
     if (rest.length) {
-      const copy = window.confirm('להעתיק את מה שהזנת הרגע?');
       const next = rest[0];
-      const nextRows = copy ? updatedRows.map(r => ({ ...r, id: crypto.randomUUID(), isNew: true, date: format(next.day, 'yyyy-MM-dd') })) : [];
+      let nextRows = [];
+      if (isMultiDateMode && window.confirm('להעתיק את מה שהזנת הרגע?')) {
+        nextRows = updatedRows.map(r => ({ ...r, id: crypto.randomUUID(), isNew: true, date: format(next.day, 'yyyy-MM-dd') }));
+      }
       setMultiQueue(rest);
       setEditingCell({ day: next.day, employee: next.employee, existingSessions: nextRows });
     } else {
       setEditingCell(null);
       setMultiQueue([]);
-      setSelectedCells([]);
+      setSelectedDates([]);
+      setSelectedEmployees(employees.map(e => e.id));
       setMultiMode(false);
+      setIsMultiDateMode(false);
+      setLastRows([]);
     }
   };
 
@@ -109,11 +126,17 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setImportOpen(true)}>ייבוא CSV</Button>
               {!multiMode ? (
-                <Button variant="outline" onClick={() => setMultiMode(true)}>בחר תאריכים להזנה מרובה</Button>
+                <Button variant="outline" onClick={() => {
+                  setMultiMode(true);
+                  setSelectedDates([]);
+                  setSelectedEmployees(employees.map(e => e.id));
+                  setIsMultiDateMode(false);
+                }}>בחר תאריכים להזנה מרובה</Button>
               ) : (
                 <>
-                  <Button variant="default" onClick={startMultiEntry} disabled={!selectedCells.length}>הזן</Button>
-                  <Button variant="outline" onClick={() => { setMultiMode(false); setSelectedCells([]); }}>בטל</Button>
+                  <EmployeePicker employees={employees} value={selectedEmployees} onChange={setSelectedEmployees} />
+                  <Button variant="default" onClick={startMultiEntry} disabled={!selectedDates.length || !selectedEmployees.length}>הזן</Button>
+                  <Button variant="outline" onClick={() => { setMultiMode(false); setSelectedDates([]); setSelectedEmployees(employees.map(e => e.id)); setIsMultiDateMode(false); }}>בטל</Button>
                 </>
               )}
             </div>
@@ -164,15 +187,7 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                             <TableCell className={`text-right font-semibold sticky right-0 z-10 p-2 ${isToday(day) ? 'bg-blue-100' : 'bg-slate-50'}`}>
                                 <div className="flex items-center justify-end gap-2">
                                 {multiMode && (
-                                  <input type="checkbox" checked={!!selectedCells.find(c => c.day.getTime() === day.getTime())} onChange={() => {
-                                    const cellsForDay = selectedCells.filter(c => c.day.getTime() === day.getTime());
-                                    if (cellsForDay.length === employees.length) {
-                                      setSelectedCells(prev => prev.filter(c => c.day.getTime() !== day.getTime()));
-                                    } else {
-                                      const newSelections = employees.map(emp => ({ day, employee: emp }));
-                                      setSelectedCells(prev => [...prev.filter(c => c.day.getTime() !== day.getTime()), ...newSelections]);
-                                    }
-                                  }} />
+                                  <input type="checkbox" checked={selectedDates.some(d => d.getTime() === day.getTime())} onChange={() => toggleDateSelection(day)} />
                                 )}
                                 <span>{format(day, 'd')}</span>
                                 <span className="text-xs text-slate-500">{format(day, 'EEE', { locale: he })}</span>
@@ -209,7 +224,7 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                     summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
                                   } else {
                                     const paidLeaveCount = regularSessions.filter(s => s.entry_type === 'paid_leave').length;
-                                    const dayCount = regularSessions.filter(s => s.entry_type === 'hours').reduce((sum, s) => sum + (s.hours || 1), 0);
+                                    const dayCount = regularSessions.filter(s => s.entry_type === 'hours').length;
                                     const parts = [];
                                     if (dayCount > 0) parts.push(`${dayCount} ימים`);
                                     if (paidLeaveCount > 0) parts.push(`${paidLeaveCount} חופש`);
@@ -218,21 +233,21 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                   }
                                 }
 
+                                const isSelected = multiMode && selectedDates.some(d => d.getTime() === day.getTime()) && selectedEmployees.includes(emp.id);
+
                                 return (
                                     <TableCell
                                         key={emp.id}
-                                        className={`text-center transition-colors p-2 ${multiMode ? 'cursor-pointer' : 'cursor-pointer hover:bg-blue-50'}`}
+                                        className={`text-center transition-colors p-2 ${isSelected ? 'bg-blue-50' : ''} ${multiMode ? '' : 'cursor-pointer hover:bg-blue-50'}`}
                                         onClick={() => {
-                                          if (multiMode) {
-                                            toggleCellSelection(day, emp);
-                                          } else {
+                                          if (!multiMode) {
                                             setEditingCell({ day, employee: emp, existingSessions: regularSessions });
                                           }
                                         }}
                                     >
                                         <div className="font-semibold text-sm">{summaryText}</div>
 
-                                        {/* --- WARNINGS --- */}
+                {/* --- WARNINGS --- */}
                                         {rateInfo?.reason === 'לא התחילו לעבוד עדיין' && (
                                           <div className="text-xs text-red-700">טרם התחיל</div>
                                         )}
@@ -246,7 +261,7 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                         )}
 
                                         {adjustmentTotal !== 0 && (
-                                          <div className={`text-xs ${adjustmentTotal > 0 ? 'text-green-700' : 'text-red-700'}`}>
+                                          <div className={`text-xs ${adjustmentTotal > 0 ? 'text-green-700' : 'text-red-700'}`}> 
                                             {adjustmentTotal > 0 ? '+' : '-'}₪{Math.abs(adjustmentTotal).toLocaleString()}
                                           </div>
                                         )}
@@ -299,6 +314,19 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
               הזן או ערוך את פרטי שעות העבודה או המפגשים עבור היום הנבחר.
             </DialogDescription>
             </DialogHeader>
+            {isMultiDateMode && (
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm text-slate-600">
+                  {selectedDates.sort((a,b) => a - b).map(d => format(d, 'dd/MM')).join(', ')}
+                </div>
+                {lastRows.length > 0 && (
+                  <Button variant="outline" size="sm" onClick={() => {
+                    const copyRows = lastRows.map(r => ({ ...r, id: crypto.randomUUID(), isNew: true, date: format(editingCell.day, 'yyyy-MM-dd') }));
+                    setEditingCell(prev => ({ ...prev, existingSessions: copyRows }));
+                  }}>העתק מהתאריך הקודם</Button>
+                )}
+              </div>
+            )}
             {editingCell && (
               <Tabs defaultValue={editingCell.existingSessions.length ? 'edit' : 'add'}>
                 <TabsList className="grid w-full grid-cols-2 mb-4">
@@ -353,4 +381,12 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
         />
     </>
     );
+}
+
+export default function TimeEntryTable(props) {
+  return (
+    <MultiDateProvider>
+      <TimeEntryTableInner {...props} />
+    </MultiDateProvider>
+  );
 }

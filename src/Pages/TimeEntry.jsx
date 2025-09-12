@@ -134,12 +134,7 @@ export default function TimeEntry() {
         } else if (employee.employee_type === 'global') {
           try {
             const dailyRate = calculateGlobalDailyRate(employee, row.date, rateUsed);
-            const daysCount = row.entry_type === 'hours' ? (parseFloat(row.hours) || 1) : 1;
-            if (row.entry_type === 'hours' && daysCount <= 0) {
-              toast.error("יש להזין מספר ימים גדול מ-0.", { duration: 15000 });
-              return null;
-            }
-            totalPayment = dailyRate * daysCount;
+            totalPayment = dailyRate;
           } catch (err) {
             toast.error(err.message, { duration: 15000 });
             return null;
@@ -238,12 +233,7 @@ export default function TimeEntry() {
         } else if (employee.employee_type === 'global') {
           try {
             const dailyRate = calculateGlobalDailyRate(employee, day, rateUsed);
-            const daysCount = row.entry_type === 'hours' ? (parseFloat(row.hours) || 1) : 1;
-            if (row.entry_type === 'hours' && daysCount <= 0) {
-              toast.error("יש להזין מספר ימים גדול מ-0.", { duration: 15000 });
-              return 'validation_error';
-            }
-            totalPayment = dailyRate * daysCount;
+            totalPayment = dailyRate;
           } catch (err) {
             toast.error(err.message, { duration: 15000 });
             return 'validation_error';

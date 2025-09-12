@@ -10,6 +10,7 @@ import { format } from "date-fns";
 import { he } from "date-fns/locale";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
+import { InfoTooltip } from '@/components/InfoTooltip.jsx';
 
 // This is our central calculation logic
 const calculateRowPayment = (row, employee, services, getRateForDate) => {
@@ -22,8 +23,7 @@ const calculateRowPayment = (row, employee, services, getRateForDate) => {
   if (employee.employee_type === 'global') {
     try {
       const dailyRate = calculateGlobalDailyRate(employee, row.date, rate);
-      const daysCount = row.entry_type === 'hours' ? (parseFloat(row.hours) || 1) : 1;
-      return dailyRate * daysCount;
+      return dailyRate;
     } catch {
       return 0;
     }
@@ -105,7 +105,7 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
                   <>
                     <div className="space-y-1"><Label>סוג יום</Label><Select value={row.entry_type} onValueChange={(v)=>handleRowChange(row.id,'entry_type',v)}><SelectTrigger className="bg-white"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="hours">יום רגיל</SelectItem><SelectItem value="paid_leave">חופשה בתשלום</SelectItem></SelectContent></Select></div>
                     {row.entry_type === 'hours' && (
-                      <div className="space-y-1"><Label>מספר ימים</Label><Input type="number" step="1" value={row.hours || ''} onChange={(e) => handleRowChange(row.id, 'hours', e.target.value)} className="bg-white" /></div>
+                      <div className="space-y-1"><Label className="flex items-center gap-1">שעות<InfoTooltip text="בגלובלי השכר מחושב לפי יום; שדה השעות להצגה בלבד." /></Label><Input type="number" step="0.1" value={row.hours || ''} onChange={(e) => handleRowChange(row.id, 'hours', e.target.value)} className="bg-white" /></div>
                     )}
                   </>
                 )}

@@ -58,12 +58,7 @@ export default function CsvImportModal({ open, onOpenChange, employees, services
         } else {
           try {
             const dailyRate = calculateGlobalDailyRate(employee, row.date, rateUsed);
-            const daysCount = row.hours || 1;
-            if (row.hours && row.hours <= 0) {
-              errors.push('יש להזין מספר ימים גדול מ-0.');
-            } else {
-              totalPayment = dailyRate * daysCount;
-            }
+            totalPayment = dailyRate;
           } catch (err) {
             errors.push(err.message);
           }
