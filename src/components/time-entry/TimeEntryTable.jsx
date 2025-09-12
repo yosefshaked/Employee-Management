@@ -8,13 +8,15 @@ import { he } from "date-fns/locale";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import TimeEntryForm from './TimeEntryForm'; // Assuming it's in the same folder
+import CsvImportModal from './CsvImportModal.jsx';
 
-export default function TimeEntryTable({ employees, workSessions, services, getRateForDate, onTableSubmit }) {
+export default function TimeEntryTable({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
   const [multiMode, setMultiMode] = useState(false);
   const [selectedCells, setSelectedCells] = useState([]);
   const [multiQueue, setMultiQueue] = useState([]);
+  const [importOpen, setImportOpen] = useState(false);
   const daysInMonth = useMemo(() => {
     const start = startOfMonth(currentMonth);
     const end = endOfMonth(currentMonth);
@@ -105,6 +107,7 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
               <Button variant="outline" size="icon" onClick={goToNextMonth}><ChevronLeft className="w-4 h-4" /></Button>
             </div>
             <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setImportOpen(true)}>ייבוא CSV</Button>
               {!multiMode ? (
                 <Button variant="outline" onClick={() => setMultiMode(true)}>בחר תאריכים להזנה מרובה</Button>
               ) : (
@@ -340,6 +343,14 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
             )}
         </DialogContent>
         </Dialog>
+        <CsvImportModal
+          open={importOpen}
+          onOpenChange={setImportOpen}
+          employees={employees}
+          services={services}
+          getRateForDate={getRateForDate}
+          onImported={onImported}
+        />
     </>
     );
 }

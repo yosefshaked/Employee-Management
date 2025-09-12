@@ -157,6 +157,10 @@ export default function TimeEntry() {
         const entryType = employee.employee_type === 'global'
           ? row.entry_type
           : (employee.employee_type === 'hourly' ? 'hours' : 'session');
+        if (entryType === 'paid_leave' && employee.employee_type !== 'global') {
+          toast.error('paid_leave only allowed for global employees', { duration: 15000 });
+          return null;
+        }
 
         return {
           employee_id: employee.id,
@@ -194,6 +198,10 @@ export default function TimeEntry() {
     try {
       const sessionsToProcess = updatedRows.map(row => {
         const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
+        if (row.entry_type === 'paid_leave' && employee.employee_type !== 'global') {
+          toast.error('paid_leave only allowed for global employees', { duration: 15000 });
+          return 'validation_error';
+        }
         const hoursValue = parseFloat(row.hours);
         const studentsValue = parseInt(row.students_count, 10);
         const sessionsValue = parseInt(row.sessions_count, 10);
@@ -388,6 +396,7 @@ export default function TimeEntry() {
               services={services}
               getRateForDate={getRateForDate}
               onTableSubmit={handleTableSubmit}
+              onImported={loadInitialData}
             />
           </TabsContent>
         </Tabs>
