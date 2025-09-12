@@ -3,7 +3,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isToday, parseISO } from "date-fns";
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isToday, parseISO, getDaysInMonth } from "date-fns";
 import { he } from "date-fns/locale";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -28,7 +28,7 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
     const totals = {};
 
     employees.forEach(emp => {
-      totals[emp.id] = { hours: 0, sessions: 0, payment: 0, adjustments: 0, hasEntry: false };
+      totals[emp.id] = { hours: 0, sessions: 0, payment: 0, adjustments: 0, workDays: new Set() };
     });
 
     workSessions.forEach(s => {
@@ -39,12 +39,10 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
       const emp = employees.find(e => e.id === s.employee_id);
       if (!emp) return;
 
-      if (s.entry_type === 'adjustment') {
+      if (s.entry_type === 'adjustment' || ((s.hours ?? 0) === 0 && (s.sessions_count ?? 0) === 0)) {
         empTotals.adjustments += s.total_payment || 0;
         return;
       }
-
-      empTotals.hasEntry = true;
 
       if (emp.employee_type === 'instructor') {
         const service = services.find(se => se.id === s.service_id);
@@ -63,17 +61,20 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
         empTotals.hours += s.hours || 0;
       } else if (emp.employee_type === 'global') {
         empTotals.hours += s.hours || 0;
+        empTotals.workDays.add(format(sessionDate, 'yyyy-MM-dd'));
       }
     });
 
-    // For global employees, if they have any entry this month, show their monthly rate
+    // For global employees, prorate salary by worked days
     employees.forEach(emp => {
       const empTotals = totals[emp.id];
       if (!empTotals) return;
       if (emp.employee_type === 'global') {
-        if (empTotals.hasEntry) {
-          const { rate } = getRateForDate(emp.id, start);
-          empTotals.payment = rate;
+        const { rate } = getRateForDate(emp.id, start);
+        if (rate > 0) {
+          const daysInMonthCount = getDaysInMonth(start);
+          const daysWorked = empTotals.workDays.size;
+          empTotals.payment = (rate / daysInMonthCount) * daysWorked;
         } else {
           empTotals.payment = 0;
         }
@@ -147,8 +148,8 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                             {/* For each day, loop through employees to create a cell */}
                             {employees.map(emp => {
                                 const dailySessions = workSessions.filter(s =>
-                                s.employee_id === emp.id &&
-                                format(parseISO(s.date), 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd')
+                                  s.employee_id === emp.id &&
+                                  format(parseISO(s.date), 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd')
                                 );
                                 const adjustments = dailySessions.filter(s =>
                                   s.entry_type === 'adjustment' ||
@@ -162,13 +163,14 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
 
                                 let summaryText = '-';
                                 let summaryPayment = 0;
-                                let rateInfo = null; // Will hold the entire rate object
+                                let paymentDisplay = summaryPayment;
+                                let rateInfo = null;
                                 let showNoRateWarning = false;
 
                                 if (emp.employee_type === 'hourly' || emp.employee_type === 'global') {
-                                rateInfo = getRateForDate(emp.id, day);
+                                  rateInfo = getRateForDate(emp.id, day);
                                 } else {
-                                showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
+                                  showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
                                 }
 
                                 if (regularSessions.length > 0) {
@@ -176,59 +178,58 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                     summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
                                     const sessionCount = regularSessions.reduce((sum, s) => sum + (s.sessions_count || 0), 0);
                                     summaryText = `${sessionCount} מפגשים`;
-                                  } else { // Hourly or Global
+                                  } else {
                                     const hoursCount = regularSessions.reduce((sum, s) => sum + (s.hours || 0), 0);
                                     summaryText = `${hoursCount.toFixed(1)} שעות`;
-                                    if (emp.employee_type === 'hourly' && rateInfo?.rate > 0) {
-                                      summaryPayment = hoursCount * rateInfo.rate;
+                                    if (rateInfo?.rate > 0) {
+                                      if (emp.employee_type === 'hourly') {
+                                        summaryPayment = hoursCount * rateInfo.rate;
+                                      } else if (emp.employee_type === 'global') {
+                                        const daysCount = getDaysInMonth(day);
+                                        summaryPayment = rateInfo.rate / daysCount;
+                                      }
                                     }
                                   }
                                 }
 
+                                if (rateInfo) {
+                                  if (rateInfo.rate === 0 && regularSessions.length > 0 && rateInfo.reason !== 'Not yet started') {
+                                    showNoRateWarning = true;
+                                  }
+
+                                  if (rateInfo.reason === 'Not yet started') {
+                                    summaryText = 'טרם התחיל';
+                                    paymentDisplay = null;
+                                  } else {
+                                    paymentDisplay = summaryPayment;
+                                  }
+                                } else {
+                                  paymentDisplay = summaryPayment;
+                                }
+
                                 return (
-                                    <TableCell
-                                        key={emp.id}
-                                        className="text-center cursor-pointer hover:bg-blue-50 transition-colors p-2"
-                                        onClick={() => setEditingCell({ day, employee: emp, existingSessions: regularSessions })}
-                                    >
-                                        <div className="font-semibold text-sm">{summaryText}</div>
+                                  <TableCell
+                                    key={emp.id}
+                                    className="text-center cursor-pointer hover:bg-blue-50 transition-colors p-2"
+                                    onClick={() => setEditingCell({ day, employee: emp, existingSessions: regularSessions })}
+                                  >
+                                    <div className="font-semibold text-sm">{summaryText}</div>
 
-                                        {rateInfo && (emp.employee_type === 'hourly' || emp.employee_type === 'global') && (
-                                          <div className="text-xs">
-                                            {rateInfo.rate > 0 ? (
-                                              <span
-                                                className="text-slate-500"
-                                                title={`Rate effective from ${format(parseISO(rateInfo.effectiveDate), 'dd/MM/yy')}`}
-                                              >
-                                                {emp.employee_type === 'hourly'
-                                                  ? `@${rateInfo.rate.toFixed(2)}₪`
-                                                  : `₪${rateInfo.rate.toLocaleString()} לחודש`}
-                                              </span>
-                                            ) : (
-                                              <span className="text-slate-500">
-                                                {rateInfo.reason === 'Not yet started'
-                                                  ? 'טרם התחיל'
-                                                  : (summaryText === '-' ? '' : 'לא הוגדר תעריף')}
-                                              </span>
-                                            )}
-                                          </div>
-                                        )}
+                                    {showNoRateWarning && summaryText !== '-' && (
+                                      <div className="text-xs text-red-700">לא הוגדר תעריף</div>
+                                    )}
 
-                                        {showNoRateWarning && summaryText !== '-' && (
-                                          <div className="text-xs text-red-700">לא הוגדר תעריף</div>
-                                        )}
+                                    {paymentDisplay !== null && (paymentDisplay !== 0 || rateInfo) && (
+                                      <div className="text-xs text-green-700">₪{paymentDisplay.toLocaleString()}</div>
+                                    )}
 
-                                        {summaryPayment > 0 && (
-                                          <div className="text-xs text-green-700">₪{summaryPayment.toLocaleString()}</div>
-                                        )}
-
-                                        {adjustmentTotal !== 0 && (
-                                          <div className={`text-xs ${adjustmentTotal > 0 ? 'text-green-700' : 'text-red-700'}`}>
-                                            {adjustmentTotal > 0 ? '+' : '-'}₪{Math.abs(adjustmentTotal).toLocaleString()}
-                                          </div>
-                                        )}
-                                    </TableCell>
-                                    );
+                                    {adjustmentTotal !== 0 && (
+                                      <div className={`text-xs ${adjustmentTotal > 0 ? 'text-green-700' : 'text-red-700'}`}>
+                                        {adjustmentTotal > 0 ? '+' : '-'}₪{Math.abs(adjustmentTotal).toLocaleString()}
+                                      </div>
+                                    )}
+                                  </TableCell>
+                                );
                             })}
                             </TableRow>
                         ))}

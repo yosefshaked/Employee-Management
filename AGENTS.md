@@ -20,5 +20,5 @@
 - When filtering reports, apply global base salaries only to employees included in the filtered results.
 
 - Prorate global employees' base salaries by days worked in each month using `calculatePayrollSummary`.
-- In TimeEntryTable, display the rate or 'טרם התחיל' for hourly and global employees using `getRateForDate`; show 'לא הוגדר תעריף' only when there is activity and no rate.
+- In TimeEntryTable, show each day's payment for hourly (rate × hours) and global (base ÷ days × attendance) employees; display 'טרם התחיל' before their start date and only show 'לא הוגדר תעריף' when there is activity without a rate.
 
