@@ -13,7 +13,12 @@ describe('workSessions API', () => {
             return {
               in(col, ids) {
                 calls.push({ col, ids });
-                return Promise.resolve({ error: null });
+                return {
+                  select(cols) {
+                    calls.push(cols);
+                    return Promise.resolve({ data: ids.map(id => ({ id })), error: null });
+                  }
+                };
               }
             };
           }
@@ -21,7 +26,7 @@ describe('workSessions API', () => {
       }
     };
     await deleteWorkSession('123', fakeClient);
-    assert.deepStrictEqual(calls, ['WorkSessions', { col: 'id', ids: ['123'] }]);
+    assert.deepStrictEqual(calls, ['WorkSessions', { col: 'id', ids: ['123'] }, 'id']);
   });
 
   it('deletes multiple ids', async () => {
@@ -34,7 +39,12 @@ describe('workSessions API', () => {
             return {
               in(col, ids) {
                 calls.push({ col, ids });
-                return Promise.resolve({ error: null });
+                return {
+                  select(cols) {
+                    calls.push(cols);
+                    return Promise.resolve({ data: ids.map(id => ({ id })), error: null });
+                  }
+                };
               }
             };
           }
@@ -42,7 +52,7 @@ describe('workSessions API', () => {
       }
     };
     await deleteWorkSessions(['a', 'b'], fakeClient);
-    assert.deepStrictEqual(calls, ['WorkSessions', { col: 'id', ids: ['a', 'b'] }]);
+    assert.deepStrictEqual(calls, ['WorkSessions', { col: 'id', ids: ['a', 'b'] }, 'id']);
   });
 
   it('propagates errors', async () => {
@@ -52,7 +62,11 @@ describe('workSessions API', () => {
           delete() {
             return {
               in() {
-                return Promise.resolve({ error: { message: 'fail' } });
+                return {
+                  select() {
+                    return Promise.resolve({ error: { message: 'fail' }, data: null });
+                  }
+                };
               }
             };
           }
@@ -60,5 +74,26 @@ describe('workSessions API', () => {
       }
     };
     await assert.rejects(() => deleteWorkSessions(['a'], fakeClient), /fail/);
+  });
+
+  it('throws when nothing deleted', async () => {
+    const fakeClient = {
+      from() {
+        return {
+          delete() {
+            return {
+              in() {
+                return {
+                  select() {
+                    return Promise.resolve({ data: [], error: null });
+                  }
+                };
+              }
+            };
+          }
+        };
+      }
+    };
+    await assert.rejects(() => deleteWorkSessions(['a'], fakeClient), /No rows deleted/);
   });
 });

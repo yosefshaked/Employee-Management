@@ -313,7 +313,8 @@ export default function TimeEntry() {
   };
 
   const handleSessionsDeleted = (ids) => {
-    setWorkSessions(prev => prev.filter(ws => !ids.includes(ws.id)));
+    const idsSet = new Set(ids.map(String));
+    setWorkSessions(prev => prev.filter(ws => !idsSet.has(String(ws.id))));
   };
   
   const selectedEmployee = employees.find(e => e.id === selectedEmployeeId);

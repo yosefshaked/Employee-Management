@@ -19,4 +19,5 @@
 - Payroll calculations now rely solely on `WorkSessions.rate_used` and `total_payment`; avoid adding external salary adjustments in reports.
 - Global employees use `working_days` for daily rate proration and `paid_leave` rows for paid days off.
 - Reports date filters accept `DD/MM/YYYY`, `D/M/YY`, or ISO strings and hours KPIs count only hourly employees.
+- WorkSessions deletions verify at least one row was removed; a zero-row delete should surface an error.
 
