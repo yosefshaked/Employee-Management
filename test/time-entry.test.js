@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { calculateGlobalDailyRate } from '../src/lib/payroll.js';
-import { copyFromPrevious, fillDown } from '../src/components/time-entry/multiDateUtils.js';
+import { copyFromPrevious, fillDown, isRowCompleteForProgress } from '../src/components/time-entry/multiDateUtils.js';
 import { useTimeEntry } from '../src/components/time-entry/useTimeEntry.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -56,6 +56,32 @@ describe('global daily rate ignores hours', () => {
     const dailyRate = calculateGlobalDailyRate(emp, new Date('2024-02-05'), monthlyRate);
     const total = dailyRate; // hours ignored
     assert.equal(total, dailyRate);
+  });
+});
+
+describe('progress completion rules', () => {
+  it('session row requires service, sessions and students', () => {
+    const emp = { employee_type: 'instructor' };
+    const row = { service_id: 's1', sessions_count: '1', students_count: '1' };
+    assert.equal(isRowCompleteForProgress(row, emp), true);
+    row.students_count = '';
+    assert.equal(isRowCompleteForProgress(row, emp), false);
+  });
+  it('hourly row requires hours > 0', () => {
+    const emp = { employee_type: 'hourly' };
+    const row = { hours: '0' };
+    assert.equal(isRowCompleteForProgress(row, emp), false);
+    row.hours = '2';
+    assert.equal(isRowCompleteForProgress(row, emp), true);
+  });
+  it('global row requires explicit day type', () => {
+    const emp = { employee_type: 'global' };
+    const row = { entry_type: '' };
+    assert.equal(isRowCompleteForProgress(row, emp), false);
+    row.entry_type = 'hours';
+    assert.equal(isRowCompleteForProgress(row, emp), true);
+    row.entry_type = 'paid_leave';
+    assert.equal(isRowCompleteForProgress(row, emp), true);
   });
 });
 

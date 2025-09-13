@@ -22,3 +22,16 @@ export function formatDatesCount(n) {
   if (n > 1) return `${n} תאריכים להזנה`;
   return 'אין תאריכים';
 }
+
+export function isRowCompleteForProgress(row, employee) {
+  if (employee.employee_type === 'instructor') {
+    return Boolean(row.service_id) && parseInt(row.sessions_count, 10) >= 1 && parseInt(row.students_count, 10) >= 1;
+  }
+  if (employee.employee_type === 'hourly') {
+    return parseFloat(row.hours) > 0;
+  }
+  if (employee.employee_type === 'global') {
+    return row.entry_type === 'hours' || row.entry_type === 'paid_leave';
+  }
+  return false;
+}

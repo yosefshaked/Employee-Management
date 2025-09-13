@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
 import EntryRow from './EntryRow.jsx';
-import { copyFromPrevious, formatDatesCount } from './multiDateUtils.js';
+import { copyFromPrevious, formatDatesCount, isRowCompleteForProgress } from './multiDateUtils.js';
 import { format } from 'date-fns';
 import { useTimeEntry } from './useTimeEntry.js';
 import { ChevronUp } from 'lucide-react';
@@ -27,10 +27,14 @@ function validateRow(row, employee, services, getRateForDate) {
   } else if (employee.employee_type === 'hourly') {
     if (!row.hours) errors.hours = 'חסרות שעות';
   } else if (employee.employee_type === 'global') {
-    try {
-      calculateGlobalDailyRate(employee, row.date, rate);
-    } catch {
-      errors.entry_type = 'אין ימי עבודה בחודש';
+    if (row.entry_type !== 'hours' && row.entry_type !== 'paid_leave') {
+      errors.entry_type = 'בחר סוג יום';
+    } else {
+      try {
+        calculateGlobalDailyRate(employee, row.date, rate);
+      } catch {
+        errors.entry_type = 'אין ימי עבודה בחודש';
+      }
     }
   }
   return { valid: Object.keys(errors).length === 0, errors };
@@ -47,7 +51,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
         items.push({
           employee_id: empId,
           date: format(d, 'yyyy-MM-dd'),
-          entry_type: emp.employee_type === 'global' ? 'hours' : (emp.employee_type === 'hourly' ? 'hours' : 'session'),
+          entry_type: emp.employee_type === 'global' ? '' : (emp.employee_type === 'hourly' ? 'hours' : 'session'),
           service_id: null,
           hours: '',
           sessions_count: '',
@@ -67,7 +71,10 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
     () => rows.map(r => validateRow(r, employeesById[r.employee_id], services, getRateForDate)),
     [rows, employeesById, services, getRateForDate]
   );
-  const validCount = validation.filter(v => v.valid).length;
+  const filledCount = useMemo(
+    () => rows.filter(r => isRowCompleteForProgress(r, employeesById[r.employee_id])).length,
+    [rows, employeesById]
+  );
   const [showErrors, setShowErrors] = useState(false);
   const [showBanner, setShowBanner] = useState(false);
   const [flash, setFlash] = useState(null);
@@ -138,8 +145,17 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
           <div className="flex-1 overflow-y-auto p-4 flex flex-col space-y-3">
             <div className="flex text-sm text-slate-600">
               <span>טיפ: אפשר להעתיק ערכים מהרישום הקודם עם האייקון ליד כל שדה.</span>
-              <span className="ml-auto">מולאו {validCount} מתוך {rows.length} שורות</span>
+              <span className="ml-auto">מולאו {filledCount} מתוך {rows.length} שורות</span>
             </div>
+            {showBanner && (
+              <div className="bg-amber-50 border border-amber-200 p-4 flex justify-between items-center text-sm">
+                <span>חלק מהשורות מכילות שגיאות.</span>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setShowBanner(false)}>חזור לתיקון</Button>
+                  <Button size="sm" onClick={saveValidOnly}>שמור רק תקינים</Button>
+                </div>
+              </div>
+            )}
             {groupedRows.map(([empId, items], idx) => {
               const emp = employeesById[empId];
               const isCollapsed = collapsed[empId];
@@ -179,17 +195,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
             })}
           </div>
 
-          {showBanner && (
-            <div className="bg-amber-50 border-t border-amber-200 p-4 flex justify-between items-center text-sm">
-              <span>חלק מהשורות מכילות שגיאות.</span>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setShowBanner(false)}>חזור לתיקון</Button>
-                <Button size="sm" onClick={saveValidOnly}>שמור רק תקינים</Button>
-              </div>
-            </div>
-          )}
-
-          <div className="sticky bottom-0 bg-background z-20 p-4 border-t flex justify-end gap-2">
+          <div className="sticky bottom-0 bg-background z-20 p-4 border-t flex justify-end gap-2" data-testid="modal-footer">
             <Button variant="outline" onClick={onClose}>בטל</Button>
             <Button onClick={handleSave}>שמור רישומים</Button>
           </div>

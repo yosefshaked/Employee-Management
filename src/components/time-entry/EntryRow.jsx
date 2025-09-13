@@ -75,6 +75,8 @@ export default function EntryRow({
           <Button
             variant="ghost"
             size="icon"
+            type="button"
+            data-role="copy-prev"
             onClick={() => onCopyField(field)}
             className="h-6 w-6"
             aria-label="העתק מהרישום הקודם"
@@ -136,8 +138,10 @@ export default function EntryRow({
           <>
             <div className={`space-y-1 min-w-[180px] ${flash === 'entry_type' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
               <Label className="text-sm font-medium text-slate-700">סוג יום</Label>
-              <Select value={row.entry_type} onValueChange={(v) => handleChange('entry_type', v)}>
-                <SelectTrigger className="bg-white h-10 text-base leading-6"><SelectValue /></SelectTrigger>
+              <Select value={row.entry_type || ''} onValueChange={(v) => handleChange('entry_type', v)}>
+                <SelectTrigger className="bg-white h-10 text-base leading-6">
+                  <SelectValue placeholder="בחר סוג יום" />
+                </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="hours">יום רגיל</SelectItem>
                   <SelectItem value="paid_leave">חופשה בתשלום</SelectItem>
