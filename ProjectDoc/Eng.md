@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.3.6**
-**Last Updated: 2025-09-14**
+**Version: 1.3.7**
+**Last Updated: 2025-09-13**
 
 ## 1. Vision & Purpose
 
@@ -114,7 +114,7 @@ The work log. Each row represents a completed work session.
 
 ### Multi-date Quick Entry UX
 
-Users can enable **"בחר תאריכים להזנה מרובה"** in the time-entry table to select multiple dates and employees. Clicking **"הזן"** opens a modal listing all selected dates as stacked mini-forms—one row per date and employee. Each field has an **"העתק מהרישום הקודם"** button to copy from the previous row, and top-level **"העתק מהראשון לכל השורות"** controls fill empty values down from the first row.
+Users can enable **"בחר תאריכים להזנה מרובה"** in the time-entry table to select multiple dates and employees. Clicking **"הזן"** opens a modal listing all selected dates as stacked mini-forms—one row per date and employee. Each field has an **"העתק מהרישום הקודם"** button to copy from the previous row.
 Global employees see an hours field for reference only and a toggle between regular day and paid leave; pay is still one daily rate per row.
 Saving creates a `WorkSessions` record for every employee × date combination selected.
 

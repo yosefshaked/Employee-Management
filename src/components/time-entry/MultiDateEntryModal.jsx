@@ -65,14 +65,13 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
     <Dialog open={open} onOpenChange={onClose}>
       <TooltipProvider>
         <DialogContent
-          className="p-0 flex flex-col"
-          style={{ width: 'min(95vw, 1100px)', height: 'min(90vh, calc(100dvh - 4rem))' }}
+          className="p-0 flex flex-col max-w-none w-[min(98vw,1200px)] h-[min(92vh,calc(100dvh-2rem))]"
         >
           <DialogHeader className="sticky top-0 bg-background z-10 p-4 border-b">
             <DialogTitle>הזנה מרובה</DialogTitle>
           </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
             {groupedRows.map(([empId, items], idx) => {
               const emp = employeesById[empId];
               const isCollapsed = collapsed[empId];
@@ -91,7 +90,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
                     )}
                   </div>
                   {!isCollapsed && (
-                    <div className="grid gap-3 lg:grid-cols-2 mt-2">
+                    <div className="flex flex-col gap-3 mt-2">
                       {items.map(({ row, index }) => (
                         <EntryRow
                           key={`${row.employee_id}-${row.date}-${index}`}
@@ -107,7 +106,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
                       ))}
                     </div>
                   )}
-                  {idx !== groupedRows.length - 1 && <Separator className="mt-4" />}
+                  {idx !== groupedRows.length - 1 && <Separator className="my-4" />}
                 </div>
               );
             })}

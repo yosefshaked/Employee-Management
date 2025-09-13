@@ -57,7 +57,7 @@ export default function EntryRow({
   const rowPayment = computeRowPayment(row, employee, services, getRateForDate);
 
   return (
-    <div className="rounded-xl bg-slate-50 p-4 space-y-3 relative">
+    <div className="w-full rounded-xl bg-slate-50 p-4 space-y-3 relative">
       {readOnlyDate ? (
         <div className="text-sm font-medium text-right">{format(new Date(row.date), 'dd/MM/yyyy')}</div>
       ) : (
@@ -123,7 +123,7 @@ export default function EntryRow({
       )}
 
       {employee.employee_type === 'instructor' && selectedService && (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="flex flex-col gap-3">
           <div className="space-y-1">
             <Label className="text-sm font-medium text-slate-700">כמות מפגשים</Label>
             <div className="flex gap-2">
