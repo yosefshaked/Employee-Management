@@ -4,16 +4,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTooltip } from "../components/InfoTooltip";
 import { Button } from "@/components/ui/button";
 import { BarChart3, Download, Calendar, TrendingUp } from "lucide-react";
-import { format, endOfMonth } from "date-fns";
+import { format, endOfMonth, startOfMonth } from "date-fns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "../supabaseClient";
 
 import ReportsFilters from "../components/reports/ReportsFilters";
+import { parseDateStrict, toISODateString, isValidRange } from '@/lib/date.js';
 import DetailedEntriesReport from "../components/reports/DetailedEntriesReport";
 import MonthlyReport from "../components/reports/MonthlyReport";
 import PayrollSummary from "../components/reports/PayrollSummary";
 import ChartsOverview from "../components/reports/ChartsOverview";
-import { computePeriodTotals, clampDateString } from '@/lib/payroll.js';
+import { computePeriodTotals } from '@/lib/payroll.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -60,36 +61,41 @@ export default function Reports() {
     return { rate: 0, reason: 'לא הוגדר תעריף' };
   };
 
-  const formatDateLocal = (d) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  };
-
   const [filters, setFilters] = useState({
     selectedEmployee: '',
-    dateFrom: formatDateLocal(new Date(new Date().getFullYear(), new Date().getMonth(), 1)),
-    dateTo: formatDateLocal(new Date()),
+    dateFrom: format(startOfMonth(new Date()), 'dd/MM/yyyy'),
+    dateTo: format(new Date(), 'dd/MM/yyyy'),
     employeeType: 'all',
     serviceId: 'all',
   });
+  const [dateErrors, setDateErrors] = useState({ dateFrom: null, dateTo: null, range: null });
+
+  const handleDateBlur = (key, value) => {
+    const res = parseDateStrict(value);
+    setDateErrors(prev => ({ ...prev, [key]: res.ok ? null : 'תאריך לא תקין. פורמט תקין: 30/09/2025' }));
+  };
 
   const applyFilters = useCallback(() => {
-    let start = new Date(filters.dateFrom);
-    let endStr = clampDateString(filters.dateTo);
-    let end = new Date(endStr);
-    if (start > end) {
-      const tmp = start;
-      start = end;
-      end = tmp;
+    const fromRes = parseDateStrict(filters.dateFrom);
+    const toRes = parseDateStrict(filters.dateTo);
+    if (!fromRes.ok || !toRes.ok) {
+      setFilteredSessions([]);
+      setTotals({ totalPay: 0, totalHours: 0, totalSessions: 0, totalsByEmployee: [] });
+      return;
     }
+    if (!isValidRange(fromRes.date, toRes.date)) {
+      setDateErrors(prev => ({ ...prev, range: "טווח תאריכים לא תקין (תאריך 'עד' לפני 'מ')" }));
+      setFilteredSessions([]);
+      setTotals({ totalPay: 0, totalHours: 0, totalSessions: 0, totalsByEmployee: [] });
+      return;
+    }
+    setDateErrors(prev => ({ ...prev, range: null }));
     const res = computePeriodTotals({
       workSessions,
       employees,
       services,
-      startDate: start.toISOString().slice(0,10),
-      endDate: end.toISOString().slice(0,10),
+      startDate: toISODateString(fromRes.date),
+      endDate: toISODateString(toRes.date),
       serviceFilter: filters.serviceId,
       employeeFilter: filters.selectedEmployee,
       employeeTypeFilter: filters.employeeType
@@ -101,7 +107,7 @@ export default function Reports() {
       totalSessions: res.totalSessions,
       totalsByEmployee: res.totalsByEmployee
     });
-  }, [workSessions, employees, services, filters]);
+  }, [workSessions, employees, services, filters, setDateErrors]);
 
   useEffect(() => {
     loadInitialData();
@@ -203,7 +209,14 @@ export default function Reports() {
             שים לב: נבחר טווח חלקי של חודש. הסיכומים מתבססים רק על הרישומים שבטווח שנבחר.
           </div>
         )}
-        <ReportsFilters filters={filters} setFilters={setFilters} employees={employees} services={services} isLoading={isLoading} />
+        <ReportsFilters
+          filters={filters}
+          setFilters={setFilters}
+          employees={employees}
+          services={services}
+          errors={dateErrors}
+          onDateBlur={handleDateBlur}
+        />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">

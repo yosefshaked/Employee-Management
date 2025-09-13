@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent } from "@/components/ui/card";
 import { Filter } from "lucide-react";
 
-export default function ReportsFilters({ filters, setFilters, employees, isLoading, services = [] }) {
+export default function ReportsFilters({ filters, setFilters, employees, services = [], errors = {}, onDateBlur }) {
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value }));
   };
@@ -40,19 +40,27 @@ export default function ReportsFilters({ filters, setFilters, employees, isLoadi
           <div className="space-y-2">
             <Label className="text-sm font-semibold">תאריך מ</Label>
             <Input
-              type="date"
+              type="text"
+              placeholder="DD/MM/YYYY"
               value={filters.dateFrom}
               onChange={(e) => handleFilterChange('dateFrom', e.target.value)}
+              onBlur={() => onDateBlur && onDateBlur('dateFrom', filters.dateFrom)}
+              className={errors.dateFrom ? 'border-red-500' : ''}
             />
+            {errors.dateFrom && <p className="text-sm text-red-500">{errors.dateFrom}</p>}
           </div>
 
           <div className="space-y-2">
             <Label className="text-sm font-semibold">תאריך עד</Label>
             <Input
-              type="date"
+              type="text"
+              placeholder="DD/MM/YYYY"
               value={filters.dateTo}
               onChange={(e) => handleFilterChange('dateTo', e.target.value)}
+              onBlur={() => onDateBlur && onDateBlur('dateTo', filters.dateTo)}
+              className={errors.dateTo ? 'border-red-500' : ''}
             />
+            {errors.dateTo && <p className="text-sm text-red-500">{errors.dateTo}</p>}
           </div>
 
           <div className="space-y-2">
@@ -89,6 +97,11 @@ export default function ReportsFilters({ filters, setFilters, employees, isLoadi
               </SelectContent>
             </Select>
           </div>
+          {errors.range && (
+            <div className="md:col-span-2 lg:col-span-5 text-sm text-red-500">
+              {errors.range}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

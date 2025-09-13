@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
@@ -10,6 +10,7 @@ import Employees from './Pages/Employees.jsx';
 import TimeEntry from './Pages/TimeEntry.jsx';
 import Adjustments from './Pages/Adjustments.jsx';
 import Reports from './Pages/Reports.jsx';
+import ReportsErrorBoundary from './components/reports/ReportsErrorBoundary.js';
 import Services from './Pages/Services.jsx';
 
 // קומפוננטה ראשית שמגדירה את הניווט (עכשיו עם לוגיקת טעינה)
@@ -25,7 +26,7 @@ function App() {
         <Route path="/Employees" element={<Employees />} />
         <Route path="/TimeEntry" element={<TimeEntry />} />
         <Route path="/Adjustments" element={<Adjustments />} />
-        <Route path="/Reports" element={<Reports />} />
+        <Route path="/Reports" element={<ReportsErrorBoundary><Reports /></ReportsErrorBoundary>} />
         <Route path="/Services" element={<Services />} />
       </Routes>
     </Layout>
@@ -40,3 +41,5 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </HashRouter>
   </React.StrictMode>
 );
+
+export default App;
