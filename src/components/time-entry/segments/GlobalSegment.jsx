@@ -5,27 +5,31 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Copy, Trash2 } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { InfoTooltip } from '@/components/InfoTooltip.jsx';
 
 export default function GlobalSegment({ segment, onChange, onDuplicate, onDelete, isFirst, dailyRate, error }) {
   return (
     <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5">
-      <div className="flex gap-2 mb-3">
+      <div className="flex justify-end gap-2 mb-3">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button type="button" variant="ghost" size="icon" onClick={() => onDuplicate(segment.id)} aria-label="שכפל מקטע שעות" className="h-7 w-7"><Copy className="h-4 w-4" /></Button>
+            <Button type="button" variant="ghost" size="icon" onClick={() => onDelete(segment.id)} aria-label="מחק רישום" className="h-7 w-7"><Trash2 className="h-4 w-4" /></Button>
           </TooltipTrigger>
-          <TooltipContent>שכפל מקטע שעות</TooltipContent>
+          <TooltipContent>מחק רישום</TooltipContent>
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button type="button" variant="ghost" size="icon" onClick={() => onDelete(segment.id)} aria-label="מחק מקטע שעות" className="h-7 w-7"><Trash2 className="h-4 w-4" /></Button>
+            <Button type="button" variant="ghost" size="icon" onClick={() => onDuplicate(segment.id)} aria-label="שכפל רישום" className="h-7 w-7"><Copy className="h-4 w-4" /></Button>
           </TooltipTrigger>
-          <TooltipContent>מחק מקטע שעות</TooltipContent>
+          <TooltipContent>שכפל רישום</TooltipContent>
         </Tooltip>
       </div>
       <div className="space-y-3">
         <div className="space-y-1">
-          <Label className="text-sm font-medium text-slate-700">שעות</Label>
+          <div className="flex items-center gap-1">
+            <Label className="text-sm font-medium text-slate-700">שעות</Label>
+            <InfoTooltip text="בגלובלי השכר מחושב לפי יום; שדה השעות להצגה בלבד." />
+          </div>
           <Input type="number" step="0.25" min="0" value={segment.hours} onChange={e => onChange(segment.id, { hours: e.target.value })} className="bg-white h-10 text-base leading-6" />
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>

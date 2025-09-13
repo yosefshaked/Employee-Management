@@ -4,16 +4,22 @@ import GlobalSegment from './segments/GlobalSegment.jsx';
 import HourlySegment from './segments/HourlySegment.jsx';
 import InstructorSegment from './segments/InstructorSegment.jsx';
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
-import { sumHours } from './dayUtils.js';
+import { sumHours, removeSegment } from './dayUtils.js';
+import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 
 export default function TimeEntryForm({ employee, services = [], onSubmit, getRateForDate, initialRows = null, selectedDate }) {
   const isGlobal = employee.employee_type === 'global';
   const isHourly = employee.employee_type === 'hourly';
 
-  const createSeg = () => ({ id: crypto.randomUUID(), hours: '', service_id: '', sessions_count: '', students_count: '', notes: '' });
-  const [segments, setSegments] = useState(initialRows && initialRows.length > 0 ? initialRows.map(r => ({ ...r, id: r.id || crypto.randomUUID() })) : [createSeg()]);
+  const createSeg = () => ({ id: crypto.randomUUID(), hours: '', service_id: '', sessions_count: '', students_count: '', notes: '', _status: 'new' });
+  const [segments, setSegments] = useState(
+    initialRows && initialRows.length > 0
+      ? initialRows.map(r => ({ ...r, id: r.id || crypto.randomUUID(), _status: 'existing' }))
+      : [createSeg()]
+  );
   const [dayType, setDayType] = useState('regular');
   const [errors, setErrors] = useState({});
+  const [pendingDelete, setPendingDelete] = useState(null);
 
   const dailyRate = useMemo(() => {
     if (!isGlobal) return 0;
@@ -25,16 +31,31 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
   const duplicateSeg = (id) => {
     setSegments(prev => {
       const idx = prev.findIndex(s => s.id === id);
-      const copy = { ...prev[idx], id: crypto.randomUUID() };
+      const copy = { ...prev[idx], id: crypto.randomUUID(), _status: 'new' };
       return [...prev.slice(0, idx + 1), copy, ...prev.slice(idx + 1)];
     });
   };
-  const deleteSeg = (id) => setSegments(prev => prev.filter(s => s.id !== id || prev.length === 1));
+  const deleteSeg = (id) => {
+    const target = segments.find(s => s.id === id);
+    if (!target) return;
+    if (target._status === 'new') {
+      const res = removeSegment(segments, id);
+      if (res.removed) setSegments(res.rows);
+      return;
+    }
+    const active = segments.filter(s => s._status !== 'deleted');
+    if (active.length <= 1) return;
+    setPendingDelete(id);
+  };
+  const confirmDelete = () => {
+    setSegments(prev => prev.map(s => s.id === pendingDelete ? { ...s, _status: 'deleted' } : s));
+    setPendingDelete(null);
+  };
   const changeSeg = (id, patch) => setSegments(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
 
   const validate = () => {
     const err = {};
-    segments.forEach(s => {
+    segments.filter(s => s._status !== 'deleted').forEach(s => {
       if (isGlobal || isHourly) {
         const h = parseFloat(s.hours);
         if (!h || h <= 0) err[s.id] = 'שעות נדרשות וגדולות מ־0';
@@ -55,13 +76,14 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
   };
 
   const summary = useMemo(() => {
+    const active = segments.filter(s => s._status !== 'deleted');
     if (isGlobal) return `שכר יומי: ₪${dailyRate.toFixed(2)}`;
     if (isHourly) {
       const { rate } = getRateForDate(employee.id, selectedDate, null);
-      const h = sumHours(segments);
+      const h = sumHours(active);
       return `שכר יומי: ₪${(h * rate).toFixed(2)} | סה"כ שעות: ${h}`;
     }
-    const total = segments.reduce((acc, s) => {
+    const total = active.reduce((acc, s) => {
       const { rate } = getRateForDate(employee.id, selectedDate, s.service_id || null);
       return acc + (parseFloat(s.sessions_count || 0) * parseFloat(s.students_count || 0) * rate);
     }, 0);
@@ -90,12 +112,19 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
         showDayType={isGlobal}
         dayType={dayType}
         onDayTypeChange={setDayType}
-        segments={segments}
+        segments={segments.filter(s => s._status !== 'deleted')}
         renderSegment={renderSegment}
         onAddSegment={addSeg}
         addLabel={addLabel}
         summary={summary}
         onCancel={() => onSubmit(null)}
+      />
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={() => setPendingDelete(null)}
+        onConfirm={confirmDelete}
+        title="מחיקה בלתי הפיכה"
+        description="את/ה עומד/ת למחוק רישום מהמסד. הפעולה בלתי הפיכה ולא ניתן לשחזר."
       />
     </form>
   );

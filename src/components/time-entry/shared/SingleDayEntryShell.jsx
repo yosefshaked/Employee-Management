@@ -31,12 +31,12 @@ export default function SingleDayEntryShell({
         <Button type="button" variant="outline" onClick={onAddSegment} className="self-start">
           {addLabel}
         </Button>
+        <div className="text-sm text-right text-slate-700 mt-3">{summary}</div>
       </div>
-      <div className="sticky bottom-0 z-20 bg-background border-t px-4 py-3 flex justify-between items-center">
-        <div className="text-sm text-slate-700">{summary}</div>
-        <div className="flex gap-2">
-          <Button type="button" variant="outline" onClick={onCancel}>בטל</Button>
-          <Button type="submit">שמור רישומים</Button>
+      <div className="sticky bottom-0 z-20 bg-background border-t px-4 py-3">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+          <Button type="button" variant="outline" onClick={onCancel} className="sm:order-1">בטל</Button>
+          <Button type="submit" className="sm:order-2">שמור רישומים</Button>
         </div>
       </div>
     </div>

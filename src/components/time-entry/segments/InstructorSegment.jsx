@@ -11,18 +11,18 @@ export default function InstructorSegment({ segment, services, onChange, onDupli
   const total = (parseFloat(segment.sessions_count || 0) * parseFloat(segment.students_count || 0)) * rate;
   return (
     <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5">
-      <div className="flex gap-2 mb-3">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button type="button" variant="ghost" size="icon" onClick={() => onDuplicate(segment.id)} aria-label="שכפל רישום" className="h-7 w-7"><Copy className="h-4 w-4" /></Button>
-          </TooltipTrigger>
-          <TooltipContent>שכפל רישום</TooltipContent>
-        </Tooltip>
+      <div className="flex justify-end gap-2 mb-3">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button type="button" variant="ghost" size="icon" onClick={() => onDelete(segment.id)} aria-label="מחק רישום" className="h-7 w-7"><Trash2 className="h-4 w-4" /></Button>
           </TooltipTrigger>
           <TooltipContent>מחק רישום</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button type="button" variant="ghost" size="icon" onClick={() => onDuplicate(segment.id)} aria-label="שכפל רישום" className="h-7 w-7"><Copy className="h-4 w-4" /></Button>
+          </TooltipTrigger>
+          <TooltipContent>שכפל רישום</TooltipContent>
         </Tooltip>
       </div>
       <div className="grid grid-cols-12 gap-4 items-start">

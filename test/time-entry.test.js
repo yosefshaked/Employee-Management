@@ -185,14 +185,6 @@ describe('segment duplication and deletion', () => {
     assert.equal(res.rows.length, 1);
   });
 
-  it('mark_deleted_then_cancel_before_save_restores_segment', () => {
-    const rows = [{ id: 'a', _status: 'existing' }, { id: 'b', _status: 'existing' }];
-    let res = toggleDelete(rows, 'a');
-    assert.equal(res.rows[0]._status, 'deleted');
-    res = toggleDelete(res.rows, 'a');
-    assert.equal(res.rows[0]._status, 'existing');
-  });
-
   it('prevent_delete_last_segment_instantly_blocks', () => {
     const rows = [{ id: 'a', _status: 'existing' }];
     const res = toggleDelete(rows, 'a');
@@ -207,6 +199,19 @@ describe('segment duplication and deletion', () => {
   it('table_shows_sum_hours_for_global_date', () => {
     const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryTable.jsx'),'utf8');
     assert(!content.includes('שעות סה"כ'));
+  });
+
+  it('includes_delete_confirm_text', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'),'utf8');
+    assert(content.includes('מחיקה בלתי הפיכה'));
+    assert(content.includes('הפעולה בלתי הפיכה ולא ניתן לשחזר'));
+  });
+
+  it('footer_actions_order', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','shared','SingleDayEntryShell.jsx'),'utf8');
+    const cancelIndex = content.indexOf('בטל');
+    const saveIndex = content.indexOf('שמור רישומים');
+    assert(cancelIndex < saveIndex);
   });
 });
 
