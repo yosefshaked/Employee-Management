@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
 import EntryRow from './EntryRow.jsx';
-import { copyFromPrevious } from './multiDateUtils.js';
+import { copyFromPrevious, formatDatesCount } from './multiDateUtils.js';
 import { format } from 'date-fns';
 import { useTimeEntry } from './useTimeEntry.js';
 import { ChevronDown, ChevronUp } from 'lucide-react';
@@ -79,14 +79,18 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
               return (
                 <div key={empId} className="space-y-2">
                   <div
-                    className="flex flex-row-reverse items-center justify-between bg-slate-100 px-3 py-2 rounded-md cursor-pointer"
+                    className="flex items-center bg-slate-50 px-3 py-2 rounded-xl cursor-pointer"
                     onClick={() => toggleEmp(empId)}
                   >
-                    <span className="font-medium">{emp.name}</span>
-                    <div className="flex items-center gap-2 text-sm text-slate-600">
-                      <span>{items.length}</span>
-                      {isCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-                    </div>
+                    <span className="truncate max-w-[60%] font-medium">{emp.name}</span>
+                    <span className="ml-auto flex items-center gap-1 text-sm text-muted-foreground">
+                      {formatDatesCount(items.length)}
+                      {isCollapsed ? (
+                        <ChevronDown className="h-4 w-4" />
+                      ) : (
+                        <ChevronUp className="h-4 w-4" />
+                      )}
+                    </span>
                   </div>
                   {!isCollapsed && (
                     <div className="space-y-4 mt-2">

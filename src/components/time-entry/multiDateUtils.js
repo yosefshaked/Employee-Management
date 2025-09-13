@@ -13,3 +13,9 @@ export function fillDown(rows, field) {
   if (first === undefined) return rows;
   return rows.map(r => ({ ...r, [field]: r[field] || first }));
 }
+
+export function formatDatesCount(n) {
+  if (n === 1) return 'תאריך להזנה';
+  if (n > 1) return `${n} תאריכים להזנה`;
+  return 'אין תאריכים';
+}
