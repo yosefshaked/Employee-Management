@@ -1,7 +1,10 @@
 export function copyFromPrevious(rows, index, field) {
   if (index === 0) return rows;
+  const prev = rows[index - 1];
+  const curr = rows[index];
+  if (prev.employee_id !== curr.employee_id) return rows;
   const updated = [...rows];
-  updated[index][field] = updated[index - 1][field];
+  updated[index] = { ...curr, [field]: prev[field] };
   return updated;
 }
 

@@ -28,10 +28,16 @@ describe('multi-date save', () => {
 });
 
 describe('copy and fill utilities', () => {
-  it('copyFromPrevious copies only to current row', () => {
-    const rows = [{ hours: '1' }, { hours: '' }];
-    const result = copyFromPrevious(rows, 1, 'hours');
+  it('copyFromPrevious copies only within same employee', () => {
+    const rows = [
+      { employee_id: 'e1', hours: '1' },
+      { employee_id: 'e1', hours: '' },
+      { employee_id: 'e2', hours: '' }
+    ];
+    let result = copyFromPrevious(rows, 1, 'hours');
     assert.equal(result[1].hours, '1');
+    result = copyFromPrevious(result, 2, 'hours');
+    assert.equal(result[2].hours, '');
   });
   it('fillDown fills empty rows from first', () => {
     const rows = [{ sessions_count: '2' }, { sessions_count: '' }, { sessions_count: '3' }];
