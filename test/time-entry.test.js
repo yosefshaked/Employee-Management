@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { calculateGlobalDailyRate } from '../src/lib/payroll.js';
 import { copyFromPrevious, fillDown, isRowCompleteForProgress } from '../src/components/time-entry/multiDateUtils.js';
 import { applyDayType, removeSegment } from '../src/components/time-entry/dayUtils.js';
+import { duplicateSegment, toggleDelete } from '../src/components/time-entry/dayUtils.js';
 import { useTimeEntry } from '../src/components/time-entry/useTimeEntry.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -99,6 +100,47 @@ describe('day editor helpers', () => {
     const res = applyDayType(rows, 'paid_leave');
     assert.equal(res[0].notes, 'n');
     assert.equal(res[0].date, '2024-01-01');
+  });
+});
+
+describe('segment duplication and deletion', () => {
+  it('duplicate_creates_unsaved_segment', () => {
+    const rows = [{ id: 'a', hours: '2', _status: 'existing' }];
+    const res = duplicateSegment(rows, 'a');
+    assert.equal(res.length, 2);
+    assert.equal(res[1].hours, '2');
+    assert.equal(res[1]._status, 'new');
+  });
+
+  it('trash_unsaved_removes_immediately', () => {
+    const rows = [{ id: 'a', _status: 'new' }, { id: 'b', _status: 'existing' }];
+    const res = removeSegment(rows, 'a');
+    assert.equal(res.removed, true);
+    assert.equal(res.rows.length, 1);
+  });
+
+  it('trash_existing_marks_and_deletes_on_save', () => {
+    const rows = [{ id: 'a', _status: 'existing' }, { id: 'b', _status: 'existing' }];
+    let res = toggleDelete(rows, 'a');
+    assert.equal(res.rows[0]._status, 'deleted');
+    res = toggleDelete(res.rows, 'a');
+    assert.equal(res.rows[0]._status, 'existing');
+  });
+
+  it('prevent_delete_last_segment_toggle', () => {
+    const rows = [{ id: 'a', _status: 'existing' }];
+    const res = toggleDelete(rows, 'a');
+    assert.equal(res.changed, false);
+  });
+
+  it('hours_required_message_exists', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'),'utf8');
+    assert(content.includes('שעות נדרשות וגדולות מ־0'));
+  });
+
+  it('table_shows_sum_hours_for_global_date', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryTable.jsx'),'utf8');
+    assert(content.includes('שעות סה"כ'));
   });
 });
 

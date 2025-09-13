@@ -1,138 +1,200 @@
-import React, { useState, useMemo } from 'react';
-import { Button } from "@/components/ui/button";
-import { Save, Plus } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import EntryRow, { computeRowPayment } from './EntryRow.jsx';
-import DayHeader from './DayHeader.jsx';
-import { applyDayType, removeSegment } from './dayUtils.js';
+import React, { useState, useRef, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { Save, Plus, Copy, Trash2, RotateCcw } from 'lucide-react';
+import EntryRow from './EntryRow.jsx';
+import { removeSegment, duplicateSegment, toggleDelete, sumHours } from './dayUtils.js';
 import { toast } from 'sonner';
-import { aggregateGlobalDayForDate } from '@/lib/payroll.js';
+import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 
-export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate, initialRows = null, selectedDate, hideSubmitButton = false, formId }) {
+function GlobalForm({ employee, onSubmit, getRateForDate, initialRows, selectedDate, onTotalsChange, hideSubmitButton, formId }) {
+  const createSeg = () => ({ id: crypto.randomUUID(), hours: '', notes: '', _status: 'new' });
+  const [segments, setSegments] = useState(() => {
+    if (initialRows && initialRows.length > 0) {
+      return initialRows.map(r => ({ id: r.id, hours: r.hours || '', notes: r.notes || '', _status: 'existing' }));
+    }
+    return [createSeg()];
+  });
+  const [errors, setErrors] = useState({});
+  const refs = useRef({});
+
+  const { rate } = getRateForDate(employee.id, selectedDate, null);
+  let dailyRate = 0;
+  try { dailyRate = calculateGlobalDailyRate(employee, selectedDate, rate); } catch { dailyRate = 0; }
+
+  useEffect(() => {
+    const totalH = sumHours(segments);
+    onTotalsChange && onTotalsChange({ hours: totalH, daily: dailyRate });
+  }, [segments, dailyRate, onTotalsChange]);
+
+  const addSeg = () => {
+    const seg = createSeg();
+    setSegments(prev => [...prev, seg]);
+    setTimeout(() => refs.current[seg.id]?.focus(), 0);
+  };
+
+  const duplicate = (id) => {
+    setSegments(prev => {
+      const updated = duplicateSegment(prev, id);
+      const newSeg = updated.find(s => !prev.some(p => p.id === s.id));
+      setTimeout(() => refs.current[newSeg.id]?.focus(), 0);
+      return updated;
+    });
+  };
+
+  const deleteSeg = (seg) => {
+    if (seg._status === 'new') {
+      const res = removeSegment(segments, seg.id);
+      if (!res.removed) {
+        toast('נדרש לפחות מקטע אחד ליום גלובלי');
+      } else {
+        setSegments(res.rows);
+      }
+    } else {
+      if (window.confirm('למחוק מקטע שעות?')) {
+        const res = toggleDelete(segments, seg.id);
+        if (!res.changed) {
+          toast('נדרש לפחות מקטע אחד ליום גלובלי');
+        } else {
+          setSegments(res.rows);
+        }
+      }
+    }
+  };
+
+  const undoDelete = (id) => {
+    setSegments(prev => toggleDelete(prev, id).rows);
+  };
+
+  const handleChange = (id, patch) => {
+    setSegments(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const err = {};
+    segments.forEach(s => {
+      if (s._status === 'deleted') return;
+      const h = parseFloat(s.hours);
+      if (s._status === 'new') {
+        if (isNaN(h) || h <= 0) err[s.id] = 'שעות נדרשות וגדולות מ־0';
+      } else if (isNaN(h) || h < 0) err[s.id] = 'שעות נדרשות וגדולות מ־0';
+    });
+    if (Object.keys(err).length > 0) {
+      setErrors(err);
+      return;
+    }
+    setErrors({});
+    onSubmit({ rows: segments });
+  };
+
+  const firstActive = segments.find(s => s._status !== 'deleted');
+
+  return (
+    <form id={formId} onSubmit={handleSubmit} className="flex flex-col gap-3">
+      <Button type="button" variant="outline" onClick={addSeg} className="self-start"><Plus className="w-4 h-4 ml-2" />הוסף מקטע שעות</Button>
+      <div className="flex flex-col gap-3">
+        {segments.map(seg => (
+          <div key={seg.id} className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5 relative">
+            <div className="absolute top-2 left-2 flex gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button type="button" variant="ghost" size="icon" onClick={() => duplicate(seg.id)} aria-label="שכפל מקטע שעות" className="h-7 w-7"><Copy className="h-4 w-4" /></Button>
+                </TooltipTrigger>
+                <TooltipContent>שכפל מקטע שעות</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => seg._status === 'deleted' ? undoDelete(seg.id) : deleteSeg(seg)}
+                    aria-label={seg._status === 'deleted' ? 'בטל מחיקה' : 'מחק מקטע שעות'}
+                    className="h-7 w-7"
+                  >
+                    {seg._status === 'deleted' ? <RotateCcw className="h-4 w-4" /> : <Trash2 className="h-4 w-4" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{seg._status === 'deleted' ? 'בטל מחיקה' : 'מחק מקטע שעות'}</TooltipContent>
+              </Tooltip>
+            </div>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-sm font-medium text-slate-700">שעות</Label>
+                <Input
+                  ref={el => refs.current[seg.id] = el}
+                  type="number"
+                  step="0.25"
+                  min="0"
+                  value={seg.hours}
+                  disabled={seg._status === 'deleted'}
+                  onChange={e => handleChange(seg.id, { hours: e.target.value })}
+                  className="bg-white h-10 text-base leading-6"
+                />
+                {errors[seg.id] && <p className="text-sm text-red-600">{errors[seg.id]}</p>}
+              </div>
+              <div className="space-y-1">
+                <Label className="text-sm font-medium text-slate-700">הערות</Label>
+                <Textarea
+                  value={seg.notes}
+                  disabled={seg._status === 'deleted'}
+                  onChange={e => handleChange(seg.id, { notes: e.target.value })}
+                  className="bg-white text-base leading-6"
+                  rows={2}
+                  maxLength={300}
+                  placeholder="הערה חופשית (לא חובה)"
+                />
+              </div>
+            </div>
+            <div className="mt-4 text-sm text-right text-slate-700">
+              סה"כ לשורה: <span className="font-bold">₪{dailyRate.toFixed(2)}</span>
+              {seg.id !== firstActive?.id && <span className="block text-xs text-slate-500">נספר לפי יום — רישום זה לא מכפיל שכר</span>}
+              {seg._status === 'deleted' && <span className="block text-xs text-red-600">סומן למחיקה</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+      <Button type="button" variant="outline" onClick={addSeg} className="self-start"><Plus className="w-4 h-4 ml-2" />הוסף מקטע שעות</Button>
+      {!hideSubmitButton && <Button type="submit" className="self-end bg-gradient-to-r from-green-500 to-blue-500 text-white"><Save className="w-4 h-4 ml-2" />שמור רישומים</Button>}
+    </form>
+  );
+}
+
+export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate, initialRows = null, selectedDate, onTotalsChange, hideSubmitButton = false, formId }) {
   const isGlobal = employee.employee_type === 'global';
-  const hasExisting = initialRows && initialRows.length > 0;
 
-  const createNewRow = (dateToUse, dt) => ({
+  const createRow = () => ({
     id: crypto.randomUUID(),
-    isNew: true,
-    date: dateToUse || new Date().toISOString().split('T')[0],
+    date: selectedDate,
     service_id: '',
     hours: '',
     sessions_count: '1',
     students_count: '',
     notes: '',
-    dayType: isGlobal ? (dt || null) : undefined,
+    isNew: true,
   });
+  const [rows, setRows] = useState(initialRows && initialRows.length > 0 ? initialRows : [createRow()]);
 
-  const [rows, setRows] = useState(() => {
-    if (hasExisting) return initialRows.map(r => ({ ...r, dayType: r.entry_type === 'paid_leave' ? 'paid_leave' : 'regular' }));
-    return [createNewRow(selectedDate)];
-  });
-  const [dayType, setDayType] = useState(() => (hasExisting && isGlobal ? (initialRows[0].entry_type === 'paid_leave' ? 'paid_leave' : 'regular') : null));
-
-  const totalCalculatedPayment = useMemo(() => {
-    if (employee.employee_type === 'global') {
-      const payments = rows.map(r => ({
-        ...r,
-        entry_type: r.dayType === 'paid_leave' ? 'paid_leave' : 'hours',
-        employee_id: employee.id,
-        total_payment: computeRowPayment(r, employee, services, getRateForDate)
-      }));
-      const agg = aggregateGlobalDayForDate(payments, { [employee.id]: employee });
-      return agg.total;
-    }
-    return rows.reduce((sum, row) => sum + computeRowPayment(row, employee, services, getRateForDate), 0);
-  }, [rows, employee, services, getRateForDate]);
-
-  const duplicateMap = useMemo(() => {
-    if (employee.employee_type !== 'global') return {};
-    const payments = rows.map(r => ({
-      ...r,
-      entry_type: r.dayType === 'paid_leave' ? 'paid_leave' : 'hours',
-      employee_id: employee.id,
-      total_payment: computeRowPayment(r, employee, services, getRateForDate)
-    }));
-    const agg = aggregateGlobalDayForDate(payments, { [employee.id]: employee });
-    const res = {};
-    rows.forEach(r => {
-      const info = agg.byKey.get(`${employee.id}|${r.date}`);
-      res[r.id] = info ? info.firstRowId !== r.id : false;
-    });
-    return res;
-  }, [rows, employee, services, getRateForDate]);
-
-  const addRow = () => {
-    const referenceDate = rows.length > 0 ? rows[0].date : selectedDate;
-    setRows(prev => [...prev, createNewRow(referenceDate, dayType)]);
-  };
-
-  const removeRow = (id) => {
-    if (isGlobal) {
-      const res = removeSegment(rows, id);
-      if (!res.removed) {
-        toast('נדרש לפחות מקטע אחד ליום גלובלי');
-      } else {
-        setRows(res.rows);
-      }
-    } else {
-      setRows(prev => prev.filter(row => row.id !== id));
-    }
-  };
-
-  const handleRowChange = (id, patch) => {
-    setRows(prev => prev.map(row => row.id === id ? { ...row, ...patch } : row));
-  };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const rowsToSave = isGlobal && hasExisting ? applyDayType(rows, dayType) : rows;
-    onSubmit(rowsToSave);
-  };
+  if (isGlobal) {
+    return <GlobalForm employee={employee} onSubmit={onSubmit} getRateForDate={getRateForDate} initialRows={initialRows} selectedDate={selectedDate} onTotalsChange={onTotalsChange} hideSubmitButton={hideSubmitButton} formId={formId} />;
+  }
+  const addRow = () => setRows(prev => [...prev, createRow()]);
+  const removeRow = (id) => setRows(prev => prev.filter(r => r.id !== id));
+  const handleRowChange = (id, patch) => setRows(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+  const handleSubmit = (e) => { e.preventDefault(); onSubmit({ rows }); };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6" id={formId}>
-      {isGlobal && hasExisting && (
-        <DayHeader dayType={dayType} onChange={setDayType} />
-      )}
-      <div className="space-y-4">
-        {rows.map((row) => (
-          <EntryRow
-            key={row.id}
-            value={row}
-            employee={employee}
-            services={services}
-            getRateForDate={getRateForDate}
-            onChange={(patch) => handleRowChange(row.id, patch)}
-            allowRemove={(!isGlobal || hasExisting) && rows.length > 1}
-            onRemove={() => removeRow(row.id)}
-            isDuplicate={!!duplicateMap[row.id]}
-            hideDayType={isGlobal && (hasExisting || rows.length > 1)}
-            readOnlyDate
-          />
-        ))}
-      </div>
-
-      {isGlobal && hasExisting && (
-        <Button type="button" variant="outline" onClick={addRow}><Plus className="w-4 h-4 ml-2" />הוסף מקטע שעות</Button>
-      )}
-
-      {!isGlobal && (
-        <div className="flex justify-start">
-          <Button type="button" variant="outline" onClick={addRow}><Plus className="w-4 h-4 ml-2" />הוסף רישום</Button>
-        </div>
-      )}
-
-      <Alert variant="info" className="bg-blue-50 border-blue-200">
-        <AlertTitle className="text-blue-800 font-semibold">סיכום כולל לרישומים</AlertTitle>
-        <AlertDescription className="text-blue-700">
-          סה״כ לתשלום עבור כל הרישומים שהוזנו: <span className="font-bold">₪{totalCalculatedPayment.toFixed(2)}</span>
-        </AlertDescription>
-      </Alert>
-      <div className="flex justify-end items-center pt-4">
-        {!hideSubmitButton && (
-          <Button type="submit" className="bg-gradient-to-r from-green-500 to-blue-500 text-white"><Save className="w-4 h-4 ml-2" />שמור רישומים</Button>
-        )}
-      </div>
+    <form onSubmit={handleSubmit} id={formId} className="space-y-4">
+      {rows.map(r => (
+        <EntryRow key={r.id} value={r} employee={employee} services={services} getRateForDate={getRateForDate} onChange={p => handleRowChange(r.id, p)} allowRemove={rows.length > 1} onRemove={() => removeRow(r.id)} />
+      ))}
+      <Button type="button" variant="outline" onClick={addRow}><Plus className="w-4 h-4 ml-2" />הוסף רישום</Button>
+      {!hideSubmitButton && <Button type="submit" className="bg-gradient-to-r from-green-500 to-blue-500 text-white"><Save className="w-4 h-4 ml-2" />שמור רישומים</Button>}
     </form>
   );
 }
+

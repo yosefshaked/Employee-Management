@@ -1,25 +1,44 @@
 import React from 'react';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 
-export default function DayHeader({ dayType, onChange }) {
+const weekNames = ['א׳','ב׳','ג׳','ד׳','ה׳','ו׳','ש׳'];
+
+export default function DayHeader({ employee, date, dayType, onChange, dayTypeError }) {
+  const dayLabel = React.useMemo(() => {
+    const d = new Date(date + 'T00:00:00');
+    const dayName = weekNames[d.getDay()];
+    const dayStr = d.toLocaleDateString('he-IL');
+    return `${dayStr} · יום ${dayName}`;
+  }, [date]);
+
   return (
-    <div className="bg-slate-50 ring-1 ring-slate-200 rounded-xl px-3 py-2 mb-3">
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
-        <div className="space-y-1">
-          <Label className="text-sm font-medium text-slate-700">סוג יום</Label>
-          <Select value={dayType || ''} onValueChange={onChange}>
-            <SelectTrigger className="bg-white h-10 text-base leading-6">
-              <SelectValue placeholder="בחר סוג יום" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="regular">יום רגיל</SelectItem>
-              <SelectItem value="paid_leave">חופשה בתשלום</SelectItem>
-            </SelectContent>
-          </Select>
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between">
+        <div className="text-lg font-semibold truncate">{employee.name}</div>
+        <div className="text-sm text-slate-600">{dayLabel}</div>
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="flex rounded-md overflow-hidden ring-1 ring-slate-200">
+          <Button
+            type="button"
+            variant={dayType === 'regular' ? 'default' : 'ghost'}
+            className="rounded-none"
+            onClick={() => onChange('regular')}
+          >
+            יום רגיל
+          </Button>
+          <Button
+            type="button"
+            variant={dayType === 'paid_leave' ? 'default' : 'ghost'}
+            className="rounded-none"
+            onClick={() => onChange('paid_leave')}
+          >
+            חופשה בתשלום
+          </Button>
         </div>
       </div>
-      <p className="text-sm text-slate-600 mt-2">שכר גלובלי נספר לפי יום; הוספת מקטע שעות לא מכפילה שכר.</p>
+      {dayTypeError && <p className="text-sm text-red-600">יש לבחור סוג יום</p>}
+      <p className="text-sm text-slate-600">שכר גלובלי נספר לפי יום; הוספת מקטע שעות לא מכפילה שכר.</p>
     </div>
   );
 }

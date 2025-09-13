@@ -11,6 +11,7 @@ import ImportModal from '@/components/import/ImportModal.jsx';
 import EmployeePicker from '../employees/EmployeePicker.jsx';
 import MultiDateEntryModal from './MultiDateEntryModal.jsx';
 import { aggregateGlobalDays, aggregateGlobalDayForDate } from '@/lib/payroll.js';
+import DayHeader from './DayHeader.jsx';
 function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
@@ -20,6 +21,9 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
   const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees]);
   const [importOpen, setImportOpen] = useState(false);
   const [multiModalOpen, setMultiModalOpen] = useState(false);
+  const [dayType, setDayType] = useState(null);
+  const [dayTypeError, setDayTypeError] = useState(false);
+  const [dayTotals, setDayTotals] = useState({ hours: 0, daily: 0 });
   const daysInMonth = useMemo(() => {
     const start = startOfMonth(currentMonth);
     const end = endOfMonth(currentMonth);
@@ -36,6 +40,16 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
     setSelectedEmployees(employees.map(e => e.id));
     setMultiMode(false);
   }, [currentMonth, employees]);
+
+  React.useEffect(() => {
+    if (editingCell) {
+      const existing = editingCell.existingSessions || [];
+      const initial = existing.length > 0 ? (existing[0].entry_type === 'paid_leave' ? 'paid_leave' : 'regular') : null;
+      setDayType(initial);
+      setDayTypeError(false);
+      setDayTotals({ hours: 0, daily: 0 });
+    }
+  }, [editingCell]);
 
 
   const monthlyTotals = useMemo(() => {
@@ -289,45 +303,35 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
         <Dialog open={!!editingCell} onOpenChange={(isOpen) => !isOpen && setEditingCell(null)}>
         <DialogContent wide className="max-w-none w-[98vw] max-w-[1100px] p-0 overflow-hidden">
           {editingCell && (
-            <div
-              data-testid="day-modal-container"
-              className="flex flex-col w-[min(98vw,1100px)] max-w-[98vw] h-[min(92vh,calc(100dvh-2rem))]"
-            >
-              <div
-                data-testid="day-modal-header"
-                className="sticky top-0 z-20 bg-background border-b px-4 py-3"
-              >
-                <DialogHeader className="p-0">
-                  <DialogTitle>
-                    רישום עבור: {editingCell.employee.name} | {format(editingCell.day, 'dd/MM/yyyy', { locale: he })}
-                  </DialogTitle>
-                  <DialogDescription className="sr-only">
-                    הזן או ערוך את פרטי שעות העבודה או המפגשים עבור היום הנבחר.
-                  </DialogDescription>
-                </DialogHeader>
+            <div data-testid="day-modal-container" className="flex flex-col w-[min(98vw,1100px)] max-w-[98vw] h-[min(92vh,calc(100dvh-2rem))]">
+              <div data-testid="day-modal-header" className="sticky top-0 z-20 bg-background border-b px-4 py-3">
+                <DayHeader employee={editingCell.employee} date={format(editingCell.day,'yyyy-MM-dd')} dayType={dayType} onChange={(v)=>{setDayType(v); setDayTypeError(false);}} dayTypeError={dayTypeError} />
               </div>
-              <div
-                data-testid="day-modal-body"
-                className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3"
-              >
+              <div data-testid="day-modal-body" className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
                 <TimeEntryForm
                   employee={editingCell.employee}
                   services={services}
                   initialRows={editingCell.existingSessions}
                   selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
                   getRateForDate={getRateForDate}
+                  onTotalsChange={setDayTotals}
                   hideSubmitButton
                   formId="entry-form"
-                  onSubmit={(updatedRows) => {
-                    onTableSubmit({ employee: editingCell.employee, day: editingCell.day, updatedRows });
+                  onSubmit={({ rows }) => {
+                    if (!dayType) {
+                      setDayTypeError(true);
+                      return;
+                    }
+                    onTableSubmit({ employee: editingCell.employee, day: editingCell.day, dayType, updatedRows: rows });
                     setEditingCell(null);
                   }}
                 />
               </div>
-              <div
-                data-testid="day-modal-footer"
-                className="shrink-0 bg-background border-t px-4 py-3 flex justify-between gap-2"
-              >
+              <div className="shrink-0 bg-background border-t px-4 py-2 flex justify-between text-sm">
+                <span>שעות סה"כ: {dayTotals.hours}</span>
+                <span>שכר יומי: ₪{dayTotals.daily.toFixed(2)} (נספר פעם אחת)</span>
+              </div>
+              <div data-testid="day-modal-footer" className="shrink-0 bg-background border-t px-4 py-3 flex justify-between gap-2">
                 <Button variant="outline" type="button" onClick={() => setEditingCell(null)}>בטל</Button>
                 <Button type="submit" form="entry-form" className="bg-gradient-to-r from-green-500 to-blue-500 text-white">שמור רישומים</Button>
               </div>
