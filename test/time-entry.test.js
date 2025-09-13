@@ -29,6 +29,36 @@ describe('multi-date save', () => {
   });
 });
 
+describe('per-employee day type mapping', () => {
+  it('maps global day types per employee on save', async () => {
+    let inserted = [];
+    const employees = [
+      { id: 'g1', employee_type: 'global' },
+      { id: 'g2', employee_type: 'global' }
+    ];
+    const services = [];
+    const rows = [
+      { employee_id: 'g1', date: '2024-02-01', hours: '' },
+      { employee_id: 'g2', date: '2024-02-01', hours: '' }
+    ];
+    const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
+    const getRateForDate = () => ({ rate: 100 });
+    const { saveRows } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
+    const map = { g1: 'regular', g2: 'paid_leave' };
+    await saveRows(rows, map);
+    assert.equal(inserted[0].entry_type, 'hours');
+    assert.equal(inserted[1].entry_type, 'paid_leave');
+  });
+});
+
+describe('per-employee day type control rendering', () => {
+  it('renders group-level day type control and no top-level control', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','MultiDateEntryModal.jsx'),'utf8');
+    assert(content.includes('סוג יום לעובד זה*'));
+    assert(!content.includes('id="md-daytype"'));
+  });
+});
+
 describe('copy and fill utilities', () => {
   it('copyFromPrevious copies only within same employee', () => {
     const rows = [
@@ -50,38 +80,13 @@ describe('copy and fill utilities', () => {
     assert.equal(result[2].sessions_count, '3');
   });
 
-  it('copies day type for global employees', () => {
-    const rows = [
-      { employee_id: 'g1', dayType: 'regular' },
-      { employee_id: 'g1', dayType: null }
-    ];
-    let { rows: result, success } = copyFromPrevious(rows, 1, 'dayType');
-    assert.equal(success, true);
-    assert.equal(result[1].dayType, 'regular');
+  it('global row requires explicit day type via map', () => {
+    const row = { employee_id: 'g1' };
     const emp = { employee_type: 'global' };
-    assert.equal(isRowCompleteForProgress(result[1], emp), true);
-  });
-
-  it('daytype_required_blocks_body_until_selected', () => {
-    const row = { dayType: null };
-    const emp = { employee_type: 'global' };
-    assert.equal(isRowCompleteForProgress(row, emp), false);
-    row.dayType = 'regular';
-    assert.equal(isRowCompleteForProgress(row, emp), true);
-  });
-
-  it('fails to copy day type when source missing or different employee', () => {
-    const rows = [
-      { employee_id: 'g1', dayType: null },
-      { employee_id: 'g1', dayType: null },
-      { employee_id: 'g2', dayType: 'regular' }
-    ];
-    let res = copyFromPrevious(rows, 1, 'dayType');
-    assert.equal(res.success, false);
-    assert.equal(res.rows[1].dayType, null);
-    res = copyFromPrevious(rows, 2, 'dayType');
-    assert.equal(res.success, false);
-    assert.equal(res.rows[2].dayType, 'regular');
+    const map = {};
+    assert.equal(isRowCompleteForProgress(row, emp, map), false);
+    map.g1 = 'regular';
+    assert.equal(isRowCompleteForProgress(row, emp, map), true);
   });
 });
 
@@ -198,12 +203,13 @@ describe('progress completion rules', () => {
   });
   it('global row requires explicit day type', () => {
     const emp = { employee_type: 'global' };
-    const row = { dayType: null };
-    assert.equal(isRowCompleteForProgress(row, emp), false);
-    row.dayType = 'regular';
-    assert.equal(isRowCompleteForProgress(row, emp), true);
-    row.dayType = 'paid_leave';
-    assert.equal(isRowCompleteForProgress(row, emp), true);
+    const row = { employee_id: 'g1' };
+    const map = {};
+    assert.equal(isRowCompleteForProgress(row, emp, map), false);
+    map.g1 = 'regular';
+    assert.equal(isRowCompleteForProgress(row, emp, map), true);
+    map.g1 = 'paid_leave';
+    assert.equal(isRowCompleteForProgress(row, emp, map), true);
   });
 });
 

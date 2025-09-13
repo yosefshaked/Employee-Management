@@ -1,7 +1,7 @@
 import { calculateGlobalDailyRate } from '../../lib/payroll.js';
 
 export function useTimeEntry({ employees, services, getRateForDate, supabaseClient }) {
-  const saveRows = async (rows) => {
+  const saveRows = async (rows, dayTypeMap = {}) => {
     const client = supabaseClient || (await import('../../supabaseClient.js')).supabase;
     const inserts = [];
     for (const row of rows) {
@@ -11,8 +11,9 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
       const { rate: rateUsed, reason } = getRateForDate(employee.id, row.date, isHourlyOrGlobal ? null : row.service_id);
       if (!rateUsed) throw new Error(reason || 'missing rate');
       let totalPayment = 0;
+      const empDayType = dayTypeMap[row.employee_id];
       const entryType = employee.employee_type === 'global'
-        ? (row.dayType === 'paid_leave' ? 'paid_leave' : 'hours')
+        ? (empDayType === 'paid_leave' ? 'paid_leave' : 'hours')
         : row.entry_type;
 
       if (entryType === 'session') {
