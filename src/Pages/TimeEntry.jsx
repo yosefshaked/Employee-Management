@@ -6,7 +6,6 @@ import RecentActivity from "../components/dashboard/RecentActivity";
 import TimeEntryTable from '../components/time-entry/TimeEntryTable';
 import { toast } from "sonner";
 import { supabase } from "../supabaseClient";
-import { deleteWorkSessions } from '@/api/workSessions.js';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -204,15 +203,10 @@ export default function TimeEntry() {
     try {
       const toInsert = [];
       const toUpdate = [];
-      const toDelete = [];
-      if (paidLeaveId && dayType !== 'paid_leave') {
-        toDelete.push(paidLeaveId);
+      if (paidLeaveId && dayType !== 'paid_leave' && updatedRows.length > 0 && !updatedRows[0].id) {
+        updatedRows[0].id = paidLeaveId;
       }
       for (const row of updatedRows) {
-        if (row._status === 'deleted' && row.id) {
-          toDelete.push(row.id);
-          continue;
-        }
         const hoursValue = parseFloat(row.hours);
         const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
         if (employee.employee_type === 'hourly') {
@@ -271,7 +265,7 @@ export default function TimeEntry() {
           rate_used: rateUsed,
           total_payment: totalPayment,
         };
-        if (row.id && row._status !== 'new') sessionData.id = row.id;
+        if (row.id) sessionData.id = row.id;
         if (employee.employee_type === 'hourly') {
           sessionData.entry_type = 'hours';
           sessionData.hours = hoursValue || 0;
@@ -291,7 +285,11 @@ export default function TimeEntry() {
           sessionData.sessions_count = parseInt(row.sessions_count, 10) || 1;
           sessionData.students_count = parseInt(row.students_count, 10) || null;
         }
-        if (!row.id || row._status === 'new') toInsert.push(sessionData); else toUpdate.push(sessionData);
+        if (row.id) {
+          toUpdate.push(sessionData);
+        } else {
+          toInsert.push(sessionData);
+        }
       }
       if (dayType === 'paid_leave') {
         const { rate: rateUsed, reason } = getRateForDate(employee.id, day, GENERIC_RATE_SERVICE_ID);
@@ -327,9 +325,6 @@ export default function TimeEntry() {
         } else {
           toInsert.push(plRow);
         }
-      }
-      if (toDelete.length > 0) {
-        await deleteWorkSessions(toDelete);
       }
       if (toInsert.length > 0) {
         const { error: insErr } = await supabase.from('WorkSessions').insert(toInsert);

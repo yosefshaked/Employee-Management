@@ -14,5 +14,6 @@
   "kpi.hoursCard.total": "סך כל השעות",
   "tooltip.hoursCard.hourly": "סכימת שעות עבודה שנרשמו לעובדים שעתיים בטווח הנבחר.",
   "tooltip.hoursCard.meetings": "הערכה לפי משך השירותים שהוזנו לכל מפגש.",
-  "tooltip.hoursCard.global": "סכימת קטעי שעות שנרשמו לעובדים גלובליים (ללא ימי חופשה בתשלום)."
+  "tooltip.hoursCard.global": "סכימת קטעי שעות שנרשמו לעובדים גלובליים (ללא ימי חופשה בתשלום)",
+  "error.paidLeaveRequiresEmpty": "יש למחוק את כל הרישומים לפני סימון היום כחופשה בתשלום"
 }

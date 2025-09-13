@@ -95,8 +95,12 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
   const handleSave = (e) => {
     e.preventDefault();
     if (dayType === 'paid_leave') {
-      const deletionRows = segments.filter(s => s.id && s._status !== 'new').map(s => ({ ...s, _status: 'deleted' }));
-      onSubmit({ rows: deletionRows, dayType, paidLeaveId, paidLeaveNotes });
+      const remaining = segments.filter(s => s._status !== 'deleted');
+      if (remaining.length > 0) {
+        toast.error(he['error.paidLeaveRequiresEmpty']);
+        return;
+      }
+      onSubmit({ rows: [], dayType, paidLeaveId, paidLeaveNotes });
       return;
     }
     if (!validate()) return;
