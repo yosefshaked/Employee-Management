@@ -5,12 +5,13 @@ import HourlySegment from './segments/HourlySegment.jsx';
 import InstructorSegment from './segments/InstructorSegment.jsx';
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { sumHours, removeSegment } from './dayUtils.js';
-import ConfirmDeleteDialog from '@/components/common/ConfirmDeleteDialog.jsx';
+import ConfirmPermanentDeleteModal from './ConfirmPermanentDeleteModal.jsx';
+import { deleteTimeEntry } from '@/api/timeEntries.js';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import he from '@/i18n/he.json';
 
-export default function TimeEntryForm({ employee, services = [], onSubmit, getRateForDate, initialRows = null, selectedDate }) {
+export default function TimeEntryForm({ employee, services = [], onSubmit, getRateForDate, initialRows = null, selectedDate, onDeleted }) {
   const isGlobal = employee.employee_type === 'global';
   const isHourly = employee.employee_type === 'hourly';
 
@@ -58,9 +59,16 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
     setPendingDelete({ id, summary });
   };
   const confirmDelete = async () => {
-    setSegments(prev => prev.map(s => s.id === pendingDelete.id ? { ...s, _status: 'deleted' } : s));
-    setPendingDelete(null);
-    toast.success(he['toast.delete.success']);
+    try {
+      await deleteTimeEntry(pendingDelete.id);
+      setSegments(prev => prev.filter(s => s.id !== pendingDelete.id));
+      onDeleted?.(pendingDelete.id);
+      toast.success(he['toast.delete.success']);
+    } catch {
+      toast.error(he['toast.delete.error']);
+    } finally {
+      setPendingDelete(null);
+    }
   };
   const changeSeg = (id, patch) => setSegments(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
 
@@ -130,7 +138,7 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
         summary={summary}
         onCancel={() => onSubmit(null)}
       />
-      <ConfirmDeleteDialog
+      <ConfirmPermanentDeleteModal
         isOpen={pendingDelete !== null}
         onClose={() => setPendingDelete(null)}
         onConfirm={confirmDelete}

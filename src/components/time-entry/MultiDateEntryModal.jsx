@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
@@ -209,6 +209,10 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
           className="max-w-none w-[98vw] max-w-[1200px] p-0 overflow-hidden"
           style={{ maxHeight: 'none' }}
         >
+          <DialogHeader>
+            <DialogTitle className="sr-only">הזנה מרובה</DialogTitle>
+            <DialogDescription className="sr-only">טופס הזנת רישומים למספר תאריכים</DialogDescription>
+          </DialogHeader>
           <div
             data-testid="md-container"
             className="flex flex-col w-full h-[min(92vh,calc(100dvh-2rem))]"

@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import he from '@/i18n/he.json';
 
-export default function ConfirmDeleteDialog({ isOpen, onClose, onConfirm, summary = null }) {
+export default function ConfirmPermanentDeleteModal({ isOpen, onClose, onConfirm, summary = null }) {
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);

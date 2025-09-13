@@ -11,7 +11,7 @@ import ImportModal from '@/components/import/ImportModal.jsx';
 import EmployeePicker from '../employees/EmployeePicker.jsx';
 import MultiDateEntryModal from './MultiDateEntryModal.jsx';
 import { aggregateGlobalDays, aggregateGlobalDayForDate } from '@/lib/payroll.js';
-function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported }) {
+function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported, onDeleted }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
   const [multiMode, setMultiMode] = useState(false);
@@ -288,25 +288,33 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
         </Card>
         {/* The Dialog for editing/adding entries */}
         <Dialog open={!!editingCell} onOpenChange={(isOpen) => !isOpen && setEditingCell(null)}>
-          <DialogContent wide className="max-w-none w-[98vw] max-w-[1100px] p-0 overflow-hidden">
-            {editingCell && (
-              <TimeEntryForm
-                employee={editingCell.employee}
-                services={services}
-                initialRows={editingCell.existingSessions}
-                selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
-                getRateForDate={getRateForDate}
-                onSubmit={(result) => {
-                  if (!result) {
-                    setEditingCell(null);
-                    return;
-                  }
-                  onTableSubmit({ employee: editingCell.employee, day: editingCell.day, dayType: result.dayType, updatedRows: result.rows });
+        <DialogContent wide className="max-w-none w-[98vw] max-w-[1100px] p-0 overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="sr-only">עריכת רישומי זמן</DialogTitle>
+            <DialogDescription className="sr-only">טופס עריכת רישומים</DialogDescription>
+          </DialogHeader>
+          {editingCell && (
+            <TimeEntryForm
+              employee={editingCell.employee}
+              services={services}
+              initialRows={editingCell.existingSessions}
+              selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
+              getRateForDate={getRateForDate}
+              onSubmit={(result) => {
+                if (!result) {
                   setEditingCell(null);
-                }}
-              />
-            )}
-          </DialogContent>
+                  return;
+                }
+                onTableSubmit({ employee: editingCell.employee, day: editingCell.day, dayType: result.dayType, updatedRows: result.rows });
+                setEditingCell(null);
+              }}
+              onDeleted={(id) => {
+                setEditingCell(prev => prev ? { ...prev, existingSessions: prev.existingSessions.filter(s => s.id !== id) } : prev);
+                onDeleted([id]);
+              }}
+            />
+          )}
+        </DialogContent>
         </Dialog>
         <ImportModal
           open={importOpen}

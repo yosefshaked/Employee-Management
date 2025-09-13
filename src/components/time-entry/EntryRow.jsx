@@ -14,7 +14,7 @@ import { InfoTooltip } from '@/components/InfoTooltip.jsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { useEffect, useState } from 'react';
-import ConfirmDeleteDialog from '@/components/common/ConfirmDeleteDialog.jsx';
+import ConfirmPermanentDeleteModal from './ConfirmPermanentDeleteModal.jsx';
 
 export function computeRowPayment(row, employee, services, getRateForDate) {
   const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
@@ -278,7 +278,7 @@ export default function EntryRow({
         <div className="space-y-1 col-span-12 min-w-0">
           <Label className="text-sm font-medium text-slate-700">הערות</Label>
           <Textarea
-            value={row.notes}
+            value={row.notes ?? ''}
             onChange={(e) => handleChange('notes', e.target.value)}
             className="bg-white text-base leading-6 min-h-[88px] resize-y"
             placeholder="הערה חופשית (לא חובה)"
@@ -297,7 +297,7 @@ export default function EntryRow({
         </div>
       )}
       {allowRemove && (
-        <ConfirmDeleteDialog
+        <ConfirmPermanentDeleteModal
           isOpen={confirmOpen}
           onClose={() => setConfirmOpen(false)}
           onConfirm={async () => {

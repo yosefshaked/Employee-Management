@@ -310,6 +310,10 @@ export default function TimeEntry() {
       setIsLoading(false);
     }
   };
+
+  const handleSessionsDeleted = (ids) => {
+    setWorkSessions(prev => prev.filter(ws => !ids.includes(ws.id)));
+  };
   
   const selectedEmployee = employees.find(e => e.id === selectedEmployeeId);
 
@@ -379,6 +383,7 @@ export default function TimeEntry() {
               getRateForDate={getRateForDate}
               onTableSubmit={handleTableSubmit}
               onImported={loadInitialData}
+              onDeleted={handleSessionsDeleted}
             />
           </TabsContent>
         </Tabs>
