@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.3.8**
-**Last Updated: 2025-09-14**
+**Version: 1.3.9**
+**Last Updated: 2025-09-13**
 
 ## 1. Vision & Purpose
 
@@ -151,6 +151,9 @@ Buttons in the modal allow downloading a CSV template (UTF‑8 with BOM) and a b
 - `adjustment` rows require an `adjustment_amount` and ignore other fields.
 
 Only valid rows are inserted into `WorkSessions`; the summary dialog lists inserted, failed and skipped rows.
+
+### Global Single-Day Editor
+- When editing a global employee for a specific date, the modal aggregates all segments under one day header. A single day type selector controls the entire day, and adding hour segments does **not** multiply pay. Removing the last segment is blocked with a notice.
 
 ---
 

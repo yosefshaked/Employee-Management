@@ -54,7 +54,8 @@ export default function EntryRow({
   flashField = null,
   errors = {},
   rowId,
-  isDuplicate = false
+  isDuplicate = false,
+  hideDayType = false
 }) {
   const row = value;
   const handleChange = (field, val) => onChange({ [field]: val });
@@ -140,22 +141,24 @@ export default function EntryRow({
 
         {employee.employee_type === 'global' && (
           <>
-            <div className={`space-y-1 min-w-[180px] ${flash === 'entry_type' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
-              <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
-                {CopyBtn('dayType')}
-                <span>סוג יום</span>
-              </Label>
-              <Select value={row.entry_type || ''} onValueChange={(v) => handleChange('entry_type', v)}>
-                <SelectTrigger className="bg-white h-10 text-base leading-6">
-                  <SelectValue placeholder="בחר סוג יום" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="hours">יום רגיל</SelectItem>
-                  <SelectItem value="paid_leave">חופשה בתשלום</SelectItem>
-                </SelectContent>
-              </Select>
-              {errors.entry_type && <p className="text-sm text-red-600 mt-1">{errors.entry_type}</p>}
-            </div>
+            {!hideDayType && (
+              <div className={`space-y-1 min-w-[180px] ${flash === 'entry_type' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
+                <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
+                  {CopyBtn('dayType')}
+                  <span>סוג יום</span>
+                </Label>
+                <Select value={row.entry_type || ''} onValueChange={(v) => handleChange('entry_type', v)}>
+                  <SelectTrigger className="bg-white h-10 text-base leading-6">
+                    <SelectValue placeholder="בחר סוג יום" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="hours">יום רגיל</SelectItem>
+                    <SelectItem value="paid_leave">חופשה בתשלום</SelectItem>
+                  </SelectContent>
+                </Select>
+                {errors.entry_type && <p className="text-sm text-red-600 mt-1">{errors.entry_type}</p>}
+              </div>
+            )}
             <div className={`space-y-1 min-w-[160px] ${flash === 'hours' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
               <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
                 {CopyBtn('hours')}

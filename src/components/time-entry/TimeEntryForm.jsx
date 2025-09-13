@@ -3,10 +3,16 @@ import { Button } from "@/components/ui/button";
 import { Save, Plus } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import EntryRow, { computeRowPayment } from './EntryRow.jsx';
+import DayHeader from './DayHeader.jsx';
+import { applyDayType, removeSegment } from './dayUtils.js';
+import { toast } from 'sonner';
 import { aggregateGlobalDayForDate } from '@/lib/payroll.js';
 
-export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate, initialRows = null, selectedDate, allowAddRow = true, hideSubmitButton = false, formId }) {
-  const createNewRow = (dateToUse) => ({
+export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate, initialRows = null, selectedDate, hideSubmitButton = false, formId }) {
+  const isGlobal = employee.employee_type === 'global';
+  const hasExisting = initialRows && initialRows.length > 0;
+
+  const createNewRow = (dateToUse, dt) => ({
     id: crypto.randomUUID(),
     isNew: true,
     date: dateToUse || new Date().toISOString().split('T')[0],
@@ -15,13 +21,14 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
     sessions_count: '1',
     students_count: '',
     notes: '',
-    entry_type: employee.employee_type === 'global' ? 'hours' : undefined,
+    entry_type: isGlobal ? (dt || '') : undefined,
   });
 
   const [rows, setRows] = useState(() => {
-    if (initialRows && initialRows.length > 0) return initialRows;
+    if (hasExisting) return initialRows;
     return [createNewRow(selectedDate)];
   });
+  const [dayType, setDayType] = useState(() => (hasExisting && isGlobal ? initialRows[0].entry_type || '' : ''));
 
   const totalCalculatedPayment = useMemo(() => {
     if (employee.employee_type === 'global') {
@@ -46,14 +53,20 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
 
   const addRow = () => {
     const referenceDate = rows.length > 0 ? rows[0].date : selectedDate;
-    setRows(prev => [...prev, createNewRow(referenceDate)]);
+    setRows(prev => [...prev, createNewRow(referenceDate, dayType)]);
   };
 
   const removeRow = (id) => {
-    setRows(prev => {
-      const newRows = prev.filter(row => row.id !== id);
-      return newRows.length > 0 ? newRows : [createNewRow(selectedDate)];
-    });
+    if (isGlobal) {
+      const res = removeSegment(rows, id);
+      if (!res.removed) {
+        toast('נדרש לפחות מקטע אחד ליום גלובלי');
+      } else {
+        setRows(res.rows);
+      }
+    } else {
+      setRows(prev => prev.filter(row => row.id !== id));
+    }
   };
 
   const handleRowChange = (id, patch) => {
@@ -62,11 +75,15 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSubmit(rows);
+    const rowsToSave = isGlobal ? applyDayType(rows, dayType) : rows;
+    onSubmit(rowsToSave);
   };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6" id={formId}>
+      {isGlobal && hasExisting && (
+        <DayHeader dayType={dayType} onChange={setDayType} />
+      )}
       <div className="space-y-4">
         {rows.map((row) => (
           <EntryRow
@@ -76,12 +93,24 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
             services={services}
             getRateForDate={getRateForDate}
             onChange={(patch) => handleRowChange(row.id, patch)}
-            allowRemove={allowAddRow && typeof row.id === 'string' && rows.length > 1}
+            allowRemove={(!isGlobal || hasExisting) && rows.length > 1}
             onRemove={() => removeRow(row.id)}
             isDuplicate={!!duplicateMap[row.id]}
+            hideDayType={isGlobal && (hasExisting || rows.length > 1)}
+            readOnlyDate
           />
         ))}
       </div>
+
+      {isGlobal && hasExisting && (
+        <Button type="button" variant="outline" onClick={addRow}><Plus className="w-4 h-4 ml-2" />הוסף מקטע שעות</Button>
+      )}
+
+      {!isGlobal && (
+        <div className="flex justify-start">
+          <Button type="button" variant="outline" onClick={addRow}><Plus className="w-4 h-4 ml-2" />הוסף רישום</Button>
+        </div>
+      )}
 
       <Alert variant="info" className="bg-blue-50 border-blue-200">
         <AlertTitle className="text-blue-800 font-semibold">סיכום כולל לרישומים</AlertTitle>
@@ -89,11 +118,7 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
           סה״כ לתשלום עבור כל הרישומים שהוזנו: <span className="font-bold">₪{totalCalculatedPayment.toFixed(2)}</span>
         </AlertDescription>
       </Alert>
-
-      <div className={`flex ${allowAddRow ? 'justify-between' : 'justify-end'} items-center pt-4`}>
-        {allowAddRow && (
-          <Button type="button" variant="outline" onClick={addRow}><Plus className="w-4 h-4 ml-2" />הוסף רישום</Button>
-        )}
+      <div className="flex justify-end items-center pt-4">
         {!hideSubmitButton && (
           <Button type="submit" className="bg-gradient-to-r from-green-500 to-blue-500 text-white"><Save className="w-4 h-4 ml-2" />שמור רישומים</Button>
         )}

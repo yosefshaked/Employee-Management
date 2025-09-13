@@ -6,7 +6,6 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isToday, parseISO } from 'date-fns';
 import { he } from 'date-fns/locale';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import TimeEntryForm from './TimeEntryForm';
 import ImportModal from '@/components/import/ImportModal.jsx';
 import EmployeePicker from '../employees/EmployeePicker.jsx';
@@ -15,7 +14,6 @@ import { aggregateGlobalDays } from '@/lib/payroll.js';
 function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
-  const [tab, setTab] = useState('add');
   const [multiMode, setMultiMode] = useState(false);
   const [selectedDates, setSelectedDates] = useState([]);
   const [selectedEmployees, setSelectedEmployees] = useState(employees.map(e => e.id));
@@ -38,11 +36,6 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
     setMultiMode(false);
   }, [currentMonth, employees]);
 
-  React.useEffect(() => {
-    if (editingCell) {
-      setTab(editingCell.existingSessions.length ? 'edit' : 'add');
-    }
-  }, [editingCell]);
 
   const monthlyTotals = useMemo(() => {
     const start = startOfMonth(currentMonth);
@@ -295,76 +288,49 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
         <Dialog open={!!editingCell} onOpenChange={(isOpen) => !isOpen && setEditingCell(null)}>
         <DialogContent wide className="max-w-none w-[98vw] max-w-[1100px] p-0 overflow-hidden">
           {editingCell && (
-            <Tabs
-              value={tab}
-              onValueChange={setTab}
-              defaultValue={editingCell.existingSessions.length ? 'edit' : 'add'}
+            <div
+              data-testid="day-modal-container"
+              className="flex flex-col w-[min(98vw,1100px)] max-w-[98vw] h-[min(92vh,calc(100dvh-2rem))]"
             >
               <div
-                data-testid="day-modal-container"
-                className="flex flex-col w-[min(98vw,1100px)] max-w-[98vw] h-[min(92vh,calc(100dvh-2rem))]"
+                data-testid="day-modal-header"
+                className="sticky top-0 z-20 bg-background border-b px-4 py-3"
               >
-                <div
-                  data-testid="day-modal-header"
-                  className="sticky top-0 z-20 bg-background border-b px-4 py-3"
-                >
-                  <DialogHeader className="p-0">
-                    <DialogTitle>
-                      רישום עבור: {editingCell.employee.name} | {format(editingCell.day, 'dd/MM/yyyy', { locale: he })}
-                    </DialogTitle>
-                    <DialogDescription className="sr-only">
-                      הזן או ערוך את פרטי שעות העבודה או המפגשים עבור היום הנבחר.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <TabsList className="grid w-full grid-cols-2 mt-2">
-                    <TabsTrigger value="add">הוספת רישום חדש</TabsTrigger>
-                    <TabsTrigger value="edit" disabled={!editingCell.existingSessions.length}>עריכת רישומים קיימים</TabsTrigger>
-                  </TabsList>
-                </div>
-                <div
-                  data-testid="day-modal-body"
-                  className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3"
-                >
-                  <TabsContent value="add">
-                    <TimeEntryForm
-                      employee={editingCell.employee}
-                      services={services}
-                      selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
-                      getRateForDate={getRateForDate}
-                      hideSubmitButton
-                      formId="add-entry-form"
-                      onSubmit={(updatedRows) => {
-                        onTableSubmit({ employee: editingCell.employee, day: editingCell.day, updatedRows });
-                        setEditingCell(null);
-                      }}
-                    />
-                  </TabsContent>
-                  <TabsContent value="edit">
-                    <TimeEntryForm
-                      employee={editingCell.employee}
-                      services={services}
-                      initialRows={editingCell.existingSessions}
-                      selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
-                      getRateForDate={getRateForDate}
-                      allowAddRow={false}
-                      hideSubmitButton
-                      formId="edit-entry-form"
-                      onSubmit={(updatedRows) => {
-                        onTableSubmit({ employee: editingCell.employee, day: editingCell.day, updatedRows });
-                        setEditingCell(null);
-                      }}
-                    />
-                  </TabsContent>
-                </div>
-                <div
-                  data-testid="day-modal-footer"
-                  className="shrink-0 bg-background border-t px-4 py-3 flex justify-between gap-2"
-                >
-                  <Button variant="outline" type="button" onClick={() => setEditingCell(null)}>בטל</Button>
-                  <Button type="submit" form={tab === 'edit' ? 'edit-entry-form' : 'add-entry-form'} className="bg-gradient-to-r from-green-500 to-blue-500 text-white">שמור רישומים</Button>
-                </div>
+                <DialogHeader className="p-0">
+                  <DialogTitle>
+                    רישום עבור: {editingCell.employee.name} | {format(editingCell.day, 'dd/MM/yyyy', { locale: he })}
+                  </DialogTitle>
+                  <DialogDescription className="sr-only">
+                    הזן או ערוך את פרטי שעות העבודה או המפגשים עבור היום הנבחר.
+                  </DialogDescription>
+                </DialogHeader>
               </div>
-            </Tabs>
+              <div
+                data-testid="day-modal-body"
+                className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3"
+              >
+                <TimeEntryForm
+                  employee={editingCell.employee}
+                  services={services}
+                  initialRows={editingCell.existingSessions}
+                  selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
+                  getRateForDate={getRateForDate}
+                  hideSubmitButton
+                  formId="entry-form"
+                  onSubmit={(updatedRows) => {
+                    onTableSubmit({ employee: editingCell.employee, day: editingCell.day, updatedRows });
+                    setEditingCell(null);
+                  }}
+                />
+              </div>
+              <div
+                data-testid="day-modal-footer"
+                className="shrink-0 bg-background border-t px-4 py-3 flex justify-between gap-2"
+              >
+                <Button variant="outline" type="button" onClick={() => setEditingCell(null)}>בטל</Button>
+                <Button type="submit" form="entry-form" className="bg-gradient-to-r from-green-500 to-blue-500 text-white">שמור רישומים</Button>
+              </div>
+            </div>
           )}
         </DialogContent>
         </Dialog>

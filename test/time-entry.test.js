@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { calculateGlobalDailyRate } from '../src/lib/payroll.js';
 import { copyFromPrevious, fillDown, isRowCompleteForProgress } from '../src/components/time-entry/multiDateUtils.js';
+import { applyDayType, removeSegment } from '../src/components/time-entry/dayUtils.js';
 import { useTimeEntry } from '../src/components/time-entry/useTimeEntry.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -72,6 +73,32 @@ describe('copy and fill utilities', () => {
     res = copyFromPrevious(rows, 2, 'dayType');
     assert.equal(res.success, false);
     assert.equal(res.rows[2].entry_type, 'hours');
+  });
+});
+
+describe('day editor helpers', () => {
+  it('applyDayType propagates to all rows', () => {
+    const rows = [{ id: 'a', entry_type: 'hours' }, { id: 'b', entry_type: 'hours' }];
+    const res = applyDayType(rows, 'paid_leave');
+    assert.equal(res[0].entry_type, 'paid_leave');
+    assert.equal(res[1].entry_type, 'paid_leave');
+  });
+
+  it('prevent removing last segment', () => {
+    const rows = [{ id: 'a' }];
+    let result = removeSegment(rows, 'a');
+    assert.equal(result.removed, false);
+    assert.equal(result.rows.length, 1);
+    result = removeSegment([{ id: 'a' }, { id: 'b' }], 'a');
+    assert.equal(result.removed, true);
+    assert.equal(result.rows.length, 1);
+  });
+
+  it('preserves notes and date when applying day type', () => {
+    const rows = [{ id: 'a', entry_type: 'hours', notes: 'n', date: '2024-01-01' }];
+    const res = applyDayType(rows, 'paid_leave');
+    assert.equal(res[0].notes, 'n');
+    assert.equal(res[0].date, '2024-01-01');
   });
 });
 
