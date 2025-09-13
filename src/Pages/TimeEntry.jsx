@@ -6,6 +6,7 @@ import RecentActivity from "../components/dashboard/RecentActivity";
 import TimeEntryTable from '../components/time-entry/TimeEntryTable';
 import { toast } from "sonner";
 import { supabase } from "../supabaseClient";
+import { deleteWorkSessions } from '@/api/workSessions.js';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -290,8 +291,7 @@ export default function TimeEntry() {
         if (!row.id || row._status === 'new') toInsert.push(sessionData); else toUpdate.push(sessionData);
       }
       if (toDelete.length > 0) {
-        const { error: delErr } = await supabase.from('WorkSessions').delete().in('id', toDelete);
-        if (delErr) throw delErr;
+        await deleteWorkSessions(toDelete);
       }
       if (toInsert.length > 0) {
         const { error: insErr } = await supabase.from('WorkSessions').insert(toInsert);

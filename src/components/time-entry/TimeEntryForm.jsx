@@ -6,7 +6,7 @@ import InstructorSegment from './segments/InstructorSegment.jsx';
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { sumHours, removeSegment } from './dayUtils.js';
 import ConfirmPermanentDeleteModal from './ConfirmPermanentDeleteModal.jsx';
-import { deleteTimeEntry } from '@/api/timeEntries.js';
+import { deleteWorkSession } from '@/api/workSessions.js';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import he from '@/i18n/he.json';
@@ -60,7 +60,7 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
   };
   const confirmDelete = async () => {
     try {
-      await deleteTimeEntry(pendingDelete.id);
+      await deleteWorkSession(pendingDelete.id);
       setSegments(prev => prev.filter(s => s.id !== pendingDelete.id));
       onDeleted?.(pendingDelete.id);
       toast.success(he['toast.delete.success']);
