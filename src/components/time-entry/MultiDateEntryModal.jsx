@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
+import { Label } from '@/components/ui/label';
 import EntryRow, { computeRowPayment } from './EntryRow.jsx';
 import { copyFromPrevious, formatDatesCount, isRowCompleteForProgress } from './multiDateUtils.js';
 import { format } from 'date-fns';
@@ -67,6 +68,10 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   const [rows, setRows] = useState(initialRows);
   useEffect(() => { setRows(initialRows); }, [initialRows]);
   const { saveRows } = useTimeEntry({ employees, services, getRateForDate });
+
+  const hasGlobal = useMemo(() => selectedEmployees.some(id => employeesById[id].employee_type === 'global'), [selectedEmployees, employeesById]);
+  const [dayType, setDayType] = useState(null);
+  const [dayTypeError, setDayTypeError] = useState(false);
 
   const validation = useMemo(
     () => rows.map(r => validateRow(r, employeesById[r.employee_id], services, getRateForDate)),
@@ -133,7 +138,29 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   const [collapsed, setCollapsed] = useState({});
   const toggleEmp = (id) => setCollapsed(prev => ({ ...prev, [id]: !prev[id] }));
 
+  const handleDayTypeChange = (dt) => {
+    setDayType(dt);
+    setDayTypeError(false);
+    setRows(prev => prev.map(r => {
+      const emp = employeesById[r.employee_id];
+      return emp.employee_type === 'global' ? { ...r, dayType: dt } : r;
+    }));
+    const firstIdx = rows.findIndex(r => employeesById[r.employee_id].employee_type === 'global');
+    if (firstIdx !== -1) {
+      setTimeout(() => {
+        const el = document.querySelector(`#row-${firstIdx} input[name="hours"]`);
+        el?.focus();
+      }, 0);
+    }
+  };
+
   const handleSave = async () => {
+    if (hasGlobal && !dayType) {
+      setDayTypeError(true);
+      const el = document.getElementById('md-daytype');
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
     const invalidIndex = validation.findIndex(v => !v.valid);
     if (invalidIndex !== -1) {
       setShowErrors(true);
@@ -164,7 +191,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   };
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+      <Dialog open={open} onOpenChange={onClose}>
       <TooltipProvider>
         <DialogContent
           wide
@@ -177,20 +204,64 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
           >
             <div
               data-testid="md-header"
-              className="sticky top-0 z-20 bg-background border-b px-4 py-3"
+              className="sticky top-0 z-20 bg-background border-b px-4 py-3 space-y-3"
             >
-              <DialogTitle>הזנה מרובה</DialogTitle>
+              <div className="flex items-center">
+                <div className="text-xl font-semibold ml-auto">הזנה מרובה</div>
+                <div className="text-sm text-slate-700 flex gap-2 mr-4">
+                  <span>נבחרו {selectedEmployees.length} עובדים</span>
+                  <span>{selectedDates.length} תאריכים להזנה</span>
+                </div>
+              </div>
+              {hasGlobal && (
+                <div id="md-daytype">
+                  <Label className="text-sm font-medium text-slate-700">
+                    סוג יום<span className="text-red-600">*</span>
+                  </Label>
+                  <div className="mt-1 flex rounded-lg overflow-hidden ring-1 ring-slate-200" role="radiogroup">
+                    <Button
+                      type="button"
+                      variant={dayType === 'regular' ? 'default' : 'ghost'}
+                      className="flex-1 h-10 rounded-none"
+                      onClick={() => handleDayTypeChange('regular')}
+                      aria-label="יום רגיל"
+                    >
+                      יום רגיל
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={dayType === 'paid_leave' ? 'default' : 'ghost'}
+                      className="flex-1 h-10 rounded-none"
+                      onClick={() => handleDayTypeChange('paid_leave')}
+                      aria-label="חופשה בתשלום"
+                    >
+                      חופשה בתשלום
+                    </Button>
+                  </div>
+                  {dayTypeError && <p className="text-sm text-red-600">יש לבחור סוג יום</p>}
+                  <p className="text-sm text-slate-600 mt-1">
+                    שכר גלובלי נספר לפי יום; הוספת מקטע שעות לא מכפילה שכר.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div
-              className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3"
+              className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3 relative"
               data-testid="md-body"
             >
+              {hasGlobal && !dayType && (
+                <div className="absolute inset-0 bg-white/70 z-10 flex items-center justify-center pointer-events-none"></div>
+              )}
               <div className="flex text-sm text-slate-600">
                 <span>טיפ: אפשר להעתיק ערכים מהרישום הקודם עם האייקון ליד כל שדה.</span>
               <span className="ml-auto">מולאו {filledCount} מתוך {rows.length} שורות</span>
             </div>
-            <div className="text-right font-medium text-slate-700">סיכום כולל לרישומים: ₪{summaryTotal.toFixed(2)}</div>
+            {hasGlobal && !dayType ? (
+              <div className="text-right text-sm text-slate-500">יש לבחור סוג יום כדי לראות סיכום</div>
+            ) : (
+              <div className="text-right font-medium text-slate-700">סיכום כולל לרישומים: ₪{summaryTotal.toFixed(2)}</div>
+            )}
             {showBanner && (
                 <div className="bg-amber-50 border border-amber-200 p-4 flex justify-between items-center text-sm">
                   <span>חלק מהשורות מכילות שגיאות.</span>
@@ -245,7 +316,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
               className="shrink-0 bg-background border-t px-4 py-3 flex justify-end gap-2"
             >
               <Button variant="outline" onClick={onClose}>בטל</Button>
-              <Button onClick={handleSave}>שמור רישומים</Button>
+              <Button onClick={handleSave} disabled={hasGlobal && !dayType}>שמור רישומים</Button>
             </div>
           </div>
         </DialogContent>

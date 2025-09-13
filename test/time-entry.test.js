@@ -62,6 +62,14 @@ describe('copy and fill utilities', () => {
     assert.equal(isRowCompleteForProgress(result[1], emp), true);
   });
 
+  it('daytype_required_blocks_body_until_selected', () => {
+    const row = { dayType: null };
+    const emp = { employee_type: 'global' };
+    assert.equal(isRowCompleteForProgress(row, emp), false);
+    row.dayType = 'regular';
+    assert.equal(isRowCompleteForProgress(row, emp), true);
+  });
+
   it('fails to copy day type when source missing or different employee', () => {
     const rows = [
       { employee_id: 'g1', dayType: null },
