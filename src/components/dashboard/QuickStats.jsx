@@ -1,79 +1,76 @@
 import React from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, Clock, TrendingUp, DollarSign } from "lucide-react";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { Clock, Calendar, Users, DollarSign } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, startOfMonth, endOfMonth } from "date-fns";
 import { he } from "date-fns/locale";
 import { InfoTooltip } from "../InfoTooltip";
-import { computePeriodTotals } from '@/lib/payroll.js';
+import {
+  computePeriodTotals,
+  sumHourlyHours,
+  countGlobalEffectiveDays,
+  sumInstructorSessions
+} from '@/lib/payroll.js';
 
-export default function QuickStats({ employees, workSessions, services, currentDate, isLoading }) {
-
-  const calculateMonthlyStats = () => {
-    if (!workSessions || !employees || !services) {
-      return { totalPayment: 0, totalHours: 0, uniqueWorkDays: 0, activeEmployees: 0 };
-    }
-    const start = startOfMonth(currentDate);
-    const end = endOfMonth(currentDate);
-    const res = computePeriodTotals({
-      workSessions,
-      employees,
-      services,
-      startDate: format(start, 'yyyy-MM-dd'),
-      endDate: format(end, 'yyyy-MM-dd')
-    });
-    return {
-      totalPayment: res.totalPay,
-      totalHours: res.totalHours,
-      uniqueWorkDays: res.diagnostics.uniquePaidDays,
-      activeEmployees: employees.filter(e => e.is_active !== false).length
-    };
+export default function QuickStats({ employees = [], workSessions = [], services = [], currentDate, filters = {}, isLoading }) {
+  const start = startOfMonth(currentDate);
+  const end = endOfMonth(currentDate);
+  const baseFilters = {
+    dateFrom: format(start, 'yyyy-MM-dd'),
+    dateTo: format(end, 'yyyy-MM-dd'),
+    employeeType: filters.employeeType || 'all',
+    selectedEmployee: filters.selectedEmployee || null,
+    serviceId: filters.serviceId || 'all'
   };
 
-  const statsData = calculateMonthlyStats();
-  const tooltipTextsHe = [
-    'מספר עובדים שמסומנים כפעילים',
-    'נספרות שעות עבור עובדים שעתיים בלבד',
-    'עובד נספר פעם אחת לכל יום עבודה בחודש',
-    'סכום תשלומים מהרישומים'
-  ];
-  const tooltipTexts = [
-    'Counts only employees marked active',
-    'Hours counted only for hourly employees',
-    'Each employee counted once per work day in the month',
-    'Total payments from work sessions'
-  ];
-  
-  // === שינוי 3: עדכון מערך הנתונים לתצוגה ===
+  const totals = computePeriodTotals({
+    workSessions,
+    employees,
+    services,
+    startDate: baseFilters.dateFrom,
+    endDate: baseFilters.dateTo,
+    serviceFilter: baseFilters.serviceId,
+    employeeFilter: baseFilters.selectedEmployee || '',
+    employeeTypeFilter: baseFilters.employeeType
+  });
+
+  const hourlyHours = sumHourlyHours(workSessions, employees, baseFilters);
+  const globalDays = countGlobalEffectiveDays(workSessions, employees, baseFilters, { excludePaidLeave: true });
+  const instructorSessions = sumInstructorSessions(workSessions, services, employees, baseFilters);
+
   const stats = [
     {
-      title: "עובדים פעילים",
-      value: statsData.activeEmployees,
-      icon: Users,
-      color: "from-blue-500 to-blue-600",
-    },
-    {
-      title: "שעות עבודה בחודש",
-      value: statsData.totalHours.toFixed(1),
+      title: "סך שעות (שעתיים)",
+      value: hourlyHours.toFixed(1),
       icon: Clock,
       color: "from-green-500 to-green-600",
+      tooltip: "סכום שעות שנרשמו לעובדים שעתיים בלבד בטווח התאריכים המסונן."
     },
     {
-      title: "ימי עבודה בחודש",
-      value: statsData.uniqueWorkDays,
-      icon: TrendingUp,
+      title: "ימי עבודה (גלובליים)",
+      value: globalDays,
+      icon: Calendar,
       color: "from-purple-500 to-purple-600",
+      tooltip: "ימי עבודה אפקטיביים לעובדים גלובליים לפי הגדרות הימים והסוגים (ללא חופשה בתשלום)."
+    },
+    {
+      title: "סה״כ מפגשים (מדריכים)",
+      value: instructorSessions,
+      icon: Users,
+      color: "from-blue-500 to-blue-600",
+      tooltip: "סך מפגשים של מדריכים לפי הרישומים והמסננים הפעילים."
     },
     {
       title: `סה״כ תשלום ל${format(currentDate, 'MMMM', { locale: he })}`,
-      value: `₪${statsData.totalPayment.toLocaleString()}`,
+      value: `₪${totals.totalPay.toLocaleString()}`,
       icon: DollarSign,
       color: "from-orange-500 to-orange-600",
+      tooltip: 'סכום תשלומים מהרישומים'
     }
   ];
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {stats.map((stat, index) => (
         <Card key={index} className="relative overflow-hidden bg-white/70 backdrop-blur-sm border-0 shadow-lg hover:shadow-xl transition-all duration-300">
           <div className={`absolute top-0 right-0 w-32 h-32 bg-gradient-to-l ${stat.color} opacity-10 transform translate-x-8 -translate-y-8 rounded-full`} />
@@ -82,7 +79,7 @@ export default function QuickStats({ employees, workSessions, services, currentD
               <div className="space-y-2">
                 <p className="text-sm font-medium text-slate-600">{stat.title}</p>
                 <div className="absolute left-3 top-3 z-10">
-                  <InfoTooltip text={tooltipTextsHe[index] || tooltipTexts[index]} />
+                  <InfoTooltip text={stat.tooltip} />
                 </div>
                 {isLoading ? (
                   <Skeleton className="h-8 w-20" />

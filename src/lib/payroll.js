@@ -153,3 +153,52 @@ export function computePeriodTotals({
   return result;
 }
 
+function entryMatchesFilters(row, emp, filters = {}) {
+  const { dateFrom, dateTo, selectedEmployee, employeeType = 'all', serviceId = 'all' } = filters;
+  if (dateFrom && new Date(row.date) < new Date(dateFrom)) return false;
+  if (dateTo && new Date(row.date) > new Date(dateTo)) return false;
+  if (selectedEmployee && row.employee_id !== selectedEmployee) return false;
+  if (employeeType !== 'all' && emp.employee_type !== employeeType) return false;
+  if (serviceId !== 'all' && row.service_id !== serviceId) return false;
+  return true;
+}
+
+export function sumHourlyHours(entries = [], employees = [], filters = {}) {
+  const byId = Object.fromEntries(employees.map(e => [e.id, e]));
+  return entries.reduce((sum, row) => {
+    const emp = byId[row.employee_id];
+    if (!emp || emp.employee_type !== 'hourly') return sum;
+    if (!entryMatchesFilters(row, emp, filters)) return sum;
+    if (row.entry_type !== 'hours') return sum;
+    return sum + (parseFloat(row.hours) || 0);
+  }, 0);
+}
+
+export function countGlobalEffectiveDays(entries = [], employees = [], filters = {}, opts = {}) {
+  const { excludePaidLeave = true } = opts;
+  const byId = Object.fromEntries(employees.map(e => [e.id, e]));
+  const days = new Set();
+  entries.forEach(row => {
+    const emp = byId[row.employee_id];
+    if (!emp || emp.employee_type !== 'global') return;
+    if (!entryMatchesFilters(row, emp, filters)) return;
+    if (row.entry_type !== 'hours' && row.entry_type !== 'paid_leave') return;
+    if (excludePaidLeave && row.entry_type === 'paid_leave') return;
+    days.add(`${row.employee_id}|${row.date}`);
+  });
+  return days.size;
+}
+
+export function sumInstructorSessions(entries = [], services = [], employees = [], filters = {}) {
+  const serviceSet = new Set(services.map(s => s.id));
+  
+  const byId = Object.fromEntries(employees.map(e => [e.id, e]));
+  return entries.reduce((sum, row) => {
+    const emp = byId[row.employee_id];
+    if (!emp || emp.employee_type !== 'instructor') return sum;
+    if (!serviceSet.has(row.service_id)) return sum;
+    if (!entryMatchesFilters(row, emp, filters)) return sum;
+    if (row.entry_type !== 'session') return sum;
+    return sum + (row.sessions_count || 0);
+  }, 0);
+}
