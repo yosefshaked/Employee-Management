@@ -34,10 +34,12 @@ describe('copy and fill utilities', () => {
       { employee_id: 'e1', hours: '' },
       { employee_id: 'e2', hours: '' }
     ];
-    let result = copyFromPrevious(rows, 1, 'hours');
+    let { rows: result, success } = copyFromPrevious(rows, 1, 'hours');
+    assert.equal(success, true);
     assert.equal(result[1].hours, '1');
-    result = copyFromPrevious(result, 2, 'hours');
-    assert.equal(result[2].hours, '');
+    const second = copyFromPrevious(result, 2, 'hours');
+    assert.equal(second.success, false);
+    assert.equal(second.rows[2].hours, '');
   });
   it('fillDown fills empty rows from first', () => {
     const rows = [{ sessions_count: '2' }, { sessions_count: '' }, { sessions_count: '3' }];

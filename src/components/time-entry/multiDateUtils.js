@@ -1,11 +1,14 @@
 export function copyFromPrevious(rows, index, field) {
-  if (index === 0) return rows;
+  if (index === 0) return { rows, success: false };
   const prev = rows[index - 1];
   const curr = rows[index];
-  if (prev.employee_id !== curr.employee_id) return rows;
+  if (prev.employee_id !== curr.employee_id) return { rows, success: false };
+  if (prev[field] === undefined || prev[field] === '' || prev[field] === null) {
+    return { rows, success: false };
+  }
   const updated = [...rows];
   updated[index] = { ...curr, [field]: prev[field] };
-  return updated;
+  return { rows: updated, success: true };
 }
 
 export function fillDown(rows, field) {

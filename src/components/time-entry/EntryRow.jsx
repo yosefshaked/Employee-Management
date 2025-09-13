@@ -12,6 +12,7 @@ import { he } from 'date-fns/locale';
 import { InfoTooltip } from '@/components/InfoTooltip.jsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
+import { useEffect, useState } from 'react';
 
 export function computeRowPayment(row, employee, services, getRateForDate) {
   const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
@@ -48,14 +49,24 @@ export default function EntryRow({
   allowRemove = false,
   onRemove,
   showSummary = true,
-  readOnlyDate = false
+  readOnlyDate = false,
+  flashField = null,
+  errors = {},
+  rowId
 }) {
   const row = value;
   const handleChange = (field, val) => onChange({ [field]: val });
   const selectedService = services.find(s => s.id === row.service_id);
-  const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
-  const { rate } = getRateForDate(employee.id, row.date, isHourlyOrGlobal ? null : row.service_id);
   const rowPayment = computeRowPayment(row, employee, services, getRateForDate);
+  const [flash, setFlash] = useState(null);
+
+  useEffect(() => {
+    if (flashField) {
+      setFlash(flashField);
+      const t = setTimeout(() => setFlash(null), 400);
+      return () => clearTimeout(t);
+    }
+  }, [flashField]);
 
   const CopyBtn = (field) => (
     onCopyField ? (
@@ -77,9 +88,11 @@ export default function EntryRow({
   );
 
   return (
-    <div className="w-full rounded-xl bg-slate-50 p-4 relative">
+    <div className="w-full rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5 relative focus-within:ring-2 focus-within:ring-sky-300" id={rowId}>
       {readOnlyDate ? (
-        <div className="text-sm font-medium text-right">{format(new Date(row.date), 'dd/MM/yyyy')}</div>
+        <div className="absolute top-2 right-2 text-xs font-medium text-slate-600 bg-slate-50 ring-1 ring-slate-200 rounded-full px-2 py-0.5">
+          {format(new Date(row.date), 'dd/MM')}
+        </div>
       ) : (
         <div className="space-y-1">
           <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
@@ -102,7 +115,7 @@ export default function EntryRow({
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3 mt-3">
         {employee.employee_type === 'hourly' && (
-          <div className="space-y-1 min-w-[160px]">
+          <div className={`space-y-1 min-w-[160px] ${flash === 'hours' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
             <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
               {CopyBtn('hours')}
               <span>שעות עבודה</span>
@@ -115,12 +128,13 @@ export default function EntryRow({
               required
               className="w-full bg-white h-10 text-base leading-6"
             />
+            {errors.hours && <p className="text-sm text-red-600 mt-1">{errors.hours}</p>}
           </div>
         )}
 
         {employee.employee_type === 'global' && (
           <>
-            <div className="space-y-1 min-w-[180px]">
+            <div className={`space-y-1 min-w-[180px] ${flash === 'entry_type' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
               <Label className="text-sm font-medium text-slate-700">סוג יום</Label>
               <Select value={row.entry_type} onValueChange={(v) => handleChange('entry_type', v)}>
                 <SelectTrigger className="bg-white h-10 text-base leading-6"><SelectValue /></SelectTrigger>
@@ -129,8 +143,9 @@ export default function EntryRow({
                   <SelectItem value="paid_leave">חופשה בתשלום</SelectItem>
                 </SelectContent>
               </Select>
+              {errors.entry_type && <p className="text-sm text-red-600 mt-1">{errors.entry_type}</p>}
             </div>
-            <div className="space-y-1 min-w-[160px]">
+            <div className={`space-y-1 min-w-[160px] ${flash === 'hours' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
               <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
                 {CopyBtn('hours')}
                 <span className="flex items-center gap-1">שעות<InfoTooltip text="בגלובלי השכר מחושב לפי יום; שדה השעות להצגה בלבד." /></span>
@@ -142,12 +157,13 @@ export default function EntryRow({
                 onChange={(e) => handleChange('hours', e.target.value)}
                 className="w-full bg-white h-10 text-base leading-6"
               />
+              {errors.hours && <p className="text-sm text-red-600 mt-1">{errors.hours}</p>}
             </div>
           </>
         )}
 
         {employee.employee_type === 'instructor' && (
-          <div className="space-y-1 min-w-[320px]">
+          <div className={`space-y-1 min-w-[320px] ${flash === 'service_id' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
             <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
               {CopyBtn('service_id')}
               <span>שירות</span>
@@ -162,12 +178,13 @@ export default function EntryRow({
                 ))}
               </SelectContent>
             </Select>
+            {errors.service_id && <p className="text-sm text-red-600 mt-1">{errors.service_id}</p>}
           </div>
         )}
 
         {employee.employee_type === 'instructor' && selectedService && (
           <>
-            <div className="space-y-1 min-w-[160px]">
+            <div className={`space-y-1 min-w-[160px] ${flash === 'sessions_count' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
               <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
                 {CopyBtn('sessions_count')}
                 <span>כמות מפגשים</span>
@@ -178,9 +195,10 @@ export default function EntryRow({
                 onChange={(e) => handleChange('sessions_count', e.target.value)}
                 className="w-full bg-white h-10 text-base leading-6"
               />
+              {errors.sessions_count && <p className="text-sm text-red-600 mt-1">{errors.sessions_count}</p>}
             </div>
             {selectedService.payment_model === 'per_student' && (
-              <div className="space-y-1 min-w-[160px]">
+              <div className={`space-y-1 min-w-[160px] ${flash === 'students_count' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
                 <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
                   {CopyBtn('students_count')}
                   <span>כמות תלמידים</span>
@@ -191,6 +209,7 @@ export default function EntryRow({
                   onChange={(e) => handleChange('students_count', e.target.value)}
                   className="w-full bg-white h-10 text-base leading-6"
                 />
+                {errors.students_count && <p className="text-sm text-red-600 mt-1">{errors.students_count}</p>}
               </div>
             )}
           </>
@@ -201,11 +220,8 @@ export default function EntryRow({
       </div>
 
       {showSummary && (
-        <div className="mt-3 text-sm text-slate-600 bg-slate-100 p-2 rounded-md text-right">
-          {employee.employee_type === 'global'
-            ? `שכר חודשי: ₪${rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-            : `תעריף: ₪${rate.toFixed(2)}`}
-          {' | '}סה"כ לשורה: <span className="font-bold text-slate-800">₪{rowPayment.toFixed(2)}</span>
+        <div className="mt-4 text-sm text-right text-slate-700">
+          סה"כ לשורה: <span className="font-bold">₪{rowPayment.toFixed(2)}</span>
         </div>
       )}
 
