@@ -306,6 +306,7 @@ export default function TimeEntry() {
     } catch (error) {
       console.error('Error submitting from table:', error);
       toast.error(`שגיאה בעדכון הרישומים: ${error.message}`);
+      throw error;
     } finally {
       setIsLoading(false);
     }

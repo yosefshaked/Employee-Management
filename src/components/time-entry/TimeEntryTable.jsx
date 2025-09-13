@@ -300,13 +300,22 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
               initialRows={editingCell.existingSessions}
               selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
               getRateForDate={getRateForDate}
-              onSubmit={(result) => {
+              onSubmit={async (result) => {
                 if (!result) {
                   setEditingCell(null);
                   return;
                 }
-                onTableSubmit({ employee: editingCell.employee, day: editingCell.day, dayType: result.dayType, updatedRows: result.rows });
-                setEditingCell(null);
+                try {
+                  await onTableSubmit({
+                    employee: editingCell.employee,
+                    day: editingCell.day,
+                    dayType: result.dayType,
+                    updatedRows: result.rows,
+                  });
+                  setEditingCell(null);
+                } catch {
+                  // keep modal open on error
+                }
               }}
               onDeleted={(id) => {
                 setEditingCell(prev => prev ? { ...prev, existingSessions: prev.existingSessions.filter(s => s.id !== id) } : prev);

@@ -64,10 +64,10 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
       setSegments(prev => prev.filter(s => s.id !== pendingDelete.id));
       onDeleted?.(pendingDelete.id);
       toast.success(he['toast.delete.success']);
-    } catch {
-      toast.error(he['toast.delete.error']);
-    } finally {
       setPendingDelete(null);
+    } catch (err) {
+      toast.error(he['toast.delete.error']);
+      throw err;
     }
   };
   const changeSeg = (id, patch) => setSegments(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
