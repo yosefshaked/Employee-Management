@@ -8,12 +8,12 @@ export default function DayHeader({ dayType, onChange }) {
       <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
         <div className="space-y-1">
           <Label className="text-sm font-medium text-slate-700">סוג יום</Label>
-          <Select value={dayType} onValueChange={onChange}>
+          <Select value={dayType || ''} onValueChange={onChange}>
             <SelectTrigger className="bg-white h-10 text-base leading-6">
               <SelectValue placeholder="בחר סוג יום" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="hours">יום רגיל</SelectItem>
+              <SelectItem value="regular">יום רגיל</SelectItem>
               <SelectItem value="paid_leave">חופשה בתשלום</SelectItem>
             </SelectContent>
           </Select>

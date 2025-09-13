@@ -147,16 +147,16 @@ export default function EntryRow({
                   {CopyBtn('dayType')}
                   <span>סוג יום</span>
                 </Label>
-                <Select value={row.entry_type || ''} onValueChange={(v) => handleChange('entry_type', v)}>
+                <Select value={row.dayType || ''} onValueChange={(v) => handleChange('dayType', v)}>
                   <SelectTrigger className="bg-white h-10 text-base leading-6">
                     <SelectValue placeholder="בחר סוג יום" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="hours">יום רגיל</SelectItem>
+                    <SelectItem value="regular">יום רגיל</SelectItem>
                     <SelectItem value="paid_leave">חופשה בתשלום</SelectItem>
                   </SelectContent>
                 </Select>
-                {errors.entry_type && <p className="text-sm text-red-600 mt-1">{errors.entry_type}</p>}
+                {errors.dayType && <p className="text-sm text-red-600 mt-1">{errors.dayType}</p>}
               </div>
             )}
             <div className={`space-y-1 min-w-[160px] ${flash === 'hours' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>

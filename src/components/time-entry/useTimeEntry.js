@@ -11,7 +11,11 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
       const { rate: rateUsed, reason } = getRateForDate(employee.id, row.date, isHourlyOrGlobal ? null : row.service_id);
       if (!rateUsed) throw new Error(reason || 'missing rate');
       let totalPayment = 0;
-      if (row.entry_type === 'session') {
+      const entryType = employee.employee_type === 'global'
+        ? (row.dayType === 'paid_leave' ? 'paid_leave' : 'hours')
+        : row.entry_type;
+
+      if (entryType === 'session') {
         const service = services.find(s => s.id === row.service_id);
         if (!service) throw new Error('service required');
         if (service.payment_model === 'per_student') {
@@ -28,11 +32,11 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
       inserts.push({
         employee_id: employee.id,
         date: row.date,
-        entry_type: row.entry_type,
+        entry_type: entryType,
         service_id: row.service_id || null,
-        hours: row.entry_type === 'hours' ? (parseFloat(row.hours) || null) : null,
-        sessions_count: row.entry_type === 'session' ? (parseInt(row.sessions_count, 10) || null) : null,
-        students_count: row.entry_type === 'session' ? (parseInt(row.students_count, 10) || null) : null,
+        hours: entryType === 'hours' ? (parseFloat(row.hours) || null) : null,
+        sessions_count: entryType === 'session' ? (parseInt(row.sessions_count, 10) || null) : null,
+        students_count: entryType === 'session' ? (parseInt(row.students_count, 10) || null) : null,
         notes: row.notes ? row.notes : null,
         rate_used: rateUsed,
         total_payment: totalPayment,

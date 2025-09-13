@@ -51,37 +51,37 @@ describe('copy and fill utilities', () => {
 
   it('copies day type for global employees', () => {
     const rows = [
-      { employee_id: 'g1', entry_type: 'hours' },
-      { employee_id: 'g1', entry_type: '' }
+      { employee_id: 'g1', dayType: 'regular' },
+      { employee_id: 'g1', dayType: null }
     ];
     let { rows: result, success } = copyFromPrevious(rows, 1, 'dayType');
     assert.equal(success, true);
-    assert.equal(result[1].entry_type, 'hours');
+    assert.equal(result[1].dayType, 'regular');
     const emp = { employee_type: 'global' };
     assert.equal(isRowCompleteForProgress(result[1], emp), true);
   });
 
   it('fails to copy day type when source missing or different employee', () => {
     const rows = [
-      { employee_id: 'g1', entry_type: '' },
-      { employee_id: 'g1', entry_type: '' },
-      { employee_id: 'g2', entry_type: 'hours' }
+      { employee_id: 'g1', dayType: null },
+      { employee_id: 'g1', dayType: null },
+      { employee_id: 'g2', dayType: 'regular' }
     ];
     let res = copyFromPrevious(rows, 1, 'dayType');
     assert.equal(res.success, false);
-    assert.equal(res.rows[1].entry_type, '');
+    assert.equal(res.rows[1].dayType, null);
     res = copyFromPrevious(rows, 2, 'dayType');
     assert.equal(res.success, false);
-    assert.equal(res.rows[2].entry_type, 'hours');
+    assert.equal(res.rows[2].dayType, 'regular');
   });
 });
 
 describe('day editor helpers', () => {
   it('applyDayType propagates to all rows', () => {
-    const rows = [{ id: 'a', entry_type: 'hours' }, { id: 'b', entry_type: 'hours' }];
+    const rows = [{ id: 'a', dayType: 'regular' }, { id: 'b', dayType: 'regular' }];
     const res = applyDayType(rows, 'paid_leave');
-    assert.equal(res[0].entry_type, 'paid_leave');
-    assert.equal(res[1].entry_type, 'paid_leave');
+    assert.equal(res[0].dayType, 'paid_leave');
+    assert.equal(res[1].dayType, 'paid_leave');
   });
 
   it('prevent removing last segment', () => {
@@ -95,7 +95,7 @@ describe('day editor helpers', () => {
   });
 
   it('preserves notes and date when applying day type', () => {
-    const rows = [{ id: 'a', entry_type: 'hours', notes: 'n', date: '2024-01-01' }];
+    const rows = [{ id: 'a', dayType: 'regular', notes: 'n', date: '2024-01-01' }];
     const res = applyDayType(rows, 'paid_leave');
     assert.equal(res[0].notes, 'n');
     assert.equal(res[0].date, '2024-01-01');
@@ -137,11 +137,11 @@ describe('progress completion rules', () => {
   });
   it('global row requires explicit day type', () => {
     const emp = { employee_type: 'global' };
-    const row = { entry_type: '' };
+    const row = { dayType: null };
     assert.equal(isRowCompleteForProgress(row, emp), false);
-    row.entry_type = 'hours';
+    row.dayType = 'regular';
     assert.equal(isRowCompleteForProgress(row, emp), true);
-    row.entry_type = 'paid_leave';
+    row.dayType = 'paid_leave';
     assert.equal(isRowCompleteForProgress(row, emp), true);
   });
 });

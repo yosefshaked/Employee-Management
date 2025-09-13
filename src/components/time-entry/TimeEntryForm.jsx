@@ -21,18 +21,23 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
     sessions_count: '1',
     students_count: '',
     notes: '',
-    entry_type: isGlobal ? (dt || '') : undefined,
+    dayType: isGlobal ? (dt || null) : undefined,
   });
 
   const [rows, setRows] = useState(() => {
-    if (hasExisting) return initialRows;
+    if (hasExisting) return initialRows.map(r => ({ ...r, dayType: r.entry_type === 'paid_leave' ? 'paid_leave' : 'regular' }));
     return [createNewRow(selectedDate)];
   });
-  const [dayType, setDayType] = useState(() => (hasExisting && isGlobal ? initialRows[0].entry_type || '' : ''));
+  const [dayType, setDayType] = useState(() => (hasExisting && isGlobal ? (initialRows[0].entry_type === 'paid_leave' ? 'paid_leave' : 'regular') : null));
 
   const totalCalculatedPayment = useMemo(() => {
     if (employee.employee_type === 'global') {
-      const payments = rows.map(r => ({ ...r, employee_id: employee.id, total_payment: computeRowPayment(r, employee, services, getRateForDate) }));
+      const payments = rows.map(r => ({
+        ...r,
+        entry_type: r.dayType === 'paid_leave' ? 'paid_leave' : 'hours',
+        employee_id: employee.id,
+        total_payment: computeRowPayment(r, employee, services, getRateForDate)
+      }));
       const agg = aggregateGlobalDayForDate(payments, { [employee.id]: employee });
       return agg.total;
     }
@@ -41,7 +46,12 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
 
   const duplicateMap = useMemo(() => {
     if (employee.employee_type !== 'global') return {};
-    const payments = rows.map(r => ({ ...r, employee_id: employee.id, total_payment: computeRowPayment(r, employee, services, getRateForDate) }));
+    const payments = rows.map(r => ({
+      ...r,
+      entry_type: r.dayType === 'paid_leave' ? 'paid_leave' : 'hours',
+      employee_id: employee.id,
+      total_payment: computeRowPayment(r, employee, services, getRateForDate)
+    }));
     const agg = aggregateGlobalDayForDate(payments, { [employee.id]: employee });
     const res = {};
     rows.forEach(r => {
@@ -75,7 +85,7 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const rowsToSave = isGlobal ? applyDayType(rows, dayType) : rows;
+    const rowsToSave = isGlobal && hasExisting ? applyDayType(rows, dayType) : rows;
     onSubmit(rowsToSave);
   };
 

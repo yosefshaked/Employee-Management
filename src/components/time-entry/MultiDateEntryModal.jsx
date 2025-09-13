@@ -27,13 +27,13 @@ function validateRow(row, employee, services, getRateForDate) {
   } else if (employee.employee_type === 'hourly') {
     if (!row.hours) errors.hours = 'חסרות שעות';
   } else if (employee.employee_type === 'global') {
-    if (row.entry_type !== 'hours' && row.entry_type !== 'paid_leave') {
-      errors.entry_type = 'בחר סוג יום';
+    if (row.dayType !== 'regular' && row.dayType !== 'paid_leave') {
+      errors.dayType = 'בחר סוג יום';
     } else {
       try {
         calculateGlobalDailyRate(employee, row.date, rate);
       } catch {
-        errors.entry_type = 'אין ימי עבודה בחודש';
+        errors.dayType = 'אין ימי עבודה בחודש';
       }
     }
   }
@@ -51,7 +51,8 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
         items.push({
           employee_id: empId,
           date: format(d, 'yyyy-MM-dd'),
-          entry_type: emp.employee_type === 'global' ? '' : (emp.employee_type === 'hourly' ? 'hours' : 'session'),
+          entry_type: emp.employee_type === 'hourly' ? 'hours' : (emp.employee_type === 'instructor' ? 'session' : undefined),
+          dayType: emp.employee_type === 'global' ? null : undefined,
           service_id: null,
           hours: '',
           sessions_count: '',
@@ -73,7 +74,13 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   );
   const payments = useMemo(() => rows.map(r => computeRowPayment(r, employeesById[r.employee_id], services, getRateForDate)), [rows, employeesById, services, getRateForDate]);
   const globalAgg = useMemo(() => {
-    const withPay = rows.map((r, i) => ({ ...r, total_payment: payments[i] }));
+    const withPay = rows.map((r, i) => ({
+      ...r,
+      entry_type: employeesById[r.employee_id].employee_type === 'global'
+        ? (r.dayType === 'paid_leave' ? 'paid_leave' : 'hours')
+        : r.entry_type,
+      total_payment: payments[i]
+    }));
     return aggregateGlobalDays(withPay, employeesById);
   }, [rows, payments, employeesById]);
   const duplicateMap = useMemo(() => {
@@ -87,7 +94,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
     let nonGlobal = 0;
     rows.forEach((r, i) => {
       const emp = employeesById[r.employee_id];
-      if (emp.employee_type === 'global' && (r.entry_type === 'hours' || r.entry_type === 'paid_leave')) return;
+      if (emp.employee_type === 'global') return;
       nonGlobal += payments[i];
     });
     let globalSum = 0;

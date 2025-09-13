@@ -1,5 +1,5 @@
 export function applyDayType(rows, dayType) {
-  return rows.map(r => ({ ...r, entry_type: dayType }));
+  return rows.map(r => ({ ...r, dayType }));
 }
 
 export function removeSegment(rows, id) {

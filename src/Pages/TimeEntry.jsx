@@ -121,12 +121,12 @@ export default function TimeEntry() {
             }
           }
         } else if (employee.employee_type === 'global') {
-          if (!row.entry_type) {
+          if (!row.dayType) {
             toast.error('יש לבחור סוג יום.', { duration: 15000 });
             return null;
           }
           const hoursValue = parseFloat(row.hours);
-          if (row.entry_type === 'hours' && (isNaN(hoursValue) || hoursValue <= 0)) {
+          if (row.dayType === 'regular' && (isNaN(hoursValue) || hoursValue <= 0)) {
             toast.error("יש להזין מספר שעות גדול מ-0.", { duration: 15000 });
             return null;
           }
@@ -160,7 +160,7 @@ export default function TimeEntry() {
         }
 
         const entryType = employee.employee_type === 'global'
-          ? row.entry_type
+          ? (row.dayType === 'paid_leave' ? 'paid_leave' : 'hours')
           : (employee.employee_type === 'hourly' ? 'hours' : 'session');
         if (entryType === 'paid_leave' && employee.employee_type !== 'global') {
           toast.error('paid_leave only allowed for global employees', { duration: 15000 });
@@ -203,7 +203,7 @@ export default function TimeEntry() {
     try {
       const sessionsToProcess = updatedRows.map(row => {
         const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
-        if (row.entry_type === 'paid_leave' && employee.employee_type !== 'global') {
+        if (row.dayType === 'paid_leave' && employee.employee_type !== 'global') {
           toast.error('paid_leave only allowed for global employees', { duration: 15000 });
           return 'validation_error';
         }
@@ -230,11 +230,11 @@ export default function TimeEntry() {
             }
           }
         } else if (employee.employee_type === 'global') {
-          if (!row.entry_type) {
+          if (!row.dayType) {
             toast.error('יש לבחור סוג יום.', { duration: 15000 });
             return 'validation_error';
           }
-          if (row.entry_type === 'hours' && row.isNew && (isNaN(hoursValue) || hoursValue <= 0)) {
+          if (row.dayType === 'regular' && row.isNew && (isNaN(hoursValue) || hoursValue <= 0)) {
             toast.error("יש להזין מספר שעות גדול מ-0.", { duration: 15000 });
             return 'validation_error';
           }
@@ -286,8 +286,9 @@ export default function TimeEntry() {
           sessionData.sessions_count = null;
           sessionData.students_count = null;
         } else if (employee.employee_type === 'global') {
-          sessionData.entry_type = row.entry_type;
-          sessionData.hours = row.entry_type === 'hours' ? (parseFloat(row.hours) || null) : null;
+          const dtEntry = row.dayType === 'paid_leave' ? 'paid_leave' : 'hours';
+          sessionData.entry_type = dtEntry;
+          sessionData.hours = dtEntry === 'hours' ? (parseFloat(row.hours) || null) : null;
           sessionData.service_id = null;
           sessionData.sessions_count = null;
           sessionData.students_count = null;
