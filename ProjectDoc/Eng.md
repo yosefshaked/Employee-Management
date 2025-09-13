@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.3.4**
-**Last Updated: 2025-09-12**
+**Version: 1.3.5**
+**Last Updated: 2025-09-13**
 
 ## 1. Vision & Purpose
 
@@ -117,39 +117,38 @@ The work log. Each row represents a completed work session.
 Users can enable **"בחר תאריכים להזנה מרובה"** in the time-entry table to select multiple dates and employees. Clicking **"הזן"** opens a modal listing all selected dates as stacked mini-forms—one row per date and employee. Each field has an **"העתק מהרישום הקודם"** button to copy from the previous row, and top-level **"העתק מהראשון לכל השורות"** controls fill empty values down from the first row.
 Global employees see an hours field for reference only and a toggle between regular day and paid leave; pay is still one daily rate per row.
 
-### Hebrew CSV Import
+### Hebrew Data Import
 
-A modal allows either pasting text or uploading a `.csv` file. The employee is chosen in the modal; the CSV should not include an employee column.
+The import modal supports either pasting text or uploading a `.csv` file. Lines starting with `#` are treated as comments and skipped. The employee is chosen inside the modal; the file must not contain an employee column. Supported delimiters are comma, TAB, semicolon and pipe—auto detected with a manual override.
 
 **Header Mapping**
 
-| Hebrew           | Internal field |
-|-----------------|----------------|
-| תאריך          | `date` (DD/MM/YYYY → YYYY-MM-DD) |
-| סוג רישום      | `entry_type` (`שיעור`=`session`, `שעות`=`hours`, `התאמה`=`adjustment`, `חופשה בתשלום`=`paid_leave`) |
-| שירות          | `service_name` |
-| שעות           | `hours` |
-| מספר שיעורים   | `sessions_count` |
-| מספר תלמידים   | `students_count` |
+| Hebrew             | Internal field |
+|-------------------|----------------|
+| תאריך            | `date` (DD/MM/YYYY → YYYY-MM-DD) |
+| סוג רישום        | `entry_type` (`שיעור`=`session`, `שעות`=`hours`, `התאמה`=`adjustment`, `חופשה בתשלום`=`paid_leave`) |
+| שירות            | `service_name` |
+| שעות             | `hours` |
+| מספר שיעורים     | `sessions_count` |
+| מספר תלמידים     | `students_count` |
+| סכום התאמה       | `adjustment_amount` |
+| הערות            | `notes` |
 
-Up to 50 rows are previewed with per-row validation messages. Invalid rows can be downloaded as a separate CSV.
+The preview shows up to 100 rows with per-row error messages. Duplicate rows are flagged and skipped unless the user opts in to import them.
 
-**Template & Encoding**
+**Templates**
 
-A "Download CSV template" button generates a UTF-8 **with BOM** file so Excel renders Hebrew correctly. The template includes three sample rows:
-1. שעות — `שעות=8`
-2. שיעור — `שירות="שם שירות לדוגמה"`, `מספר שיעורים=1`, `מספר תלמידים=1`
-3. חופשה בתשלום — other columns empty
+Buttons in the modal allow downloading a CSV template (UTF‑8 with BOM) and a basic Excel placeholder. Both templates include instructional comment lines and example rows marked “(דוגמה)” that should be deleted before upload.
 
 **Validation Rules**
 
 - `date` must parse to ISO format.
-- `entry_type` must be one of the allowed values.
-- `session` rows require a valid `service_name` and rate snapshot.
-- `hours` rows require a rate snapshot; for global employees the daily rate is computed automatically.
+- `session` rows require `service_name`, `sessions_count` ≥1, `students_count` ≥1 and a rate snapshot.
+- `hours` rows require a rate snapshot; hourly employees must supply `hours`, while global employees ignore it and use a daily rate.
 - `paid_leave` rows are allowed only for global employees and use the global daily rate.
+- `adjustment` rows require an `adjustment_amount` and ignore other fields.
 
-Only valid rows are inserted into `WorkSessions`; a summary of inserted vs. failed rows is shown after import.
+Only valid rows are inserted into `WorkSessions`; the summary dialog lists inserted, failed and skipped rows.
 
 ---
 

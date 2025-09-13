@@ -8,7 +8,7 @@ import { he } from 'date-fns/locale';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import TimeEntryForm from './TimeEntryForm';
-import CsvImportModal from '@/components/import/ImportCsvModal.jsx';
+import ImportModal from '@/components/import/ImportModal.jsx';
 import EmployeePicker from '../employees/EmployeePicker.jsx';
 import MultiDateEntryModal from './MultiDateEntryModal.jsx';
 function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported }) {
@@ -315,7 +315,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
             )}
         </DialogContent>
         </Dialog>
-        <CsvImportModal
+        <ImportModal
           open={importOpen}
           onOpenChange={setImportOpen}
           employees={employees}
