@@ -73,27 +73,25 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {groupedRows.map(([empId, items]) => {
+            {groupedRows.map(([empId, items], idx) => {
               const emp = employeesById[empId];
               const isCollapsed = collapsed[empId];
               return (
-                <div key={empId} className="space-y-2">
+                <div key={empId} className="space-y-3">
                   <div
-                    className="flex items-center bg-slate-50 px-3 py-2 rounded-xl cursor-pointer"
+                    className="flex items-center bg-slate-100 px-3 py-2 rounded-xl cursor-pointer sticky top-0"
                     onClick={() => toggleEmp(empId)}
                   >
                     <span className="truncate max-w-[60%] font-medium">{emp.name}</span>
-                    <span className="ml-auto flex items-center gap-1 text-sm text-muted-foreground">
-                      {formatDatesCount(items.length)}
-                      {isCollapsed ? (
-                        <ChevronDown className="h-4 w-4" />
-                      ) : (
-                        <ChevronUp className="h-4 w-4" />
-                      )}
-                    </span>
+                    <span className="ml-auto text-sm text-muted-foreground">{formatDatesCount(items.length)}</span>
+                    {isCollapsed ? (
+                      <ChevronDown className="h-4 w-4 mr-1" />
+                    ) : (
+                      <ChevronUp className="h-4 w-4 mr-1" />
+                    )}
                   </div>
                   {!isCollapsed && (
-                    <div className="space-y-4 mt-2">
+                    <div className="grid gap-3 lg:grid-cols-2 mt-2">
                       {items.map(({ row, index }) => (
                         <EntryRow
                           key={`${row.employee_id}-${row.date}-${index}`}
@@ -109,7 +107,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
                       ))}
                     </div>
                   )}
-                  <Separator className="my-4" />
+                  {idx !== groupedRows.length - 1 && <Separator className="mt-4" />}
                 </div>
               );
             })}
