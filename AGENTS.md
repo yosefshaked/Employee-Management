@@ -21,4 +21,5 @@
 - `paid_leave` days are saved without `hours` and the table editor opens them with no hour segments.
 - Reports date filters accept `DD/MM/YYYY`, `D/M/YY`, or ISO strings and hours KPIs count only hourly employees.
 - WorkSessions deletions verify at least one row was removed; a zero-row delete should surface an error.
+- When inserting WorkSessions, avoid duplicates by comparing `employee_id`, `date`, `entry_type`, and `hours`; allow updates to the same row by matching `id`.
 

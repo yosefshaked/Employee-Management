@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
+import { hasDuplicateSession } from '@/lib/workSessionsUtils.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -166,8 +167,7 @@ export default function TimeEntry() {
           toast.error('paid_leave only allowed for global employees', { duration: 15000 });
           return null;
         }
-
-        return {
+        const session = {
           employee_id: employee.id,
           date: row.date,
           entry_type: entryType,
@@ -179,6 +179,11 @@ export default function TimeEntry() {
           rate_used: rateUsed,
           total_payment: totalPayment,
         };
+        if (hasDuplicateSession(workSessions, session)) {
+          toast.error('רישום זה כבר קיים', { duration: 15000 });
+          return null;
+        }
+        return session;
       }).filter(Boolean);
 
       if (sessionsToInsert.length === 0) {
@@ -285,6 +290,10 @@ export default function TimeEntry() {
           sessionData.sessions_count = parseInt(row.sessions_count, 10) || 1;
           sessionData.students_count = parseInt(row.students_count, 10) || null;
         }
+        if (hasDuplicateSession(workSessions, sessionData)) {
+          toast.error('רישום זה כבר קיים', { duration: 15000 });
+          return;
+        }
         if (row.id) {
           toUpdate.push(sessionData);
         } else {
@@ -319,6 +328,10 @@ export default function TimeEntry() {
           sessions_count: null,
           students_count: null,
         };
+        if (hasDuplicateSession(workSessions, plRow)) {
+          toast.error('רישום זה כבר קיים', { duration: 15000 });
+          return;
+        }
         if (paidLeaveId) {
           plRow.id = paidLeaveId;
           toUpdate.push(plRow);
