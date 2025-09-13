@@ -135,10 +135,14 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <TooltipProvider>
-        <DialogContent className="p-0 overflow-hidden">
+        <DialogContent
+          wide
+          className="max-w-none w-[98vw] max-w-[1200px] p-0 overflow-hidden"
+          style={{ maxHeight: 'none' }}
+        >
           <div
             data-testid="md-container"
-            className="flex flex-col w-[min(98vw,1200px)] h-[min(92vh,calc(100dvh-2rem))] max-w-[98vw]"
+            className="flex flex-col w-full h-[min(92vh,calc(100dvh-2rem))]"
           >
             <div
               data-testid="md-header"

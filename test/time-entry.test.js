@@ -93,15 +93,18 @@ describe('no days text in table for globals', () => {
 });
 
 describe('multi-date modal layout', () => {
-  it('renders footer outside scroll body', () => {
+  it('uses wide dialog with footer outside body', () => {
     const content = fs.readFileSync(
       path.join('src', 'components', 'time-entry', 'MultiDateEntryModal.jsx'),
       'utf8'
     );
+    assert(content.includes('w-[98vw]'));
+    assert(content.includes('max-w-[1200px]'));
     const bodyIndex = content.indexOf('data-testid="md-body"');
     const footerIndex = content.indexOf('data-testid="md-footer"');
     assert(bodyIndex !== -1 && footerIndex !== -1);
     assert(footerIndex > bodyIndex);
+    assert(content.includes('overflow-y-auto'));
     assert(!content.includes('sticky bottom-0'));
   });
 });
