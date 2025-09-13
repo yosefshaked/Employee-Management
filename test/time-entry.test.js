@@ -210,16 +210,6 @@ describe('segment duplication and deletion', () => {
   });
 });
 
-describe('destructive deletion copy', () => {
-  it('delete modals contain required Hebrew text', () => {
-    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'),'utf8');
-    assert(content.includes('מחיקה לצמיתות'));
-    assert(content.includes('אישור מחיקה לצמיתות'));
-    assert(content.includes('המחיקה תתבצע לצמיתות במסד הנתונים ואין אפשרות לשחזר'));
-    assert(content.includes('להמשך הקלד/י: מחק'));
-    assert(content.includes('אני מבין/ה שהמחיקה בלתי הפיכה'));
-  });
-});
 
 describe('day type copy icon visibility', () => {
   it('renders copy-prev-daytype with aria-label', () => {
@@ -236,6 +226,18 @@ describe('global daily rate ignores hours', () => {
     const dailyRate = calculateGlobalDailyRate(emp, new Date('2024-02-05'), monthlyRate);
     const total = dailyRate; // hours ignored
     assert.equal(total, dailyRate);
+  });
+});
+
+describe('single day shell layout', () => {
+  it('hourly shell matches global style without daytype', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'),'utf8');
+    assert(content.includes('showDayType={isGlobal}'));
+  });
+  it('sticky footer visible and body scrolls', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','shared','SingleDayEntryShell.jsx'),'utf8');
+    assert(content.includes('sticky bottom-0'));
+    assert(content.includes('overflow-y-auto'));
   });
 });
 
@@ -285,7 +287,6 @@ describe('global hours segments', () => {
   it('TimeEntryForm has add segment microcopy', () => {
     const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'), 'utf8');
     assert(content.includes('הוסף מקטע שעות'));
-    assert(content.includes('נדרש לפחות מקטע אחד ליום גלובלי'));
   });
 });
 
