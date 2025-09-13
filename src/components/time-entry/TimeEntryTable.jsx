@@ -320,10 +320,13 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                     setDayTypeError(false);
                   }}
                   dayTypeError={dayTypeError}
+                  hideDayType={editingCell.employee.employee_type !== 'global'}
                 />
               </div>
               <div data-testid="day-modal-body" className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3 relative">
-                {!dayType && <div className="absolute inset-0 bg-white/60 z-10" aria-hidden="true"></div>}
+                {editingCell.employee.employee_type === 'global' && !dayType && (
+                  <div className="absolute inset-0 bg-white/60 z-10" aria-hidden="true"></div>
+                )}
                 <TimeEntryForm
                   employee={editingCell.employee}
                   services={services}
@@ -333,9 +336,9 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                   onTotalsChange={setDayTotals}
                   hideSubmitButton
                   formId="entry-form"
-                  dayType={dayType}
+                  dayType={editingCell.employee.employee_type === 'global' ? dayType : null}
                   onSubmit={({ rows }) => {
-                    if (!dayType) {
+                    if (editingCell.employee.employee_type === 'global' && !dayType) {
                       setDayTypeError(true);
                       dayTypeRef.current?.scrollIntoView({ behavior: 'smooth' });
                       dayTypeRef.current?.querySelector('button')?.focus();
@@ -346,18 +349,20 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                   }}
                 />
               </div>
-              <div className="shrink-0 bg-background border-t px-4 py-2 flex justify-between text-sm">
-                <span>שעות סה"כ: {dayTotals.hours}</span>
-                <span>שכר יומי: ₪{dayTotals.daily.toFixed(2)} (נספר פעם אחת)</span>
-              </div>
+              {editingCell.employee.employee_type === 'global' && (
+                <div className="shrink-0 bg-background border-t px-4 py-2 flex justify-between text-sm">
+                  <span>שעות סה"כ: {dayTotals.hours}</span>
+                  <span>שכר יומי: ₪{dayTotals.daily.toFixed(2)} (נספר פעם אחת)</span>
+                </div>
+              )}
               <div data-testid="day-modal-footer" className="shrink-0 bg-background border-t px-4 py-3 flex justify-between gap-2">
                 <Button variant="outline" type="button" onClick={() => setEditingCell(null)}>בטל</Button>
                 <Button
                   type="submit"
                   form="entry-form"
-                  className={`bg-gradient-to-r from-green-500 to-blue-500 text-white ${!dayType ? 'opacity-50' : ''}`}
+                  className={`bg-gradient-to-r from-green-500 to-blue-500 text-white ${editingCell.employee.employee_type === 'global' && !dayType ? 'opacity-50' : ''}`}
                   onClick={(e) => {
-                    if (!dayType) {
+                    if (editingCell.employee.employee_type === 'global' && !dayType) {
                       e.preventDefault();
                       setDayTypeError(true);
                       dayTypeRef.current?.scrollIntoView({ behavior: 'smooth' });

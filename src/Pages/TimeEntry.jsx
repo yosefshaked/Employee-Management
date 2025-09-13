@@ -233,6 +233,10 @@ export default function TimeEntry() {
           toast.error(reason || 'לא הוגדר תעריף עבור תאריך זה', { duration: 15000 });
           return;
         }
+        const legacyPaidLeave = row.entry_type === 'paid_leave' && employee.employee_type !== 'global';
+        if (legacyPaidLeave) {
+          row.notes = row.notes ? `${row.notes} (סומן בעבר כחופשה)` : 'סומן בעבר כחופשה';
+        }
         let totalPayment = 0;
         if (employee.employee_type === 'hourly') {
           totalPayment = (hoursValue || 0) * rateUsed;

@@ -38,6 +38,8 @@ function validateRow(row, employee, services, getRateForDate, dayTypeMap) {
         errors.dayType = 'אין ימי עבודה בחודש';
       }
     }
+  } else if (row.entry_type === 'paid_leave') {
+    errors.entry_type = 'סוג יום לא נתמך';
   }
   return { valid: Object.keys(errors).length === 0, errors };
 }

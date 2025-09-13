@@ -154,6 +154,12 @@ export default function EntryRow({
         </div>
       )}
 
+      {employee.employee_type !== 'global' && row.entry_type === 'paid_leave' && (
+        <div className="mb-3 p-2 rounded-md bg-blue-50 text-blue-700 text-sm">
+          רישום חופשה היסטורי עבור סוג עובד שאינו נתמך; לא ניתן ליצור רישום חופשה חדש עבור סוג זה.
+        </div>
+      )}
+
       <div className="grid grid-cols-12 gap-x-4 gap-y-4 mt-3 auto-rows-auto items-start">
         {employee.employee_type === 'hourly' && (
           <div className={`space-y-1 min-w-0 col-span-12 sm:col-span-6 md:col-span-4 ${flash === 'hours' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>

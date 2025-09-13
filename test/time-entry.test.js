@@ -59,6 +59,17 @@ describe('per-employee day type control rendering', () => {
   });
 });
 
+describe('day type visibility', () => {
+  it('single-day modal shows day type only for globals', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryTable.jsx'),'utf8');
+    assert(content.includes("hideDayType={editingCell.employee.employee_type !== 'global'}"));
+  });
+  it('multi-date modal shows day type only for global groups', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','MultiDateEntryModal.jsx'),'utf8');
+    assert(content.includes("emp.employee_type === 'global'"));
+  });
+});
+
 describe('copy and fill utilities', () => {
   it('copyFromPrevious copies only within same employee', () => {
     const rows = [
@@ -87,6 +98,48 @@ describe('copy and fill utilities', () => {
     assert.equal(isRowCompleteForProgress(row, emp, map), false);
     map.g1 = 'regular';
     assert.equal(isRowCompleteForProgress(row, emp, map), true);
+  });
+});
+
+describe('paid leave restrictions', () => {
+  it('converts paid_leave for non-globals and appends note', async () => {
+    let inserted = [];
+    const employees = [
+      { id: 'h1', employee_type: 'hourly' },
+      { id: 'i1', employee_type: 'instructor' }
+    ];
+    const services = [{ id: 's1', payment_model: 'per_student' }];
+    const rows = [
+      { employee_id: 'h1', date: '2024-01-01', entry_type: 'paid_leave', hours: '1', notes: '' },
+      { employee_id: 'i1', date: '2024-01-01', entry_type: 'paid_leave', service_id: 's1', sessions_count: '1', students_count: '1', notes: '' }
+    ];
+    const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
+    const getRateForDate = () => ({ rate: 100 });
+    const { saveRows } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
+    await saveRows(rows);
+    assert.equal(inserted[0].entry_type, 'hours');
+    assert(inserted[0].notes.includes('סומן בעבר כחופשה'));
+    assert.equal(inserted[1].entry_type, 'session');
+    assert(inserted[1].notes.includes('סומן בעבר כחופשה'));
+  });
+
+  it('global paid_leave persists and counts daily rate', async () => {
+    let inserted = [];
+    const employees = [{ id: 'g1', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
+    const services = [];
+    const rows = [{ employee_id: 'g1', date: '2024-02-01', hours: '' }];
+    const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
+    const getRateForDate = () => ({ rate: 3000 });
+    const { saveRows } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
+    await saveRows(rows, { g1: 'paid_leave' });
+    assert.equal(inserted[0].entry_type, 'paid_leave');
+    const expected = calculateGlobalDailyRate(employees[0], '2024-02-01', 3000);
+    assert.equal(inserted[0].total_payment, expected);
+  });
+
+  it('legacy paid_leave banner text exists', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','EntryRow.jsx'),'utf8');
+    assert(content.includes('רישום חופשה היסטורי עבור סוג עובד שאינו נתמך'));
   });
 });
 
