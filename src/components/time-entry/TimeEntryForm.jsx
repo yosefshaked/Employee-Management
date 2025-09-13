@@ -6,7 +6,7 @@ import InstructorSegment from './segments/InstructorSegment.jsx';
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { sumHours } from './dayUtils.js';
 
-export default function TimeEntryForm({ employee, services = [], onSubmit, getRateForDate, initialRows = null, selectedDate, formId }) {
+export default function TimeEntryForm({ employee, services = [], onSubmit, getRateForDate, initialRows = null, selectedDate }) {
   const isGlobal = employee.employee_type === 'global';
   const isHourly = employee.employee_type === 'hourly';
 
@@ -83,20 +83,20 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
   const addLabel = isHourly || isGlobal ? 'הוסף מקטע שעות' : 'הוסף רישום';
 
   return (
-    <SingleDayEntryShell
-      employee={employee}
-      date={selectedDate}
-      showDayType={isGlobal}
-      dayType={dayType}
-      onDayTypeChange={setDayType}
-      segments={segments}
-      renderSegment={renderSegment}
-      onAddSegment={addSeg}
-      addLabel={addLabel}
-      summary={summary}
-      onCancel={() => onSubmit(null)}
-      onSave={handleSave}
-      formId={formId}
-    />
+    <form onSubmit={handleSave} className="flex flex-col w-[min(98vw,1100px)] max-w-[98vw] h-[min(92vh,calc(100dvh-2rem))]">
+      <SingleDayEntryShell
+        employee={employee}
+        date={selectedDate}
+        showDayType={isGlobal}
+        dayType={dayType}
+        onDayTypeChange={setDayType}
+        segments={segments}
+        renderSegment={renderSegment}
+        onAddSegment={addSeg}
+        addLabel={addLabel}
+        summary={summary}
+        onCancel={() => onSubmit(null)}
+      />
+    </form>
   );
 }

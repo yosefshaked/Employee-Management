@@ -61,8 +61,8 @@ describe('per-employee day type control rendering', () => {
 
 describe('day type visibility', () => {
   it('single-day modal shows day type only for globals', () => {
-    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryTable.jsx'),'utf8');
-    assert(content.includes("hideDayType={editingCell.employee.employee_type !== 'global'}"));
+    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'),'utf8');
+    assert(content.includes('showDayType={isGlobal}'));
   });
   it('multi-date modal shows day type only for global groups', () => {
     const content = fs.readFileSync(path.join('src','components','time-entry','MultiDateEntryModal.jsx'),'utf8');
@@ -206,7 +206,7 @@ describe('segment duplication and deletion', () => {
 
   it('table_shows_sum_hours_for_global_date', () => {
     const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryTable.jsx'),'utf8');
-    assert(content.includes('שעות סה"כ'));
+    assert(!content.includes('שעות סה"כ'));
   });
 });
 
@@ -308,18 +308,11 @@ describe('multi-date modal layout', () => {
 });
 
 describe('single-day modal layout and date handling', () => {
-  it('uses wide dialog with body scroll and footer outside', () => {
-    const content = fs.readFileSync(
-      path.join('src', 'components', 'time-entry', 'TimeEntryTable.jsx'),
-      'utf8'
-    );
-    assert(content.includes('data-testid="day-modal-body"'));
-    assert(content.includes('data-testid="day-modal-footer"'));
-    const bodyIndex = content.indexOf('data-testid="day-modal-body"');
-    const footerIndex = content.indexOf('data-testid="day-modal-footer"');
-    assert(footerIndex > bodyIndex);
-    assert(content.includes('w-[98vw]'));
-    assert(content.includes('max-w-[1100px]'));
+  it('uses wide form with scrollable body', () => {
+    const form = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'),'utf8');
+    const shell = fs.readFileSync(path.join('src','components','time-entry','shared','SingleDayEntryShell.jsx'),'utf8');
+    assert(form.includes('w-[min(98vw,1100px)]'));
+    assert(shell.includes('overflow-y-auto'));
   });
 
   it('avoids date off-by-one conversions', () => {
@@ -327,5 +320,17 @@ describe('single-day modal layout and date handling', () => {
     assert(!formContent.includes('new Date(dateToUse).toISOString'));
     const tableContent = fs.readFileSync(path.join('src','components','time-entry','TimeEntryTable.jsx'),'utf8');
     assert(tableContent.includes("format(editingCell.day, 'yyyy-MM-dd')"));
+  });
+
+  it('renders one shell with single save button', () => {
+    const shell = fs.readFileSync(path.join('src','components','time-entry','shared','SingleDayEntryShell.jsx'),'utf8');
+    const matches = shell.match(/שמור רישומים/g) || [];
+    assert.equal(matches.length, 1);
+    assert(!shell.includes('<Dialog'));
+  });
+
+  it('time entry table uses no extra footer', () => {
+    const table = fs.readFileSync(path.join('src','components','time-entry','TimeEntryTable.jsx'),'utf8');
+    assert(!table.includes('day-modal-footer'));
   });
 });

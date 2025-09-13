@@ -13,12 +13,10 @@ export default function SingleDayEntryShell({
   onAddSegment,
   addLabel,
   summary,
-  onCancel,
-  onSave,
-  formId
+  onCancel
 }) {
   return (
-    <form id={formId} className="flex flex-col w-full h-full">
+    <div className="flex flex-col w-full h-full">
       <div className="sticky top-0 z-20 bg-background border-b px-4 py-3">
         <DayHeader
           employee={employee}
@@ -38,9 +36,9 @@ export default function SingleDayEntryShell({
         <div className="text-sm text-slate-700">{summary}</div>
         <div className="flex gap-2">
           <Button type="button" variant="outline" onClick={onCancel}>בטל</Button>
-          <Button type="submit" onClick={onSave}>שמור רישומים</Button>
+          <Button type="submit">שמור רישומים</Button>
         </div>
       </div>
-    </form>
+    </div>
   );
 }

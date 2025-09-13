@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,6 @@ import ImportModal from '@/components/import/ImportModal.jsx';
 import EmployeePicker from '../employees/EmployeePicker.jsx';
 import MultiDateEntryModal from './MultiDateEntryModal.jsx';
 import { aggregateGlobalDays, aggregateGlobalDayForDate } from '@/lib/payroll.js';
-import DayHeader from './DayHeader.jsx';
 function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
@@ -21,10 +20,6 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
   const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees]);
   const [importOpen, setImportOpen] = useState(false);
   const [multiModalOpen, setMultiModalOpen] = useState(false);
-  const [dayType, setDayType] = useState(null);
-  const [dayTypeError, setDayTypeError] = useState(false);
-  const dayTypeRef = useRef(null);
-  const [dayTotals, setDayTotals] = useState({ hours: 0, daily: 0 });
   const daysInMonth = useMemo(() => {
     const start = startOfMonth(currentMonth);
     const end = endOfMonth(currentMonth);
@@ -42,19 +37,6 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
     setMultiMode(false);
   }, [currentMonth, employees]);
 
-  useEffect(() => {
-    if (editingCell) {
-      const existing = editingCell.existingSessions || [];
-      const initial = existing.length > 0 ? (existing[0].entry_type === 'paid_leave' ? 'paid_leave' : 'regular') : null;
-      setDayType(initial);
-      setDayTypeError(false);
-      setDayTotals({ hours: 0, daily: 0 });
-      setTimeout(() => dayTypeRef.current?.querySelector('button')?.focus(), 0);
-    } else {
-      setDayType(null);
-      setDayTypeError(false);
-    }
-  }, [editingCell]);
 
 
   const monthlyTotals = useMemo(() => {
@@ -306,76 +288,25 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
         </Card>
         {/* The Dialog for editing/adding entries */}
         <Dialog open={!!editingCell} onOpenChange={(isOpen) => !isOpen && setEditingCell(null)}>
-        <DialogContent wide className="max-w-none w-[98vw] max-w-[1100px] p-0 overflow-hidden">
-          {editingCell && (
-            <div data-testid="day-modal-container" className="flex flex-col w-[min(98vw,1100px)] max-w-[98vw] h-[min(92vh,calc(100dvh-2rem))]">
-              <div data-testid="day-modal-header" className="sticky top-0 z-20 bg-background border-b px-4 py-3">
-                <DayHeader
-                  ref={dayTypeRef}
-                  employee={editingCell.employee}
-                  date={format(editingCell.day, 'yyyy-MM-dd')}
-                  dayType={dayType}
-                  onChange={(v) => {
-                    setDayType(v);
-                    setDayTypeError(false);
-                  }}
-                  dayTypeError={dayTypeError}
-                  hideDayType={editingCell.employee.employee_type !== 'global'}
-                />
-              </div>
-              <div data-testid="day-modal-body" className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3 relative">
-                {editingCell.employee.employee_type === 'global' && !dayType && (
-                  <div className="absolute inset-0 bg-white/60 z-10" aria-hidden="true"></div>
-                )}
-                <TimeEntryForm
-                  employee={editingCell.employee}
-                  services={services}
-                  initialRows={editingCell.existingSessions}
-                  selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
-                  getRateForDate={getRateForDate}
-                  onTotalsChange={setDayTotals}
-                  hideSubmitButton
-                  formId="entry-form"
-                  dayType={editingCell.employee.employee_type === 'global' ? dayType : null}
-                  onSubmit={({ rows }) => {
-                    if (editingCell.employee.employee_type === 'global' && !dayType) {
-                      setDayTypeError(true);
-                      dayTypeRef.current?.scrollIntoView({ behavior: 'smooth' });
-                      dayTypeRef.current?.querySelector('button')?.focus();
-                      return;
-                    }
-                    onTableSubmit({ employee: editingCell.employee, day: editingCell.day, dayType, updatedRows: rows });
+          <DialogContent wide className="max-w-none w-[98vw] max-w-[1100px] p-0 overflow-hidden">
+            {editingCell && (
+              <TimeEntryForm
+                employee={editingCell.employee}
+                services={services}
+                initialRows={editingCell.existingSessions}
+                selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
+                getRateForDate={getRateForDate}
+                onSubmit={(result) => {
+                  if (!result) {
                     setEditingCell(null);
-                  }}
-                />
-              </div>
-              {editingCell.employee.employee_type === 'global' && (
-                <div className="shrink-0 bg-background border-t px-4 py-2 flex justify-between text-sm">
-                  <span>שעות סה"כ: {dayTotals.hours}</span>
-                  <span>שכר יומי: ₪{dayTotals.daily.toFixed(2)} (נספר פעם אחת)</span>
-                </div>
-              )}
-              <div data-testid="day-modal-footer" className="shrink-0 bg-background border-t px-4 py-3 flex justify-between gap-2">
-                <Button variant="outline" type="button" onClick={() => setEditingCell(null)}>בטל</Button>
-                <Button
-                  type="submit"
-                  form="entry-form"
-                  className={`bg-gradient-to-r from-green-500 to-blue-500 text-white ${editingCell.employee.employee_type === 'global' && !dayType ? 'opacity-50' : ''}`}
-                  onClick={(e) => {
-                    if (editingCell.employee.employee_type === 'global' && !dayType) {
-                      e.preventDefault();
-                      setDayTypeError(true);
-                      dayTypeRef.current?.scrollIntoView({ behavior: 'smooth' });
-                      dayTypeRef.current?.querySelector('button')?.focus();
-                    }
-                  }}
-                >
-                  שמור רישומים
-                </Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
+                    return;
+                  }
+                  onTableSubmit({ employee: editingCell.employee, day: editingCell.day, dayType: result.dayType, updatedRows: result.rows });
+                  setEditingCell(null);
+                }}
+              />
+            )}
+          </DialogContent>
         </Dialog>
         <ImportModal
           open={importOpen}
