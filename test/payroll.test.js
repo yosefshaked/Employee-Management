@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { effectiveWorkingDays, calculateGlobalDailyRate } from '../src/lib/payroll.js';
+import { effectiveWorkingDays, calculateGlobalDailyRate, aggregateGlobalDays } from '../src/lib/payroll.js';
 import { eachMonthOfInterval } from 'date-fns';
 
 const empSunThu = { working_days: ['SUN','MON','TUE','WED','THU'] };
@@ -64,5 +64,42 @@ describe('rate snapshots and adjustments', () => {
     ];
     const total = rows.reduce((sum, r) => sum + r.total_payment, 0);
     assert.equal(total, 80);
+  });
+});
+
+describe('global day aggregation', () => {
+  const emp = { id: 'e1', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] };
+  it('global_same_day_counted_once', () => {
+    const monthlyRate = 3000;
+    const daily = calculateGlobalDailyRate(emp, '2024-02-05', monthlyRate);
+    const rows = [
+      { employee_id: 'e1', date: '2024-02-05', entry_type: 'hours', total_payment: daily },
+      { employee_id: 'e1', date: '2024-02-05', entry_type: 'hours', total_payment: daily }
+    ];
+    const agg = aggregateGlobalDays(rows, { e1: emp });
+    let sum = 0; agg.forEach(v => { sum += v.dailyAmount; });
+    assert.equal(sum, daily);
+  });
+  it('global_two_days_counted_twice', () => {
+    const monthlyRate = 3000;
+    const daily = calculateGlobalDailyRate(emp, '2024-02-05', monthlyRate);
+    const rows = [
+      { employee_id: 'e1', date: '2024-02-05', entry_type: 'hours', total_payment: daily },
+      { employee_id: 'e1', date: '2024-02-06', entry_type: 'hours', total_payment: daily }
+    ];
+    const agg = aggregateGlobalDays(rows, { e1: emp });
+    let sum = 0; agg.forEach(v => { sum += v.dailyAmount; });
+    assert.equal(sum, daily * 2);
+  });
+  it('session_hourly_unchanged', () => {
+    const rows = [
+      { employee_id: 'e2', entry_type: 'hours', total_payment: 100 },
+      { employee_id: 'e2', entry_type: 'hours', total_payment: 100 },
+      { employee_id: 'e3', entry_type: 'session', total_payment: 50 }
+    ];
+    const agg = aggregateGlobalDays(rows, { e2: { id: 'e2', employee_type: 'hourly' }, e3: { id: 'e3', employee_type: 'instructor' } });
+    assert.equal(Array.from(agg.keys()).length, 0);
+    const total = rows.reduce((s,r)=>s+r.total_payment,0);
+    assert.equal(total, 250);
   });
 });

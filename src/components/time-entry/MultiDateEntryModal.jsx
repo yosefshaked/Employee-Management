@@ -3,13 +3,13 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
-import EntryRow from './EntryRow.jsx';
+import EntryRow, { computeRowPayment } from './EntryRow.jsx';
 import { copyFromPrevious, formatDatesCount, isRowCompleteForProgress } from './multiDateUtils.js';
 import { format } from 'date-fns';
 import { useTimeEntry } from './useTimeEntry.js';
 import { ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
-import { calculateGlobalDailyRate } from '@/lib/payroll.js';
+import { calculateGlobalDailyRate, aggregateGlobalDays } from '@/lib/payroll.js';
 
 function validateRow(row, employee, services, getRateForDate) {
   const errors = {};
@@ -71,6 +71,29 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
     () => rows.map(r => validateRow(r, employeesById[r.employee_id], services, getRateForDate)),
     [rows, employeesById, services, getRateForDate]
   );
+  const payments = useMemo(() => rows.map(r => computeRowPayment(r, employeesById[r.employee_id], services, getRateForDate)), [rows, employeesById, services, getRateForDate]);
+  const globalAgg = useMemo(() => {
+    const withPay = rows.map((r, i) => ({ ...r, total_payment: payments[i] }));
+    return aggregateGlobalDays(withPay, employeesById);
+  }, [rows, payments, employeesById]);
+  const duplicateMap = useMemo(() => {
+    const map = {};
+    globalAgg.forEach(val => {
+      val.indices.forEach((idx, i) => { map[idx] = i > 0; });
+    });
+    return map;
+  }, [globalAgg]);
+  const summaryTotal = useMemo(() => {
+    let nonGlobal = 0;
+    rows.forEach((r, i) => {
+      const emp = employeesById[r.employee_id];
+      if (emp.employee_type === 'global' && (r.entry_type === 'hours' || r.entry_type === 'paid_leave')) return;
+      nonGlobal += payments[i];
+    });
+    let globalSum = 0;
+    globalAgg.forEach(v => { globalSum += v.dailyAmount; });
+    return nonGlobal + globalSum;
+  }, [rows, payments, employeesById, globalAgg]);
   const filledCount = useMemo(
     () => rows.filter(r => isRowCompleteForProgress(r, employeesById[r.employee_id])).length,
     [rows, employeesById]
@@ -158,9 +181,10 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
             >
               <div className="flex text-sm text-slate-600">
                 <span>טיפ: אפשר להעתיק ערכים מהרישום הקודם עם האייקון ליד כל שדה.</span>
-                <span className="ml-auto">מולאו {filledCount} מתוך {rows.length} שורות</span>
-              </div>
-              {showBanner && (
+              <span className="ml-auto">מולאו {filledCount} מתוך {rows.length} שורות</span>
+            </div>
+            <div className="text-right font-medium text-slate-700">סיכום כולל לרישומים: ₪{summaryTotal.toFixed(2)}</div>
+            {showBanner && (
                 <div className="bg-amber-50 border border-amber-200 p-4 flex justify-between items-center text-sm">
                   <span>חלק מהשורות מכילות שגיאות.</span>
                   <div className="flex gap-2">
@@ -198,6 +222,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
                             rowId={`row-${index}`}
                             flashField={flash && flash.index === index ? flash.field : null}
                             errors={showErrors ? validation[index].errors : {}}
+                            isDuplicate={!!duplicateMap[index]}
                           />
                         ))}
                       </div>

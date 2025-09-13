@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Save, Plus } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import EntryRow, { computeRowPayment } from './EntryRow.jsx';
+import { aggregateGlobalDays } from '@/lib/payroll.js';
 
 export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate, initialRows = null, selectedDate, allowAddRow = true }) {
   const createNewRow = (dateToUse) => ({
@@ -23,7 +24,25 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
   });
 
   const totalCalculatedPayment = useMemo(() => {
+    if (employee.employee_type === 'global') {
+      const payments = rows.map(r => ({ ...r, total_payment: computeRowPayment(r, employee, services, getRateForDate) }));
+      const agg = aggregateGlobalDays(payments, { [employee.id]: employee });
+      let total = 0;
+      agg.forEach(v => { total += v.dailyAmount; });
+      return total;
+    }
     return rows.reduce((sum, row) => sum + computeRowPayment(row, employee, services, getRateForDate), 0);
+  }, [rows, employee, services, getRateForDate]);
+
+  const duplicateMap = useMemo(() => {
+    if (employee.employee_type !== 'global') return {};
+    const payments = rows.map(r => ({ ...r, employee_id: employee.id, total_payment: computeRowPayment(r, employee, services, getRateForDate) }));
+    const agg = aggregateGlobalDays(payments, { [employee.id]: employee });
+    const res = {};
+    agg.forEach(val => {
+      val.indices.forEach((idx, i) => { res[rows[idx].id] = i > 0; });
+    });
+    return res;
   }, [rows, employee, services, getRateForDate]);
 
   const addRow = () => {
@@ -60,6 +79,7 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
             onChange={(patch) => handleRowChange(row.id, patch)}
             allowRemove={allowAddRow && typeof row.id === 'string' && rows.length > 1}
             onRemove={() => removeRow(row.id)}
+            isDuplicate={!!duplicateMap[row.id]}
           />
         ))}
       </div>

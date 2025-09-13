@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Calendar as CalendarIcon, Trash2, Copy } from 'lucide-react';
@@ -52,7 +53,8 @@ export default function EntryRow({
   readOnlyDate = false,
   flashField = null,
   errors = {},
-  rowId
+  rowId,
+  isDuplicate = false
 }) {
   const row = value;
   const handleChange = (field, val) => onChange({ [field]: val });
@@ -226,11 +228,26 @@ export default function EntryRow({
 
         {employee.employee_type !== 'instructor' && employee.employee_type !== 'hourly' && employee.employee_type !== 'global' && null}
 
+        <div className="space-y-1 min-w-[320px] col-span-full">
+          <Label className="text-sm font-medium text-slate-700">הערות</Label>
+          <Textarea
+            value={row.notes}
+            onChange={(e) => handleChange('notes', e.target.value)}
+            className="bg-white text-base leading-6"
+            placeholder="הערה חופשית (לא חובה)"
+            maxLength={300}
+            rows={2}
+          />
+        </div>
+
       </div>
 
       {showSummary && (
         <div className="mt-4 text-sm text-right text-slate-700">
           סה"כ לשורה: <span className="font-bold">₪{rowPayment.toFixed(2)}</span>
+          {isDuplicate && (
+            <span className="block text-xs text-slate-500">נספר לפי יום — רישום זה לא מכפיל שכר</span>
+          )}
         </div>
       )}
 

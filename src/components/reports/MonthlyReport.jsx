@@ -1,4 +1,5 @@
 import React from 'react';
+import { aggregateGlobalDays } from '@/lib/payroll.js';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, TrendingUp } from "lucide-react";
@@ -41,11 +42,13 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
     let totalSessions = 0;
     let totalStudents = 0;
     const employeePayments = {};
-
+    const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
+    const agg = aggregateGlobalDays(monthSessions, employeesById);
     monthSessions.forEach(session => {
-      const emp = employees.find(e => e.id === session.employee_id);
+      const emp = employeesById[session.employee_id];
       if (!emp || (emp.start_date && session.date < emp.start_date)) return;
-      totalPayment += session.total_payment || 0;
+      const isGlobalDay = emp.employee_type === 'global' && (session.entry_type === 'hours' || session.entry_type === 'paid_leave');
+      if (!isGlobalDay) totalPayment += session.total_payment || 0;
       if (session.entry_type === 'session') {
         totalSessions += session.sessions_count || 0;
         totalStudents += (session.students_count || 0) * (session.sessions_count || 0);
@@ -56,7 +59,13 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
       } else if (session.entry_type === 'hours') {
         totalHours += session.hours || 0;
       }
-      employeePayments[session.employee_id] = (employeePayments[session.employee_id] || 0) + (session.total_payment || 0);
+      const val = isGlobalDay ? 0 : (session.total_payment || 0);
+      employeePayments[session.employee_id] = (employeePayments[session.employee_id] || 0) + val;
+    });
+    agg.forEach((v, key) => {
+      const [empId] = key.split('|');
+      totalPayment += v.dailyAmount;
+      employeePayments[empId] = (employeePayments[empId] || 0) + v.dailyAmount;
     });
 
     const topEmployeeId = Object.keys(employeePayments).reduce((a, b) =>

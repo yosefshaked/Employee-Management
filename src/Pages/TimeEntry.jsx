@@ -165,7 +165,7 @@ export default function TimeEntry() {
           hours: employee.employee_type === 'hourly' ? (parseFloat(row.hours) || null) : (employee.employee_type === 'global' && entryType === 'hours' ? (parseFloat(row.hours) || null) : null),
           sessions_count: employee.employee_type === 'instructor' ? (parseInt(row.sessions_count) || null) : null,
           students_count: employee.employee_type === 'instructor' ? (parseInt(row.students_count) || null) : null,
-          notes: entryType === 'paid_leave' ? 'paid_leave' : row.notes,
+          notes: row.notes || null,
           rate_used: rateUsed,
           total_payment: totalPayment,
         };
@@ -251,7 +251,7 @@ export default function TimeEntry() {
         const sessionData = {
           employee_id: employee.id,
           date: format(row.date, 'yyyy-MM-dd'),
-          notes: row.entry_type === 'paid_leave' ? 'paid_leave' : (row.notes || ''),
+          notes: row.notes || null,
           rate_used: rateUsed,
           total_payment: totalPayment,
         };

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { aggregateGlobalDays } from '@/lib/payroll.js';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -74,12 +75,13 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
     const employeeSessions = sessions.filter(
       s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
     );
-
+    const agg = aggregateGlobalDays(employeeSessions, { [employee.id]: employee });
     const sessionTotals = employeeSessions.reduce((acc, session) => {
       if (session.entry_type === 'adjustment') {
         acc.totalAdjustments += session.total_payment || 0;
       } else {
-        acc.sessionPayment += session.total_payment || 0;
+        const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || session.entry_type === 'paid_leave');
+        if (!isGlobalDay) acc.sessionPayment += session.total_payment || 0;
         if (session.entry_type === 'hours') {
           acc.totalHours += session.hours || 0;
         } else if (session.entry_type === 'session') {
@@ -88,8 +90,9 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
       }
       return acc;
     }, { sessionPayment: 0, totalHours: 0, totalSessions: 0, totalAdjustments: 0 });
-
-    const finalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments;
+    let globalSum = 0;
+    agg.forEach(v => { globalSum += v.dailyAmount; });
+    const finalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments + globalSum;
     const baseSalary = employee.employee_type === 'global' ? getRateForDate(employee.id, new Date()).rate : null;
 
     let serviceDetails = {};

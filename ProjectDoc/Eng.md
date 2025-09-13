@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.3.7**
-**Last Updated: 2025-09-13**
+**Version: 1.3.8**
+**Last Updated: 2025-09-14**
 
 ## 1. Vision & Purpose
 
@@ -107,10 +107,11 @@ The work log. Each row represents a completed work session.
 - `total_payment` is computed per row and stored:
   - Instructors: `sessions_count * students_count * rate_used` (or without students when not per-student).
   - Hourly employees: `hours * rate_used`.
-  - Global hours: `monthly_rate / effectiveWorkingDays(employee, month)` (each row represents one day; hours field is ignored).
-  - Paid leave: same daily rate as global hours, stored with `entry_type='paid_leave'` and `notes='paid_leave'`.
-- Monthly totals and reports sum `total_payment` from `WorkSessions` rows only; no external base salary is added.
-- Unpaid absence = no row. Paid leave is explicitly recorded with an `entry_type='paid_leave'` row.
+  - Global hours: `monthly_rate / effectiveWorkingDays(employee, month)` (each row represents one day; hours field is ignored and multiple rows on the same date count once).
+  - Paid leave: same daily rate as global hours, stored with `entry_type='paid_leave'`.
+  - Monthly totals and reports sum `total_payment` from `WorkSessions` rows only, deduplicating global rows by day; no external base salary is added.
+  - Unpaid absence = no row. Paid leave is explicitly recorded with an `entry_type='paid_leave'` row.
+  - Each row may include optional `notes` (free text, max 300 chars).
 
 ### Multi-date Quick Entry UX
 

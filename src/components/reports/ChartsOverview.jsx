@@ -1,4 +1,5 @@
 import React from 'react';
+import { aggregateGlobalDays } from '@/lib/payroll.js';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
@@ -73,13 +74,16 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     const employeeSessions = sessions.filter(
       s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
     );
+    const agg = aggregateGlobalDays(employeeSessions, { [employee.id]: employee });
     const totals = employeeSessions.reduce((acc, session) => {
-      acc.payment += session.total_payment || 0;
+      const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || session.entry_type === 'paid_leave');
+      if (!isGlobalDay) acc.payment += session.total_payment || 0;
       if (session.entry_type === 'session') {
         acc.totalSessions += session.sessions_count || 0;
       }
       return acc;
     }, { payment: 0, totalSessions: 0 });
+    agg.forEach(v => { totals.payment += v.dailyAmount; });
     return {
       name: employee.name,
       payment: totals.payment,
@@ -107,11 +111,14 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       return sessionDate >= monthStart && sessionDate <= monthEnd;
     });
     let payment = 0, hours = 0, sessionsCount = 0;
+    const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
+    const agg = aggregateGlobalDays(monthSessions, employeesById);
     monthSessions.forEach(session => {
-      const employee = employees.find(e => e.id === session.employee_id);
+      const employee = employeesById[session.employee_id];
       if (!employee || !employee.is_active) return;
       if (employee.start_date && session.date < employee.start_date) return;
-      payment += session.total_payment || 0;
+      const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || session.entry_type === 'paid_leave');
+      if (!isGlobalDay) payment += session.total_payment || 0;
       if (session.entry_type === 'hours') {
         hours += session.hours || 0;
         sessionsCount += session.hours || 0;
@@ -123,6 +130,7 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
         sessionsCount += session.sessions_count || 0;
       }
     });
+    agg.forEach(v => { payment += v.dailyAmount; });
     return {
       month: format(month, 'MMM', { locale: he }),
       payment,

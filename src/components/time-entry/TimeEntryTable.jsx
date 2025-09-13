@@ -11,6 +11,7 @@ import TimeEntryForm from './TimeEntryForm';
 import ImportModal from '@/components/import/ImportModal.jsx';
 import EmployeePicker from '../employees/EmployeePicker.jsx';
 import MultiDateEntryModal from './MultiDateEntryModal.jsx';
+import { aggregateGlobalDays } from '@/lib/payroll.js';
 function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
@@ -40,28 +41,43 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
     const start = startOfMonth(currentMonth);
     const end = endOfMonth(currentMonth);
     const totals = {};
-
+    const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
     employees.forEach(emp => {
       totals[emp.id] = { hours: 0, sessions: 0, payment: 0 };
     });
-
+    const globalAgg = aggregateGlobalDays(
+      workSessions.filter(s => {
+        const d = parseISO(s.date);
+        return d >= start && d <= end;
+      }),
+      employeesById
+    );
     workSessions.forEach(s => {
       const sessionDate = parseISO(s.date);
       if (sessionDate < start || sessionDate > end) return;
+      const emp = employeesById[s.employee_id];
       const empTotals = totals[s.employee_id];
-      if (!empTotals) return;
+      if (!empTotals || !emp) return;
       if (s.entry_type === 'adjustment') {
         empTotals.payment += s.total_payment || 0;
         return;
       }
-      empTotals.payment += s.total_payment || 0;
+      if (emp.employee_type === 'global' && (s.entry_type === 'hours' || s.entry_type === 'paid_leave')) {
+        // payment handled via aggregation
+      } else {
+        empTotals.payment += s.total_payment || 0;
+      }
       if (s.entry_type === 'session') {
         empTotals.sessions += s.sessions_count || 0;
       } else if (s.entry_type === 'hours') {
         empTotals.hours += s.hours || 0;
       }
     });
-
+    globalAgg.forEach((v, key) => {
+      const [empId] = key.split('|');
+      const empTotals = totals[empId];
+      if (empTotals) empTotals.payment += v.dailyAmount;
+    });
     return totals;
   }, [workSessions, employees, currentMonth]);
 

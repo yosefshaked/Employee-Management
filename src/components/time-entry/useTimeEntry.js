@@ -33,7 +33,7 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
         hours: row.entry_type === 'hours' ? (parseFloat(row.hours) || null) : null,
         sessions_count: row.entry_type === 'session' ? (parseInt(row.sessions_count, 10) || null) : null,
         students_count: row.entry_type === 'session' ? (parseInt(row.students_count, 10) || null) : null,
-        notes: row.entry_type === 'paid_leave' ? 'paid_leave' : null,
+        notes: row.notes ? row.notes : null,
         rate_used: rateUsed,
         total_payment: totalPayment,
       });
