@@ -13,7 +13,7 @@ import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 
 const weekNames = ['א׳','ב׳','ג׳','ד׳','ה׳','ו׳','ש׳'];
 
-function GlobalForm({ employee, onSubmit, getRateForDate, initialRows, selectedDate, onTotalsChange, hideSubmitButton, formId }) {
+function GlobalForm({ employee, onSubmit, getRateForDate, initialRows, selectedDate, onTotalsChange, hideSubmitButton, formId, dayType }) {
   const createSeg = () => ({ id: crypto.randomUUID(), hours: '', notes: '', _status: 'new' });
   const [segments, setSegments] = useState(() => {
     if (initialRows && initialRows.length > 0) {
@@ -44,11 +44,11 @@ function GlobalForm({ employee, onSubmit, getRateForDate, initialRows, selectedD
     onTotalsChange && onTotalsChange({ hours: totalH, daily: dailyRate });
   }, [segments, dailyRate, onTotalsChange]);
 
-  const addSeg = () => {
-    const seg = createSeg();
-    setSegments(prev => [...prev, seg]);
-    setTimeout(() => refs.current[seg.id]?.focus(), 0);
-  };
+    const addSeg = () => {
+      const seg = createSeg();
+      setSegments(prev => [...prev, seg]);
+      setTimeout(() => refs.current[seg.id]?.focus(), 0);
+    };
 
   const duplicate = (id) => {
     setSegments(prev => {
@@ -105,9 +105,9 @@ function GlobalForm({ employee, onSubmit, getRateForDate, initialRows, selectedD
     setSegments(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const err = {};
+    const handleSubmit = (e) => {
+      e.preventDefault();
+      const err = {};
     segments.forEach(s => {
       if (s._status === 'deleted') return;
       const h = parseFloat(s.hours);
@@ -127,12 +127,18 @@ function GlobalForm({ employee, onSubmit, getRateForDate, initialRows, selectedD
     }
   };
 
-  const firstActive = segments.find(s => s._status !== 'deleted');
+    const firstActive = segments.find(s => s._status !== 'deleted');
 
-  return (
-    <>
-      <form id={formId} onSubmit={handleSubmit} className="flex flex-col gap-3">
-        <Button type="button" variant="outline" onClick={addSeg} className="self-start"><Plus className="w-4 h-4 ml-2" />הוסף מקטע שעות</Button>
+    useEffect(() => {
+      if (dayType && firstActive) {
+        setTimeout(() => refs.current[firstActive.id]?.focus(), 0);
+      }
+    }, [dayType, firstActive]);
+
+    return (
+      <>
+        <form id={formId} onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <Button type="button" variant="outline" onClick={addSeg} className="self-start" disabled={!dayType}><Plus className="w-4 h-4 ml-2" />הוסף מקטע שעות</Button>
         <div className="flex flex-col gap-3">
           {segments.map(seg => (
             <div key={seg.id} className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5 relative">
@@ -257,7 +263,7 @@ function GlobalForm({ employee, onSubmit, getRateForDate, initialRows, selectedD
   );
 }
 
-export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate, initialRows = null, selectedDate, onTotalsChange, hideSubmitButton = false, formId }) {
+export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate, initialRows = null, selectedDate, onTotalsChange, hideSubmitButton = false, formId, dayType }) {
   const isGlobal = employee.employee_type === 'global';
 
   const createRow = () => ({
@@ -273,7 +279,19 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
   const [rows, setRows] = useState(initialRows && initialRows.length > 0 ? initialRows : [createRow()]);
 
   if (isGlobal) {
-    return <GlobalForm employee={employee} onSubmit={onSubmit} getRateForDate={getRateForDate} initialRows={initialRows} selectedDate={selectedDate} onTotalsChange={onTotalsChange} hideSubmitButton={hideSubmitButton} formId={formId} />;
+    return (
+      <GlobalForm
+        employee={employee}
+        onSubmit={onSubmit}
+        getRateForDate={getRateForDate}
+        initialRows={initialRows}
+        selectedDate={selectedDate}
+        onTotalsChange={onTotalsChange}
+        hideSubmitButton={hideSubmitButton}
+        formId={formId}
+        dayType={dayType}
+      />
+    );
   }
   const addRow = () => setRows(prev => [...prev, createRow()]);
   const removeRow = (id) => setRows(prev => prev.filter(r => r.id !== id));

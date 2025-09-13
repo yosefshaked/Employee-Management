@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
   const [multiModalOpen, setMultiModalOpen] = useState(false);
   const [dayType, setDayType] = useState(null);
   const [dayTypeError, setDayTypeError] = useState(false);
+  const dayTypeRef = useRef(null);
   const [dayTotals, setDayTotals] = useState({ hours: 0, daily: 0 });
   const daysInMonth = useMemo(() => {
     const start = startOfMonth(currentMonth);
@@ -35,19 +36,23 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
   const goToNextMonth = () => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
 
   // Clear selections when month changes
-  React.useEffect(() => {
+  useEffect(() => {
     setSelectedDates([]);
     setSelectedEmployees(employees.map(e => e.id));
     setMultiMode(false);
   }, [currentMonth, employees]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (editingCell) {
       const existing = editingCell.existingSessions || [];
       const initial = existing.length > 0 ? (existing[0].entry_type === 'paid_leave' ? 'paid_leave' : 'regular') : null;
       setDayType(initial);
       setDayTypeError(false);
       setDayTotals({ hours: 0, daily: 0 });
+      setTimeout(() => dayTypeRef.current?.querySelector('button')?.focus(), 0);
+    } else {
+      setDayType(null);
+      setDayTypeError(false);
     }
   }, [editingCell]);
 
@@ -305,9 +310,20 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
           {editingCell && (
             <div data-testid="day-modal-container" className="flex flex-col w-[min(98vw,1100px)] max-w-[98vw] h-[min(92vh,calc(100dvh-2rem))]">
               <div data-testid="day-modal-header" className="sticky top-0 z-20 bg-background border-b px-4 py-3">
-                <DayHeader employee={editingCell.employee} date={format(editingCell.day,'yyyy-MM-dd')} dayType={dayType} onChange={(v)=>{setDayType(v); setDayTypeError(false);}} dayTypeError={dayTypeError} />
+                <DayHeader
+                  ref={dayTypeRef}
+                  employee={editingCell.employee}
+                  date={format(editingCell.day, 'yyyy-MM-dd')}
+                  dayType={dayType}
+                  onChange={(v) => {
+                    setDayType(v);
+                    setDayTypeError(false);
+                  }}
+                  dayTypeError={dayTypeError}
+                />
               </div>
-              <div data-testid="day-modal-body" className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3">
+              <div data-testid="day-modal-body" className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3 relative">
+                {!dayType && <div className="absolute inset-0 bg-white/60 z-10" aria-hidden="true"></div>}
                 <TimeEntryForm
                   employee={editingCell.employee}
                   services={services}
@@ -317,9 +333,12 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                   onTotalsChange={setDayTotals}
                   hideSubmitButton
                   formId="entry-form"
+                  dayType={dayType}
                   onSubmit={({ rows }) => {
                     if (!dayType) {
                       setDayTypeError(true);
+                      dayTypeRef.current?.scrollIntoView({ behavior: 'smooth' });
+                      dayTypeRef.current?.querySelector('button')?.focus();
                       return;
                     }
                     onTableSubmit({ employee: editingCell.employee, day: editingCell.day, dayType, updatedRows: rows });
@@ -333,7 +352,21 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
               </div>
               <div data-testid="day-modal-footer" className="shrink-0 bg-background border-t px-4 py-3 flex justify-between gap-2">
                 <Button variant="outline" type="button" onClick={() => setEditingCell(null)}>בטל</Button>
-                <Button type="submit" form="entry-form" className="bg-gradient-to-r from-green-500 to-blue-500 text-white">שמור רישומים</Button>
+                <Button
+                  type="submit"
+                  form="entry-form"
+                  className={`bg-gradient-to-r from-green-500 to-blue-500 text-white ${!dayType ? 'opacity-50' : ''}`}
+                  onClick={(e) => {
+                    if (!dayType) {
+                      e.preventDefault();
+                      setDayTypeError(true);
+                      dayTypeRef.current?.scrollIntoView({ behavior: 'smooth' });
+                      dayTypeRef.current?.querySelector('button')?.focus();
+                    }
+                  }}
+                >
+                  שמור רישומים
+                </Button>
               </div>
             </div>
           )}

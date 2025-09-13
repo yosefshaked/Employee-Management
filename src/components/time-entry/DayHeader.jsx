@@ -1,9 +1,13 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 
-const weekNames = ['א׳','ב׳','ג׳','ד׳','ה׳','ו׳','ש׳'];
+const weekNames = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'ש׳'];
 
-export default function DayHeader({ employee, date, dayType, onChange, dayTypeError }) {
+const DayHeader = React.forwardRef(function DayHeader(
+  { employee, date, dayType, onChange, dayTypeError },
+  ref
+) {
   const dayLabel = React.useMemo(() => {
     const d = new Date(date + 'T00:00:00');
     const dayName = weekNames[d.getDay()];
@@ -11,34 +15,49 @@ export default function DayHeader({ employee, date, dayType, onChange, dayTypeEr
     return `${dayStr} · יום ${dayName}`;
   }, [date]);
 
+  const firstBtnRef = useRef(null);
+  useEffect(() => {
+    firstBtnRef.current?.focus();
+  }, []);
+
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <div className="text-lg font-semibold truncate">{employee.name}</div>
-        <div className="text-sm text-slate-600">{dayLabel}</div>
+    <div className="flex flex-col gap-3" ref={ref}>
+      <div className="flex flex-col text-right">
+        <div className="text-xl font-semibold truncate">{employee.name}</div>
+        <div className="text-lg">{dayLabel}</div>
       </div>
-      <div className="flex items-center gap-2">
-        <div className="flex rounded-md overflow-hidden ring-1 ring-slate-200">
+      <div>
+        <Label className="text-sm font-medium text-slate-700">
+          סוג יום<span className="text-red-600">*</span>
+        </Label>
+        <div className="mt-1 flex rounded-lg overflow-hidden ring-1 ring-slate-200" role="radiogroup">
           <Button
+            ref={firstBtnRef}
             type="button"
             variant={dayType === 'regular' ? 'default' : 'ghost'}
-            className="rounded-none"
+            className="flex-1 h-10 rounded-none"
             onClick={() => onChange('regular')}
+            aria-label="יום רגיל"
           >
             יום רגיל
           </Button>
           <Button
             type="button"
             variant={dayType === 'paid_leave' ? 'default' : 'ghost'}
-            className="rounded-none"
+            className="flex-1 h-10 rounded-none"
             onClick={() => onChange('paid_leave')}
+            aria-label="חופשה בתשלום"
           >
             חופשה בתשלום
           </Button>
         </div>
+        {dayTypeError && <p className="text-sm text-red-600">יש לבחור סוג יום</p>}
+        <p className="text-sm text-slate-600 mt-1">
+          שכר גלובלי נספר לפי יום; הוספת מקטע שעות לא מכפילה שכר.
+        </p>
       </div>
-      {dayTypeError && <p className="text-sm text-red-600">יש לבחור סוג יום</p>}
-      <p className="text-sm text-slate-600">שכר גלובלי נספר לפי יום; הוספת מקטע שעות לא מכפילה שכר.</p>
     </div>
   );
-}
+});
+
+export default DayHeader;
