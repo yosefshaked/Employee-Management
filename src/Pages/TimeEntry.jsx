@@ -199,7 +199,7 @@ export default function TimeEntry() {
     }
   };
 
-  const handleTableSubmit = async ({ employee, day, dayType, updatedRows, paidLeaveId }) => {
+  const handleTableSubmit = async ({ employee, day, dayType, updatedRows, paidLeaveId, paidLeaveNotes }) => {
     setIsLoading(true);
     try {
       const toInsert = [];
@@ -293,7 +293,7 @@ export default function TimeEntry() {
         }
         if (!row.id || row._status === 'new') toInsert.push(sessionData); else toUpdate.push(sessionData);
       }
-      if (dayType === 'paid_leave' && updatedRows.length === 0 && !paidLeaveId) {
+      if (dayType === 'paid_leave') {
         const { rate: rateUsed, reason } = getRateForDate(employee.id, day, GENERIC_RATE_SERVICE_ID);
         if (!rateUsed) {
           toast.error(reason || 'לא הוגדר תעריף עבור תאריך זה', { duration: 15000 });
@@ -309,10 +309,10 @@ export default function TimeEntry() {
             return;
           }
         }
-        toInsert.push({
+        const plRow = {
           employee_id: employee.id,
           date: format(day, 'yyyy-MM-dd'),
-          notes: null,
+          notes: paidLeaveNotes || null,
           rate_used: rateUsed,
           total_payment: totalPayment,
           entry_type: 'paid_leave',
@@ -320,7 +320,13 @@ export default function TimeEntry() {
           service_id: null,
           sessions_count: null,
           students_count: null,
-        });
+        };
+        if (paidLeaveId) {
+          plRow.id = paidLeaveId;
+          toUpdate.push(plRow);
+        } else {
+          toInsert.push(plRow);
+        }
       }
       if (toDelete.length > 0) {
         await deleteWorkSessions(toDelete);
@@ -389,7 +395,7 @@ export default function TimeEntry() {
                   <TimeEntryForm
                     employee={selectedEmployee}
                     services={services}
-                    onSubmit={handleSessionSubmit}
+                    onSubmit={(res) => handleSessionSubmit(res.rows)}
                     getRateForDate={getRateForDate}
                   />
                 )}

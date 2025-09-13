@@ -10,19 +10,22 @@ import { deleteWorkSession } from '@/api/workSessions.js';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import he from '@/i18n/he.json';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
 
-export default function TimeEntryForm({ employee, services = [], onSubmit, getRateForDate, initialRows = null, selectedDate, onDeleted, initialDayType = 'regular', paidLeaveId = null }) {
+export default function TimeEntryForm({ employee, services = [], onSubmit, getRateForDate, initialRows = null, selectedDate, onDeleted, initialDayType = 'regular', paidLeaveId = null, paidLeaveNotes: initialPaidLeaveNotes = '' }) {
   const isGlobal = employee.employee_type === 'global';
   const isHourly = employee.employee_type === 'hourly';
 
   const createSeg = () => ({ id: crypto.randomUUID(), hours: '', service_id: '', sessions_count: '', students_count: '', notes: '', _status: 'new' });
   const [segments, setSegments] = useState(() => {
-    if (initialDayType === 'paid_leave') return [];
+    if (initialDayType === 'paid_leave') return initialRows || [];
     return initialRows && initialRows.length > 0
       ? initialRows.map(r => ({ ...r, id: r.id || crypto.randomUUID(), _status: 'existing' }))
       : [createSeg()];
   });
   const [dayType, setDayType] = useState(initialDayType);
+  const [paidLeaveNotes, setPaidLeaveNotes] = useState(initialPaidLeaveNotes);
   const [errors, setErrors] = useState({});
   const [pendingDelete, setPendingDelete] = useState(null);
 
@@ -91,6 +94,11 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
 
   const handleSave = (e) => {
     e.preventDefault();
+    if (dayType === 'paid_leave') {
+      const deletionRows = segments.filter(s => s.id && s._status !== 'new').map(s => ({ ...s, _status: 'deleted' }));
+      onSubmit({ rows: deletionRows, dayType, paidLeaveId, paidLeaveNotes });
+      return;
+    }
     if (!validate()) return;
     onSubmit({ rows: segments, dayType, paidLeaveId });
   };
@@ -124,16 +132,32 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
 
   const addLabel = isHourly || isGlobal ? 'הוסף מקטע שעות' : 'הוסף רישום';
 
+  const renderPaidLeaveSegment = () => (
+    <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5">
+      <div className="space-y-1">
+        <Label className="text-sm font-medium text-slate-700">הערות</Label>
+        <Textarea
+          value={paidLeaveNotes}
+          onChange={e => setPaidLeaveNotes(e.target.value)}
+          className="bg-white text-base leading-6"
+          rows={2}
+          maxLength={300}
+          placeholder="הערה חופשית (לא חובה)"
+        />
+      </div>
+    </div>
+  );
+
   return (
     <form onSubmit={handleSave} className="flex flex-col w-[min(98vw,1100px)] max-w-[98vw] h-[min(92vh,calc(100dvh-2rem))]">
-        <SingleDayEntryShell
+      <SingleDayEntryShell
         employee={employee}
         date={selectedDate}
         showDayType={isGlobal}
         dayType={dayType}
         onDayTypeChange={setDayType}
-        segments={segments.filter(s => s._status !== 'deleted')}
-        renderSegment={renderSegment}
+        segments={dayType === 'paid_leave' ? [{ id: 'paid_leave_notes' }] : segments.filter(s => s._status !== 'deleted')}
+        renderSegment={dayType === 'paid_leave' ? renderPaidLeaveSegment : renderSegment}
         onAddSegment={dayType === 'paid_leave' ? null : addSeg}
         addLabel={addLabel}
         summary={summary}

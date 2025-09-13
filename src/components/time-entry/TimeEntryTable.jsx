@@ -228,6 +228,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                             if (paidLeave) {
                                               payload.dayType = 'paid_leave';
                                               payload.paidLeaveId = paidLeave.id;
+                                              payload.paidLeaveNotes = paidLeave.notes || '';
                                             }
                                             setEditingCell(payload);
                                           }
@@ -308,6 +309,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
               initialRows={editingCell.existingSessions}
               initialDayType={editingCell.dayType || 'regular'}
               paidLeaveId={editingCell.paidLeaveId}
+              paidLeaveNotes={editingCell.paidLeaveNotes}
               selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
               getRateForDate={getRateForDate}
               onSubmit={async (result) => {
@@ -322,6 +324,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                     dayType: result.dayType,
                     updatedRows: result.rows,
                     paidLeaveId: result.paidLeaveId,
+                    paidLeaveNotes: result.paidLeaveNotes,
                   });
                   setEditingCell(null);
                 } catch {
