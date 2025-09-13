@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
 import EntryRow from './EntryRow.jsx';
-import { copyFromPrevious, fillDown } from './multiDateUtils.js';
+import { copyFromPrevious } from './multiDateUtils.js';
 import { format } from 'date-fns';
 import { useTimeEntry } from './useTimeEntry.js';
 import { ChevronDown, ChevronUp } from 'lucide-react';
@@ -38,7 +38,6 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
 
   const updateRow = (index, patch) => setRows(prev => prev.map((r, i) => i === index ? { ...r, ...patch } : r));
   const handleCopy = (index, field) => setRows(prev => copyFromPrevious(prev, index, field));
-  const handleFillDown = (field) => setRows(prev => fillDown(prev, field));
 
   const groupedRows = useMemo(() => {
     const map = new Map();
@@ -65,14 +64,12 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <TooltipProvider>
-        <DialogContent className="w-[95vw] max-w-[1100px] h-[90vh] p-0 flex flex-col">
+        <DialogContent
+          className="p-0 flex flex-col"
+          style={{ width: 'min(95vw, 1100px)', height: 'min(90vh, calc(100dvh - 4rem))' }}
+        >
           <DialogHeader className="sticky top-0 bg-background z-10 p-4 border-b">
             <DialogTitle>הזנה מרובה</DialogTitle>
-            <div className="flex flex-wrap gap-2 mt-4">
-              <Button variant="outline" size="sm" onClick={() => handleFillDown('hours')}>העתק מהראשון לכל השורות (שעות)</Button>
-              <Button variant="outline" size="sm" onClick={() => handleFillDown('sessions_count')}>העתק מהראשון לכל השורות (מפגשים)</Button>
-              <Button variant="outline" size="sm" onClick={() => handleFillDown('students_count')}>העתק מהראשון לכל השורות (תלמידים)</Button>
-            </div>
           </DialogHeader>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -114,7 +111,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
             })}
           </div>
 
-          <div className="sticky bottom-0 bg-background z-10 p-4 border-t flex justify-end gap-2">
+          <div className="bg-background p-4 border-t flex justify-end gap-2">
             <Button variant="outline" onClick={onClose}>בטל</Button>
             <Button onClick={handleSave}>שמור רישומים</Button>
           </div>
