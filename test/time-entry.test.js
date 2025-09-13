@@ -47,6 +47,40 @@ describe('copy and fill utilities', () => {
     assert.equal(result[1].sessions_count, '2');
     assert.equal(result[2].sessions_count, '3');
   });
+
+  it('copies day type for global employees', () => {
+    const rows = [
+      { employee_id: 'g1', entry_type: 'hours' },
+      { employee_id: 'g1', entry_type: '' }
+    ];
+    let { rows: result, success } = copyFromPrevious(rows, 1, 'dayType');
+    assert.equal(success, true);
+    assert.equal(result[1].entry_type, 'hours');
+    const emp = { employee_type: 'global' };
+    assert.equal(isRowCompleteForProgress(result[1], emp), true);
+  });
+
+  it('fails to copy day type when source missing or different employee', () => {
+    const rows = [
+      { employee_id: 'g1', entry_type: '' },
+      { employee_id: 'g1', entry_type: '' },
+      { employee_id: 'g2', entry_type: 'hours' }
+    ];
+    let res = copyFromPrevious(rows, 1, 'dayType');
+    assert.equal(res.success, false);
+    assert.equal(res.rows[1].entry_type, '');
+    res = copyFromPrevious(rows, 2, 'dayType');
+    assert.equal(res.success, false);
+    assert.equal(res.rows[2].entry_type, 'hours');
+  });
+});
+
+describe('day type copy icon visibility', () => {
+  it('renders copy-prev-daytype with aria-label', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','EntryRow.jsx'),'utf8');
+    assert(content.includes('copy-prev-daytype'));
+    assert(content.includes('העתק סוג יום מהרישום הקודם'));
+  });
 });
 
 describe('global daily rate ignores hours', () => {

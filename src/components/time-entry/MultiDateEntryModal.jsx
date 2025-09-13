@@ -84,9 +84,10 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
     const { rows: updated, success } = copyFromPrevious(rows, index, field);
     setRows(updated);
     if (!success) {
-      toast('אין ערך להעתקה');
+      toast(field === 'dayType' ? 'אין ערך סוג יום להעתקה' : 'אין ערך להעתקה');
     } else {
-      setFlash({ index, field, ts: Date.now() });
+      const flashField = field === 'dayType' ? 'entry_type' : field;
+      setFlash({ index, field: flashField, ts: Date.now() });
     }
   };
 

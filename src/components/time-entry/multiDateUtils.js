@@ -1,8 +1,37 @@
+export function getDayType(row) {
+  if (Object.prototype.hasOwnProperty.call(row, 'dayType')) {
+    return row.dayType || undefined;
+  }
+  if (row.entry_type === 'paid_leave') return 'paid_leave';
+  if (row.entry_type === 'hours') return 'regular';
+  return undefined;
+}
+
+export function setDayType(rows, index, dt) {
+  const updated = [...rows];
+  const curr = { ...updated[index] };
+  if (Object.prototype.hasOwnProperty.call(curr, 'dayType')) {
+    curr.dayType = dt;
+  } else {
+    curr.entry_type = dt === 'paid_leave' ? 'paid_leave' : 'hours';
+  }
+  updated[index] = curr;
+  return updated;
+}
+
 export function copyFromPrevious(rows, index, field) {
-  if (index === 0) return { rows, success: false };
-  const prev = rows[index - 1];
   const curr = rows[index];
-  if (prev.employee_id !== curr.employee_id) return { rows, success: false };
+  let prevIndex = index - 1;
+  while (prevIndex >= 0 && rows[prevIndex].employee_id !== curr.employee_id) {
+    prevIndex -= 1;
+  }
+  if (prevIndex < 0) return { rows, success: false };
+  const prev = rows[prevIndex];
+  if (field === 'dayType') {
+    const prevDt = getDayType(prev);
+    if (!prevDt) return { rows, success: false };
+    return { rows: setDayType(rows, index, prevDt), success: true };
+  }
   if (prev[field] === undefined || prev[field] === '' || prev[field] === null) {
     return { rows, success: false };
   }
@@ -31,7 +60,8 @@ export function isRowCompleteForProgress(row, employee) {
     return parseFloat(row.hours) > 0;
   }
   if (employee.employee_type === 'global') {
-    return row.entry_type === 'hours' || row.entry_type === 'paid_leave';
+    const dt = getDayType(row);
+    return dt === 'regular' || dt === 'paid_leave';
   }
   return false;
 }

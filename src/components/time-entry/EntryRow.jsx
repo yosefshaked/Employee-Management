@@ -76,15 +76,17 @@ export default function EntryRow({
             variant="ghost"
             size="icon"
             type="button"
-            data-role="copy-prev"
+            data-role={field === 'dayType' ? 'copy-prev-daytype' : 'copy-prev'}
             onClick={() => onCopyField(field)}
             className="h-6 w-6"
-            aria-label="העתק מהרישום הקודם"
+            aria-label={field === 'dayType' ? 'העתק סוג יום מהרישום הקודם' : 'העתק מהרישום הקודם'}
           >
             <Copy className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>העתק מהרישום הקודם</TooltipContent>
+        <TooltipContent>
+          {field === 'dayType' ? 'העתק סוג יום מהרישום הקודם' : 'העתק מהרישום הקודם'}
+        </TooltipContent>
       </Tooltip>
     ) : null
   );
@@ -137,7 +139,10 @@ export default function EntryRow({
         {employee.employee_type === 'global' && (
           <>
             <div className={`space-y-1 min-w-[180px] ${flash === 'entry_type' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
-              <Label className="text-sm font-medium text-slate-700">סוג יום</Label>
+              <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
+                {CopyBtn('dayType')}
+                <span>סוג יום</span>
+              </Label>
               <Select value={row.entry_type || ''} onValueChange={(v) => handleChange('entry_type', v)}>
                 <SelectTrigger className="bg-white h-10 text-base leading-6">
                   <SelectValue placeholder="בחר סוג יום" />
