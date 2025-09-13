@@ -5,7 +5,10 @@ import HourlySegment from './segments/HourlySegment.jsx';
 import InstructorSegment from './segments/InstructorSegment.jsx';
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { sumHours, removeSegment } from './dayUtils.js';
-import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
+import ConfirmDeleteDialog from '@/components/common/ConfirmDeleteDialog.jsx';
+import { toast } from 'sonner';
+import { format } from 'date-fns';
+import he from '@/i18n/he.json';
 
 export default function TimeEntryForm({ employee, services = [], onSubmit, getRateForDate, initialRows = null, selectedDate }) {
   const isGlobal = employee.employee_type === 'global';
@@ -45,11 +48,19 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
     }
     const active = segments.filter(s => s._status !== 'deleted');
     if (active.length <= 1) return;
-    setPendingDelete(id);
+    const summary = {
+      employeeName: employee.name,
+      date: format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy'),
+      entryTypeLabel: isHourly || isGlobal ? 'שעות' : 'מפגש',
+      hours: isHourly || isGlobal ? target.hours : null,
+      meetings: isHourly || isGlobal ? null : target.sessions_count
+    };
+    setPendingDelete({ id, summary });
   };
-  const confirmDelete = () => {
-    setSegments(prev => prev.map(s => s.id === pendingDelete ? { ...s, _status: 'deleted' } : s));
+  const confirmDelete = async () => {
+    setSegments(prev => prev.map(s => s.id === pendingDelete.id ? { ...s, _status: 'deleted' } : s));
     setPendingDelete(null);
+    toast.success(he['toast.delete.success']);
   };
   const changeSeg = (id, patch) => setSegments(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
 
@@ -119,12 +130,11 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
         summary={summary}
         onCancel={() => onSubmit(null)}
       />
-      <ConfirmDialog
-        open={pendingDelete !== null}
-        onOpenChange={() => setPendingDelete(null)}
+      <ConfirmDeleteDialog
+        isOpen={pendingDelete !== null}
+        onClose={() => setPendingDelete(null)}
         onConfirm={confirmDelete}
-        title="מחיקה בלתי הפיכה"
-        description="את/ה עומד/ת למחוק רישום מהמסד. הפעולה בלתי הפיכה ולא ניתן לשחזר."
+        summary={pendingDelete ? pendingDelete.summary : null}
       />
     </form>
   );

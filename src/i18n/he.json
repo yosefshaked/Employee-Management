@@ -1,0 +1,11 @@
+{
+  "delete.title": "אישור מחיקה",
+  "delete.subtitle": "הפעולה הבאה בלתי הפיכה. כדי להמשיך יש להקליד 'מחק' ולאשר.",
+  "delete.input.placeholder": "הקלד/י מחק לאישור",
+  "delete.primary": "מחק לצמיתות",
+  "delete.cancel": "בטל",
+  "delete.summary.global": "{{employee}} • {{date}} • {{entryType}}",
+  "delete.summary.day": "המחיקה תסיר את כל הרישומים לאותו יום ({{count}} קטעים).",
+  "toast.delete.success": "הרישום נמחק.",
+  "toast.delete.error": "מחיקה נכשלה, נסו שוב."
+}

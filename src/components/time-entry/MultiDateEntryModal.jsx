@@ -10,6 +10,7 @@ import { format } from 'date-fns';
 import { useTimeEntry } from './useTimeEntry.js';
 import { ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
+import he from '@/i18n/he.json';
 import { calculateGlobalDailyRate, aggregateGlobalDays } from '@/lib/payroll.js';
 
 function validateRow(row, employee, services, getRateForDate, dayTypeMap) {
@@ -143,6 +144,11 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
     } else {
       setFlash({ index, field, ts: Date.now() });
     }
+  };
+
+  const removeRow = (index) => {
+    setRows(prev => prev.filter((_, i) => i !== index));
+    toast.success(he['toast.delete.success']);
   };
 
   const groupedRows = useMemo(() => {
@@ -303,6 +309,8 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
                                 errors={showErrors ? validation[index].errors : {}}
                                 isDuplicate={!!duplicateMap[index]}
                                 hideDayType={emp.employee_type === 'global'}
+                                allowRemove
+                                onRemove={() => removeRow(index)}
                               />
                             ))}
                           </div>
