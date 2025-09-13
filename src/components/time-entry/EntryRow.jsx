@@ -97,7 +97,7 @@ export default function EntryRow({
     <div className="w-full rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5 relative focus-within:ring-2 focus-within:ring-sky-300" id={rowId}>
       {readOnlyDate ? (
         <div className="absolute top-2 right-2 text-xs font-medium text-slate-600 bg-slate-50 ring-1 ring-slate-200 rounded-full px-2 py-0.5">
-          {format(new Date(row.date), 'dd/MM')}
+          {format(new Date(row.date + 'T00:00:00'), 'dd/MM')}
         </div>
       ) : (
         <div className="space-y-1">
@@ -109,11 +109,11 @@ export default function EntryRow({
             <PopoverTrigger asChild>
               <Button variant="outline" className="w-full justify-start text-right font-normal bg-white h-10 text-base leading-6">
                 <CalendarIcon className="ml-2 h-4 w-4" />
-                {format(new Date(row.date), 'dd/MM/yyyy')}
+                {format(new Date(row.date + 'T00:00:00'), 'dd/MM/yyyy')}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0">
-              <Calendar mode="single" selected={new Date(row.date)} onSelect={(d) => d && handleChange('date', format(d, 'yyyy-MM-dd'))} initialFocus locale={he} />
+              <Calendar mode="single" selected={new Date(row.date + 'T00:00:00')} onSelect={(d) => d && handleChange('date', format(d, 'yyyy-MM-dd'))} initialFocus locale={he} />
             </PopoverContent>
           </Popover>
         </div>

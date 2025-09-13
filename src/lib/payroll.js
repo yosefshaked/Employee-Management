@@ -46,3 +46,22 @@ export function aggregateGlobalDays(rows, employeesById) {
   });
   return map;
 }
+
+export function aggregateGlobalDayForDate(rows, employeesById) {
+  const byKey = new Map();
+  let total = 0;
+  rows.forEach(row => {
+    const emp = employeesById[row.employee_id];
+    if (!emp || emp.employee_type !== 'global') return;
+    if (row.entry_type !== 'hours' && row.entry_type !== 'paid_leave') return;
+    const key = `${row.employee_id}|${row.date}`;
+    const amount = row.total_payment != null
+      ? row.total_payment
+      : (row.rate_used != null ? calculateGlobalDailyRate(emp, row.date, row.rate_used) : 0);
+    if (!byKey.has(key)) {
+      byKey.set(key, { firstRowId: row.id, dailyAmount: amount });
+      total += amount;
+    }
+  });
+  return { byKey, total };
+}

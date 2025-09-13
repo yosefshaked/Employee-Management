@@ -142,3 +142,26 @@ describe('multi-date modal layout', () => {
     assert(!content.includes('sticky bottom-0'));
   });
 });
+
+describe('single-day modal layout and date handling', () => {
+  it('uses wide dialog with body scroll and footer outside', () => {
+    const content = fs.readFileSync(
+      path.join('src', 'components', 'time-entry', 'TimeEntryTable.jsx'),
+      'utf8'
+    );
+    assert(content.includes('data-testid="day-modal-body"'));
+    assert(content.includes('data-testid="day-modal-footer"'));
+    const bodyIndex = content.indexOf('data-testid="day-modal-body"');
+    const footerIndex = content.indexOf('data-testid="day-modal-footer"');
+    assert(footerIndex > bodyIndex);
+    assert(content.includes('w-[98vw]'));
+    assert(content.includes('max-w-[1100px]'));
+  });
+
+  it('avoids date off-by-one conversions', () => {
+    const formContent = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'),'utf8');
+    assert(!formContent.includes('new Date(dateToUse).toISOString'));
+    const tableContent = fs.readFileSync(path.join('src','components','time-entry','TimeEntryTable.jsx'),'utf8');
+    assert(tableContent.includes("format(editingCell.day, 'yyyy-MM-dd')"));
+  });
+});

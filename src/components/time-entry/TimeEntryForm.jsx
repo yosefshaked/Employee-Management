@@ -3,13 +3,13 @@ import { Button } from "@/components/ui/button";
 import { Save, Plus } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import EntryRow, { computeRowPayment } from './EntryRow.jsx';
-import { aggregateGlobalDays } from '@/lib/payroll.js';
+import { aggregateGlobalDayForDate } from '@/lib/payroll.js';
 
-export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate, initialRows = null, selectedDate, allowAddRow = true }) {
+export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate, initialRows = null, selectedDate, allowAddRow = true, hideSubmitButton = false, formId }) {
   const createNewRow = (dateToUse) => ({
     id: crypto.randomUUID(),
     isNew: true,
-    date: dateToUse ? new Date(dateToUse).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+    date: dateToUse || new Date().toISOString().split('T')[0],
     service_id: '',
     hours: '',
     sessions_count: '1',
@@ -25,11 +25,9 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
 
   const totalCalculatedPayment = useMemo(() => {
     if (employee.employee_type === 'global') {
-      const payments = rows.map(r => ({ ...r, total_payment: computeRowPayment(r, employee, services, getRateForDate) }));
-      const agg = aggregateGlobalDays(payments, { [employee.id]: employee });
-      let total = 0;
-      agg.forEach(v => { total += v.dailyAmount; });
-      return total;
+      const payments = rows.map(r => ({ ...r, employee_id: employee.id, total_payment: computeRowPayment(r, employee, services, getRateForDate) }));
+      const agg = aggregateGlobalDayForDate(payments, { [employee.id]: employee });
+      return agg.total;
     }
     return rows.reduce((sum, row) => sum + computeRowPayment(row, employee, services, getRateForDate), 0);
   }, [rows, employee, services, getRateForDate]);
@@ -37,10 +35,11 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
   const duplicateMap = useMemo(() => {
     if (employee.employee_type !== 'global') return {};
     const payments = rows.map(r => ({ ...r, employee_id: employee.id, total_payment: computeRowPayment(r, employee, services, getRateForDate) }));
-    const agg = aggregateGlobalDays(payments, { [employee.id]: employee });
+    const agg = aggregateGlobalDayForDate(payments, { [employee.id]: employee });
     const res = {};
-    agg.forEach(val => {
-      val.indices.forEach((idx, i) => { res[rows[idx].id] = i > 0; });
+    rows.forEach(r => {
+      const info = agg.byKey.get(`${employee.id}|${r.date}`);
+      res[r.id] = info ? info.firstRowId !== r.id : false;
     });
     return res;
   }, [rows, employee, services, getRateForDate]);
@@ -67,7 +66,7 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-6" id={formId}>
       <div className="space-y-4">
         {rows.map((row) => (
           <EntryRow
@@ -95,7 +94,9 @@ export default function TimeEntryForm({ employee, services, onSubmit, getRateFor
         {allowAddRow && (
           <Button type="button" variant="outline" onClick={addRow}><Plus className="w-4 h-4 ml-2" />הוסף רישום</Button>
         )}
-        <Button type="submit" className="bg-gradient-to-r from-green-500 to-blue-500 text-white"><Save className="w-4 h-4 ml-2" />שמור רישומים</Button>
+        {!hideSubmitButton && (
+          <Button type="submit" className="bg-gradient-to-r from-green-500 to-blue-500 text-white"><Save className="w-4 h-4 ml-2" />שמור רישומים</Button>
+        )}
       </div>
     </form>
   );

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { effectiveWorkingDays, calculateGlobalDailyRate, aggregateGlobalDays } from '../src/lib/payroll.js';
+import { effectiveWorkingDays, calculateGlobalDailyRate, aggregateGlobalDays, aggregateGlobalDayForDate } from '../src/lib/payroll.js';
 import { eachMonthOfInterval } from 'date-fns';
 
 const empSunThu = { working_days: ['SUN','MON','TUE','WED','THU'] };
@@ -101,5 +101,28 @@ describe('global day aggregation', () => {
     assert.equal(Array.from(agg.keys()).length, 0);
     const total = rows.reduce((s,r)=>s+r.total_payment,0);
     assert.equal(total, 250);
+  });
+});
+
+describe('aggregateGlobalDayForDate', () => {
+  const emp = { id: 'e1', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] };
+  it('counts only once per day', () => {
+    const daily = calculateGlobalDailyRate(emp, '2024-02-05', 3000);
+    const rows = [
+      { id: 'r1', employee_id: 'e1', date: '2024-02-05', entry_type: 'hours', total_payment: daily },
+      { id: 'r2', employee_id: 'e1', date: '2024-02-05', entry_type: 'hours', total_payment: daily }
+    ];
+    const agg = aggregateGlobalDayForDate(rows, { e1: emp });
+    assert.equal(agg.total, daily);
+    assert.equal(agg.byKey.get('e1|2024-02-05').firstRowId, 'r1');
+  });
+  it('counts different days separately', () => {
+    const daily = calculateGlobalDailyRate(emp, '2024-02-05', 3000);
+    const rows = [
+      { id: 'r1', employee_id: 'e1', date: '2024-02-05', entry_type: 'hours', total_payment: daily },
+      { id: 'r2', employee_id: 'e1', date: '2024-02-06', entry_type: 'hours', total_payment: daily }
+    ];
+    const agg = aggregateGlobalDayForDate(rows, { e1: emp });
+    assert.equal(agg.total, daily * 2);
   });
 });
