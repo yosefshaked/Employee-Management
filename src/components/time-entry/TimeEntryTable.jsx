@@ -184,8 +184,9 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                 const adjustments = dailySessions.filter(s =>
                                   s.entry_type === 'adjustment'
                                 );
+                                const paidLeave = dailySessions.find(s => s.entry_type === 'paid_leave');
                                 const regularSessions = dailySessions.filter(s =>
-                                  s.entry_type !== 'adjustment'
+                                  s.entry_type !== 'adjustment' && s.entry_type !== 'paid_leave'
                                 );
                                 const adjustmentTotal = adjustments.reduce((sum, s) => sum + (s.total_payment || 0), 0);
 
@@ -195,7 +196,9 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                 const rateInfo = getRateForDate(emp.id, day);
                                 const showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
 
-                                if (regularSessions.length > 0) {
+                                if (paidLeave) {
+                                  summaryText = 'חופשה בתשלום';
+                                } else if (regularSessions.length > 0) {
                                   if (emp.employee_type === 'instructor') {
                                     summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
                                     const sessionCount = regularSessions.reduce((sum, s) => sum + (s.sessions_count || 0), 0);
@@ -221,7 +224,12 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                         className={`text-center transition-colors p-2 ${isSelected ? 'bg-blue-50' : ''} ${multiMode ? '' : 'cursor-pointer hover:bg-blue-50'}`}
                                         onClick={() => {
                                           if (!multiMode) {
-                                            setEditingCell({ day, employee: emp, existingSessions: regularSessions });
+                                            const payload = { day, employee: emp, existingSessions: regularSessions };
+                                            if (paidLeave) {
+                                              payload.dayType = 'paid_leave';
+                                              payload.paidLeaveId = paidLeave.id;
+                                            }
+                                            setEditingCell(payload);
                                           }
                                         }}
                                     >
@@ -298,6 +306,8 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
               employee={editingCell.employee}
               services={services}
               initialRows={editingCell.existingSessions}
+              initialDayType={editingCell.dayType || 'regular'}
+              paidLeaveId={editingCell.paidLeaveId}
               selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
               getRateForDate={getRateForDate}
               onSubmit={async (result) => {
@@ -311,6 +321,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                     day: editingCell.day,
                     dayType: result.dayType,
                     updatedRows: result.rows,
+                    paidLeaveId: result.paidLeaveId,
                   });
                   setEditingCell(null);
                 } catch {

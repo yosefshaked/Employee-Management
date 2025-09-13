@@ -199,12 +199,15 @@ export default function TimeEntry() {
     }
   };
 
-  const handleTableSubmit = async ({ employee, day, dayType, updatedRows }) => {
+  const handleTableSubmit = async ({ employee, day, dayType, updatedRows, paidLeaveId }) => {
     setIsLoading(true);
     try {
       const toInsert = [];
       const toUpdate = [];
       const toDelete = [];
+      if (paidLeaveId && dayType !== 'paid_leave') {
+        toDelete.push(paidLeaveId);
+      }
       for (const row of updatedRows) {
         if (row._status === 'deleted' && row.id) {
           toDelete.push(row.id);
@@ -289,6 +292,35 @@ export default function TimeEntry() {
           sessionData.students_count = parseInt(row.students_count, 10) || null;
         }
         if (!row.id || row._status === 'new') toInsert.push(sessionData); else toUpdate.push(sessionData);
+      }
+      if (dayType === 'paid_leave' && updatedRows.length === 0 && !paidLeaveId) {
+        const { rate: rateUsed, reason } = getRateForDate(employee.id, day, GENERIC_RATE_SERVICE_ID);
+        if (!rateUsed) {
+          toast.error(reason || 'לא הוגדר תעריף עבור תאריך זה', { duration: 15000 });
+          return;
+        }
+        let totalPayment = 0;
+        if (employee.employee_type === 'global') {
+          try {
+            const dailyRate = calculateGlobalDailyRate(employee, day, rateUsed);
+            totalPayment = dailyRate;
+          } catch (err) {
+            toast.error(err.message, { duration: 15000 });
+            return;
+          }
+        }
+        toInsert.push({
+          employee_id: employee.id,
+          date: format(day, 'yyyy-MM-dd'),
+          notes: null,
+          rate_used: rateUsed,
+          total_payment: totalPayment,
+          entry_type: 'paid_leave',
+          hours: null,
+          service_id: null,
+          sessions_count: null,
+          students_count: null,
+        });
       }
       if (toDelete.length > 0) {
         await deleteWorkSessions(toDelete);

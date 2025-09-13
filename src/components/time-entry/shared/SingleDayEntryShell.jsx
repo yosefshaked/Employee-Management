@@ -28,9 +28,11 @@ export default function SingleDayEntryShell({
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-28">
         {segments.map(renderSegment)}
-        <Button type="button" variant="outline" onClick={onAddSegment} className="self-start">
-          {addLabel}
-        </Button>
+        {onAddSegment && (
+          <Button type="button" variant="outline" onClick={onAddSegment} className="self-start">
+            {addLabel}
+          </Button>
+        )}
         <div className="text-sm text-right text-slate-700 mt-3">{summary}</div>
       </div>
       <div className="sticky bottom-0 z-20 bg-background border-t px-4 py-3">
