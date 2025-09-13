@@ -1,0 +1,155 @@
+import { startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
+
+const DAY_NAMES = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+
+export function effectiveWorkingDays(employee, date) {
+  const workingDays = employee?.working_days || ['SUN','MON','TUE','WED','THU'];
+  const monthDate = new Date(date);
+  const interval = { start: startOfMonth(monthDate), end: endOfMonth(monthDate) };
+  let count = 0;
+  for (const day of eachDayOfInterval(interval)) {
+    if (workingDays.includes(DAY_NAMES[day.getDay()])) count++;
+  }
+  return count;
+}
+
+export function calculateGlobalDailyRate(employee, date, monthlyRate) {
+  const days = effectiveWorkingDays(employee, date);
+  if (!days) throw new Error('Employee has no defined working days in this month');
+  return monthlyRate / days;
+}
+
+export function aggregateGlobalDays(rows, employeesById) {
+  const map = new Map();
+  rows.forEach((row, index) => {
+    const emp = employeesById[row.employee_id];
+    if (!emp || emp.employee_type !== 'global') return;
+    if (row.entry_type !== 'hours' && row.entry_type !== 'paid_leave') return;
+    const key = `${row.employee_id}|${row.date}`;
+    const existing = map.get(key);
+    if (!existing) {
+      const amount = row.total_payment != null
+        ? row.total_payment
+        : (row.rate_used != null ? calculateGlobalDailyRate(emp, row.date, row.rate_used) : 0);
+      map.set(key, {
+        dayType: row.entry_type,
+        indices: [index],
+        rateUsed: row.rate_used,
+        dailyAmount: amount
+      });
+    } else {
+      existing.indices.push(index);
+      if (existing.dayType && row.entry_type && existing.dayType !== row.entry_type) {
+        existing.conflict = true;
+      }
+    }
+  });
+  return map;
+}
+
+export function aggregateGlobalDayForDate(rows, employeesById) {
+  const byKey = new Map();
+  let total = 0;
+  rows.forEach(row => {
+    const emp = employeesById[row.employee_id];
+    if (!emp || emp.employee_type !== 'global') return;
+    if (row.entry_type !== 'hours' && row.entry_type !== 'paid_leave') return;
+    const key = `${row.employee_id}|${row.date}`;
+    const amount = row.total_payment != null
+      ? row.total_payment
+      : (row.rate_used != null ? calculateGlobalDailyRate(emp, row.date, row.rate_used) : 0);
+    if (!byKey.has(key)) {
+      byKey.set(key, { firstRowId: row.id, dailyAmount: amount });
+      total += amount;
+    }
+  });
+  return { byKey, total };
+}
+
+export function clampDateString(dateStr) {
+  const d = new Date(dateStr);
+  if (!isNaN(d) && dateStr === d.toISOString().slice(0, 10)) return dateStr;
+  const [y, m] = dateStr.split('-').map(Number);
+  const last = new Date(y, m, 0);
+  return `${y}-${String(m).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
+}
+
+export function computePeriodTotals({
+  workSessions = [],
+  employees = [],
+  startDate,
+  endDate,
+  serviceFilter = 'all',
+  employeeFilter = '',
+  employeeTypeFilter = 'all'
+}) {
+  const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const filtered = workSessions.filter(row => {
+    const d = new Date(row.date);
+    if (d < start || d > end) return false;
+    const emp = employeesById[row.employee_id];
+    if (!emp) return false;
+    if (employeeFilter && row.employee_id !== employeeFilter) return false;
+    if (employeeTypeFilter !== 'all' && emp.employee_type !== employeeTypeFilter) return false;
+    if (serviceFilter !== 'all' && row.service_id !== serviceFilter) return false;
+    if (emp.start_date && row.date < emp.start_date) return false;
+    return true;
+  });
+
+  const result = {
+    totalPay: 0,
+    totalHours: 0,
+    totalSessions: 0,
+    totalsByEmployee: [],
+    diagnostics: { uniquePaidDays: 0, paidLeaveDays: 0, adjustmentsSum: 0 },
+    filteredSessions: filtered
+  };
+
+  const perEmp = {};
+
+  const globalAgg = aggregateGlobalDays(filtered, employeesById);
+  globalAgg.forEach((val, key) => {
+    const [empId] = key.split('|');
+    result.totalPay += val.dailyAmount;
+    result.diagnostics.uniquePaidDays++;
+    if (val.dayType === 'paid_leave') result.diagnostics.paidLeaveDays++;
+    if (!perEmp[empId]) perEmp[empId] = { employee_id: empId, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
+    perEmp[empId].pay += val.dailyAmount;
+    perEmp[empId].daysPaid++;
+  });
+
+  filtered.forEach(row => {
+    const emp = employeesById[row.employee_id];
+    if (!emp || emp.employee_type === 'global') return;
+    if (!perEmp[row.employee_id]) perEmp[row.employee_id] = { employee_id: row.employee_id, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
+    const bucket = perEmp[row.employee_id];
+    if (row.entry_type === 'adjustment') {
+      const pay = row.total_payment || 0;
+      result.totalPay += pay;
+      result.diagnostics.adjustmentsSum += pay;
+      bucket.pay += pay;
+      bucket.adjustments += pay;
+      return;
+    }
+    if (row.entry_type === 'session') {
+      const pay = row.total_payment || 0;
+      result.totalPay += pay;
+      result.totalSessions += row.sessions_count || 0;
+      bucket.pay += pay;
+      bucket.sessions += row.sessions_count || 0;
+    } else if (row.entry_type === 'hours') {
+      const pay = row.total_payment || 0;
+      const hours = row.hours || 0;
+      result.totalPay += pay;
+      result.totalHours += hours;
+      bucket.pay += pay;
+      bucket.hours += hours;
+    }
+  });
+
+  result.totalsByEmployee = Object.values(perEmp);
+  return result;
+}
+

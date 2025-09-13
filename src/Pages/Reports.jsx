@@ -1,18 +1,21 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTooltip } from "../components/InfoTooltip";
 import { Button } from "@/components/ui/button";
 import { BarChart3, Download, Calendar, TrendingUp } from "lucide-react";
-import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
+import { format, startOfMonth } from "date-fns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "../supabaseClient";
 
 import ReportsFilters from "../components/reports/ReportsFilters";
+import { parseDateStrict, toISODateString, isValidRange, isFullMonthRange } from '@/lib/date.js';
+import { toast } from 'sonner';
 import DetailedEntriesReport from "../components/reports/DetailedEntriesReport";
 import MonthlyReport from "../components/reports/MonthlyReport";
 import PayrollSummary from "../components/reports/PayrollSummary";
 import ChartsOverview from "../components/reports/ChartsOverview";
+import { computePeriodTotals } from '@/lib/payroll.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -21,6 +24,7 @@ export default function Reports() {
   const [workSessions, setWorkSessions] = useState([]);
   const [services, setServices] = useState([]);
   const [filteredSessions, setFilteredSessions] = useState([]);
+  const [totals, setTotals] = useState({ totalPay: 0, totalHours: 0, totalSessions: 0, totalsByEmployee: [] });
   const [isLoading, setIsLoading] = useState(true);
   const location = useLocation(); // מאפשר לנו לגשת למידע על הכתובת הנוכחית
   const [activeTab, setActiveTab] = useState(location.state?.openTab || "overview");
@@ -58,44 +62,57 @@ export default function Reports() {
     return { rate: 0, reason: 'לא הוגדר תעריף' };
   };
 
-  const formatDateLocal = (d) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  };
-
   const [filters, setFilters] = useState({
     selectedEmployee: '',
-    dateFrom: formatDateLocal(new Date(new Date().getFullYear(), new Date().getMonth(), 1)),
-    dateTo: formatDateLocal(new Date()),
+    dateFrom: format(startOfMonth(new Date()), 'dd/MM/yyyy'),
+    dateTo: format(new Date(), 'dd/MM/yyyy'),
     employeeType: 'all',
     serviceId: 'all',
   });
+  const lastValid = useRef({ dateFrom: format(startOfMonth(new Date()), 'dd/MM/yyyy'), dateTo: format(new Date(), 'dd/MM/yyyy') });
+
+  const handleDateBlur = (key, value) => {
+    const res = parseDateStrict(value);
+    if (res.ok) {
+      lastValid.current[key] = value;
+    } else {
+      toast('תאריך לא תקין. השתמש/י בפורמט DD/MM/YYYY.');
+      setFilters(prev => ({ ...prev, [key]: lastValid.current[key] }));
+    }
+  };
 
   const applyFilters = useCallback(() => {
-    let filtered = [...workSessions];
-    if (filters.selectedEmployee) {
-      filtered = filtered.filter(session => session.employee_id === filters.selectedEmployee);
+    const fromRes = parseDateStrict(filters.dateFrom);
+    const toRes = parseDateStrict(filters.dateTo);
+    if (!fromRes.ok || !toRes.ok) {
+      setFilteredSessions([]);
+      setTotals({ totalPay: 0, totalHours: 0, totalSessions: 0, totalsByEmployee: [] });
+      return;
     }
-    if (filters.employeeType !== 'all') {
-      const relevantEmployees = employees.filter(emp => emp.employee_type === filters.employeeType);
-      const employeeIds = relevantEmployees.map(emp => emp.id);
-      filtered = filtered.filter(session => employeeIds.includes(session.employee_id));
+    if (!isValidRange(fromRes.date, toRes.date)) {
+      toast("טווח תאריכים לא תקין (תאריך 'עד' לפני 'מ')");
+      setFilteredSessions([]);
+      setTotals({ totalPay: 0, totalHours: 0, totalSessions: 0, totalsByEmployee: [] });
+      return;
     }
-    if (filters.serviceId !== 'all') {
-      filtered = filtered.filter(session => session.service_id === filters.serviceId);
-    }
-    filtered = filtered.filter(session => {
-      const sessionDate = new Date(session.date);
-      const fromDate = new Date(filters.dateFrom);
-      const toDate = new Date(filters.dateTo);
-      if (sessionDate < fromDate || sessionDate > toDate) return false;
-      const emp = employees.find(e => e.id === session.employee_id);
-      return !emp || !emp.start_date || session.date >= emp.start_date;
+    const res = computePeriodTotals({
+      workSessions,
+      employees,
+      services,
+      startDate: toISODateString(fromRes.date),
+      endDate: toISODateString(toRes.date),
+      serviceFilter: filters.serviceId,
+      employeeFilter: filters.selectedEmployee,
+      employeeTypeFilter: filters.employeeType
     });
-    setFilteredSessions(filtered);
-  }, [workSessions, filters, employees]);
+    setFilteredSessions(res.filteredSessions);
+    setTotals({
+      totalPay: res.totalPay,
+      totalHours: res.totalHours,
+      totalSessions: res.totalSessions,
+      totalsByEmployee: res.totalsByEmployee
+    });
+  }, [workSessions, employees, services, filters]);
 
   useEffect(() => {
     loadInitialData();
@@ -171,86 +188,10 @@ export default function Reports() {
       document.body.removeChild(link);
     };
 
-  const getTotals = () => {
-    let payment = 0;
-    let hours = 0;
-    let sessionsCount = 0;
-
-    filteredSessions.forEach(session => {
-      const employee = employees.find(e => e.id === session.employee_id);
-      if (!employee) return;
-
-      if (session.entry_type === 'adjustment') {
-        payment += session.total_payment || 0;
-        return;
-      }
-
-      if (employee.employee_type === 'instructor') {
-        const service = services.find(s => s.id === session.service_id);
-        const rate = getRateForDate(employee.id, session.date, session.service_id).rate;
-        let sessionPay = 0;
-        if (service && service.payment_model === 'per_student') {
-          sessionPay = (session.sessions_count || 0) * (session.students_count || 0) * rate;
-        } else {
-          sessionPay = (session.sessions_count || 0) * rate;
-        }
-        payment += sessionPay;
-        sessionsCount += session.sessions_count || 0;
-        if (service && service.duration_minutes) {
-          hours += (service.duration_minutes / 60) * (session.sessions_count || 0);
-        }
-      } else if (employee.employee_type === 'hourly') {
-        const rate = getRateForDate(employee.id, session.date).rate;
-        payment += (session.hours || 0) * rate;
-        hours += session.hours || 0;
-      } else if (employee.employee_type === 'global') {
-        hours += session.hours || 0;
-      }
-    });
-
-    const fromDate = new Date(filters.dateFrom);
-    const toDate = new Date(filters.dateTo);
-    const monthsInRange = eachMonthOfInterval({ start: startOfMonth(fromDate), end: endOfMonth(toDate) });
-
-    const globals = employees.filter(e => e.employee_type === 'global');
-    globals.forEach(emp => {
-      monthsInRange.forEach(m => {
-        const key = format(m, 'yyyy-MM');
-        const hasEntry = (workSessions || []).some(s =>
-          s.employee_id === emp.id &&
-          s.entry_type !== 'adjustment' &&
-          format(parseISO(s.date), 'yyyy-MM') === key &&
-          (!emp.start_date || s.date >= emp.start_date)
-        );
-        if (hasEntry) {
-          const baseRate = getRateForDate(emp.id, m).rate;
-          payment += baseRate;
-        }
-      });
-    });
-
-    const filteredIds = new Set(filteredSessions.map(s => s.id));
-    const monthsSet = new Set(monthsInRange.map(m => format(m, 'yyyy-MM')));
-    const extraAdjustmentsTotal = (workSessions || [])
-      .filter(s => s.entry_type === 'adjustment')
-      .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM')))
-      .filter(s => !filteredIds.has(s.id))
-      .filter(s => {
-        const emp = employees.find(e => e.id === s.employee_id);
-        return !emp || !emp.start_date || s.date >= emp.start_date;
-      })
-      .reduce((sum, s) => sum + (s.total_payment || 0), 0);
-    payment += extraAdjustmentsTotal;
-
-    return { payment, hours, sessionsCount };
-  };
-
-  const totals = getTotals();
-
   // Show a warning when the selected range is a partial month
-  const fromDate = new Date(filters.dateFrom);
-  const toDate = new Date(filters.dateTo);
-  const isPartialRange = fromDate.getDate() !== 1 || toDate.getDate() !== endOfMonth(toDate).getDate();
+  const fromParsed = parseDateStrict(filters.dateFrom);
+  const toParsed = parseDateStrict(filters.dateTo);
+  const isPartialRange = !(fromParsed.ok && toParsed.ok && isFullMonthRange(fromParsed.date, toParsed.date));
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">
@@ -270,31 +211,41 @@ export default function Reports() {
 
         {isPartialRange && (
           <div className="mb-4 p-3 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-            שים לב: נבחר טווח חלקי של חודש. הסיכומים כוללים גם התאמות ושכר גלובלי לכל החודש/ים שבטווח המסונן.
+            שים לב: נבחר טווח חלקי של חודש. הסיכומים מתבססים רק על הרישומים שבטווח שנבחר.
           </div>
         )}
-        <ReportsFilters filters={filters} setFilters={setFilters} employees={employees} services={services} isLoading={isLoading} />
+        <ReportsFilters
+          filters={filters}
+          setFilters={setFilters}
+          employees={employees}
+          services={services}
+          onDateBlur={handleDateBlur}
+        />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
             <CardContent className="p-6 flex items-center gap-4 relative">
               <div className="absolute left-4 top-4"><InfoTooltip text={"סה\"כ תשלום הוא הסכום הכולל ששולם לכל העובדים בתקופת הדוח.\nהסכום מחושב לפי תעריף העובד וסוג העבודה (שעות או מפגשים)."} /></div>
               <div className="p-3 bg-green-100 rounded-lg"><BarChart3 className="w-6 h-6 text-green-600" /></div>
-              <div><p className="text-sm text-slate-600">סה״כ תשלום</p><p className="text-2xl font-bold text-slate-900">₪{totals.payment.toLocaleString()}</p></div>
+              <div><p className="text-sm text-slate-600">סה״כ תשלום</p><p className="text-2xl font-bold text-slate-900">₪{totals.totalPay.toLocaleString()}</p></div>
             </CardContent>
           </Card>
           <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
             <CardContent className="p-6 flex items-center gap-4 relative">
-              <div className="absolute left-4 top-4"><InfoTooltip text={"סה\"כ שעות הוא סך כל השעות שעובדים עבדו בתקופת הדוח.\nלעובדים שעתיים - נספרות שעות בפועל.\nלמדריכים - השעות מחושבות לפי מספר מפגשים וזמן מפגש."} /></div>
+              <div className="absolute left-4 top-4"><InfoTooltip text={"שעות נספרות רק עבור עובדים שעתיים."} /></div>
               <div className="p-3 bg-blue-100 rounded-lg"><Calendar className="w-6 h-6 text-blue-600" /></div>
-              <div><p className="text-sm text-slate-600">סה״כ שעות (מוערך)</p><p className="text-2xl font-bold text-slate-900">{totals.hours.toFixed(1)}</p></div>
+              <div>
+                <p className="text-sm text-slate-600">סך שעות (עובדים שעתיים)</p>
+                <p className="text-2xl font-bold text-slate-900">{totals.totalHours.toFixed(1)}</p>
+                <p className="text-xs text-slate-500">נספרות עבור עובדים שעתיים בלבד</p>
+              </div>
             </CardContent>
           </Card>
           <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
             <CardContent className="p-6 flex items-center gap-4 relative">
               <div className="absolute left-4 top-4"><InfoTooltip text={"סה\"כ מפגשים הוא מספר כל המפגשים שנערכו בתקופת הדוח.\nלעובדים שעתיים - לא נספרים מפגשים.\nלמדריכים - נספרים כל המפגשים שבוצעו בפועל."} /></div>
               <div className="p-3 bg-purple-100 rounded-lg"><TrendingUp className="w-6 h-6 text-purple-600" /></div>
-              <div><p className="text-sm text-slate-600">סה״כ מפגשים</p><p className="text-2xl font-bold text-slate-900">{totals.sessionsCount}</p></div>
+              <div><p className="text-sm text-slate-600">סה״כ מפגשים</p><p className="text-2xl font-bold text-slate-900">{totals.totalSessions}</p></div>
             </CardContent>
           </Card>
         </div>
@@ -311,10 +262,10 @@ export default function Reports() {
                 <TabsTrigger value="monthly">דוח חודשי</TabsTrigger>
                 <TabsTrigger value="payroll">דוח שכר</TabsTrigger>
               </TabsList>
-              <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} getRateForDate={getRateForDate} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
               <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} getRateForDate={getRateForDate} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} getRateForDate={getRateForDate} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} getRateForDate={getRateForDate} isLoading={isLoading} employeeTotals={totals.totalsByEmployee} /></TabsContent>
             </Tabs>
           </CardContent>
         </Card>

@@ -1,17 +1,25 @@
-import React, { useState, useMemo } from 'react';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight } from "lucide-react";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isToday, parseISO } from "date-fns";
-import { he } from "date-fns/locale";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import TimeEntryForm from './TimeEntryForm'; // Assuming it's in the same folder
-
-export default function TimeEntryTable({ employees, workSessions, services, getRateForDate, onTableSubmit }) {
+import React, { useState, useMemo, useEffect } from 'react';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isToday, parseISO } from 'date-fns';
+import { he } from 'date-fns/locale';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import TimeEntryForm from './TimeEntryForm';
+import ImportModal from '@/components/import/ImportModal.jsx';
+import EmployeePicker from '../employees/EmployeePicker.jsx';
+import MultiDateEntryModal from './MultiDateEntryModal.jsx';
+import { aggregateGlobalDays, aggregateGlobalDayForDate } from '@/lib/payroll.js';
+function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
+  const [multiMode, setMultiMode] = useState(false);
+  const [selectedDates, setSelectedDates] = useState([]);
+  const [selectedEmployees, setSelectedEmployees] = useState(employees.map(e => e.id));
+  const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees]);
+  const [importOpen, setImportOpen] = useState(false);
+  const [multiModalOpen, setMultiModalOpen] = useState(false);
   const daysInMonth = useMemo(() => {
     const start = startOfMonth(currentMonth);
     const end = endOfMonth(currentMonth);
@@ -22,67 +30,69 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
   const goToPreviousMonth = () => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
   const goToNextMonth = () => setCurrentMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
 
+  // Clear selections when month changes
+  useEffect(() => {
+    setSelectedDates([]);
+    setSelectedEmployees(employees.map(e => e.id));
+    setMultiMode(false);
+  }, [currentMonth, employees]);
+
+
+
   const monthlyTotals = useMemo(() => {
     const start = startOfMonth(currentMonth);
     const end = endOfMonth(currentMonth);
     const totals = {};
-
     employees.forEach(emp => {
-      totals[emp.id] = { hours: 0, sessions: 0, payment: 0, adjustments: 0, hasEntry: false };
+      totals[emp.id] = { hours: 0, sessions: 0, payment: 0 };
     });
-
+    const globalAgg = aggregateGlobalDays(
+      workSessions.filter(s => {
+        const d = parseISO(s.date);
+        return d >= start && d <= end;
+      }),
+      employeesById
+    );
     workSessions.forEach(s => {
       const sessionDate = parseISO(s.date);
       if (sessionDate < start || sessionDate > end) return;
+      const emp = employeesById[s.employee_id];
       const empTotals = totals[s.employee_id];
-      if (!empTotals) return;
-      const emp = employees.find(e => e.id === s.employee_id);
-      if (!emp) return;
-
+      if (!empTotals || !emp) return;
       if (s.entry_type === 'adjustment') {
-        empTotals.adjustments += s.total_payment || 0;
+        empTotals.payment += s.total_payment || 0;
         return;
       }
-
-      empTotals.hasEntry = true;
-
-      if (emp.employee_type === 'instructor') {
-        const service = services.find(se => se.id === s.service_id);
-        const rate = getRateForDate(emp.id, sessionDate, s.service_id).rate;
-        let payment = 0;
-        if (service && service.payment_model === 'per_student') {
-          payment = (s.sessions_count || 0) * (s.students_count || 0) * rate;
-        } else {
-          payment = (s.sessions_count || 0) * rate;
-        }
-        empTotals.payment += payment;
+      if (emp.employee_type === 'global' && (s.entry_type === 'hours' || s.entry_type === 'paid_leave')) {
+        // payment handled via aggregation
+      } else {
+        empTotals.payment += s.total_payment || 0;
+      }
+      if (s.entry_type === 'session') {
         empTotals.sessions += s.sessions_count || 0;
-      } else if (emp.employee_type === 'hourly') {
-        const rate = getRateForDate(emp.id, sessionDate).rate;
-        empTotals.payment += (s.hours || 0) * rate;
-        empTotals.hours += s.hours || 0;
-      } else if (emp.employee_type === 'global') {
+      } else if (s.entry_type === 'hours') {
         empTotals.hours += s.hours || 0;
       }
     });
-
-    // For global employees, if they have any entry this month, show their monthly rate
-    employees.forEach(emp => {
-      const empTotals = totals[emp.id];
-      if (!empTotals) return;
-      if (emp.employee_type === 'global') {
-        if (empTotals.hasEntry) {
-          const { rate } = getRateForDate(emp.id, start);
-          empTotals.payment = rate;
-        } else {
-          empTotals.payment = 0;
-        }
-      }
-      empTotals.payment += empTotals.adjustments;
+    globalAgg.forEach((v, key) => {
+      const [empId] = key.split('|');
+      const empTotals = totals[empId];
+      if (empTotals) empTotals.payment += v.dailyAmount;
     });
-
     return totals;
-  }, [workSessions, employees, currentMonth, getRateForDate, services]);
+  }, [workSessions, employees, employeesById, currentMonth]);
+
+  const toggleDateSelection = (day) => {
+    setSelectedDates(prev => {
+      const exists = prev.find(d => d.getTime() === day.getTime());
+      return exists ? prev.filter(d => d.getTime() !== day.getTime()) : [...prev, day];
+    });
+  };
+
+  const startMultiEntry = () => {
+    if (!selectedDates.length || !selectedEmployees.length) return;
+    setMultiModalOpen(true);
+  };
 
   return (
     <> {/* Using a Fragment (<>) instead of a div to avoid extra wrappers */}
@@ -90,9 +100,27 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
         <CardContent className="p-4">
             {/* Header with Month Navigation */}
             <div className="flex justify-between items-center mb-4">
-            <Button variant="outline" size="icon" onClick={goToPreviousMonth}><ChevronRight className="w-4 h-4" /></Button>
-            <h2 className="text-xl font-bold">{format(currentMonth, 'MMMM yyyy', { locale: he })}</h2>
-            <Button variant="outline" size="icon" onClick={goToNextMonth}><ChevronLeft className="w-4 h-4" /></Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="icon" onClick={goToPreviousMonth}><ChevronRight className="w-4 h-4" /></Button>
+              <h2 className="text-xl font-bold">{format(currentMonth, 'MMMM yyyy', { locale: he })}</h2>
+              <Button variant="outline" size="icon" onClick={goToNextMonth}><ChevronLeft className="w-4 h-4" /></Button>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setImportOpen(true)}>ייבוא CSV</Button>
+              {!multiMode ? (
+                <Button variant="outline" onClick={() => {
+                  setMultiMode(true);
+                  setSelectedDates([]);
+                  setSelectedEmployees(employees.map(e => e.id));
+                }}>בחר תאריכים להזנה מרובה</Button>
+              ) : (
+                <>
+                  <EmployeePicker employees={employees} value={selectedEmployees} onChange={setSelectedEmployees} />
+                  <Button variant="default" onClick={startMultiEntry} disabled={!selectedDates.length || !selectedEmployees.length}>הזן</Button>
+                  <Button variant="outline" onClick={() => { setMultiMode(false); setSelectedDates([]); setSelectedEmployees(employees.map(e => e.id)); }}>בטל</Button>
+                </>
+              )}
+            </div>
             </div>
 
             {/* Table */}
@@ -139,6 +167,9 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                             <TableRow key={day.toISOString()}>
                             <TableCell className={`text-right font-semibold sticky right-0 z-10 p-2 ${isToday(day) ? 'bg-blue-100' : 'bg-slate-50'}`}>
                                 <div className="flex items-center justify-end gap-2">
+                                {multiMode && (
+                                  <input type="checkbox" checked={selectedDates.some(d => d.getTime() === day.getTime())} onChange={() => toggleDateSelection(day)} />
+                                )}
                                 <span>{format(day, 'd')}</span>
                                 <span className="text-xs text-slate-500">{format(day, 'EEE', { locale: he })}</span>
                                 </div>
@@ -151,49 +182,55 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                 format(parseISO(s.date), 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd')
                                 );
                                 const adjustments = dailySessions.filter(s =>
-                                  s.entry_type === 'adjustment' ||
-                                  ((s.hours ?? 0) === 0 && (s.sessions_count ?? 0) === 0)
+                                  s.entry_type === 'adjustment'
                                 );
                                 const regularSessions = dailySessions.filter(s =>
-                                  s.entry_type !== 'adjustment' &&
-                                  ((s.hours ?? 0) > 0 || (s.sessions_count ?? 0) > 0)
+                                  s.entry_type !== 'adjustment'
                                 );
                                 const adjustmentTotal = adjustments.reduce((sum, s) => sum + (s.total_payment || 0), 0);
 
                                 let summaryText = '-';
                                 let summaryPayment = 0;
-                                let rateInfo = null; // Will hold the entire rate object
-                                let showNoRateWarning = false;
-
-                                if (emp.employee_type === 'hourly' || emp.employee_type === 'global') {
-                                rateInfo = getRateForDate(emp.id, day);
-                                } else {
-                                showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
-                                }
+                                let extraInfo = '';
+                                const rateInfo = getRateForDate(emp.id, day);
+                                const showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
 
                                 if (regularSessions.length > 0) {
                                   if (emp.employee_type === 'instructor') {
                                     summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
                                     const sessionCount = regularSessions.reduce((sum, s) => sum + (s.sessions_count || 0), 0);
                                     summaryText = `${sessionCount} מפגשים`;
-                                  } else { // Hourly or Global
+                                  } else if (emp.employee_type === 'hourly') {
                                     const hoursCount = regularSessions.reduce((sum, s) => sum + (s.hours || 0), 0);
                                     summaryText = `${hoursCount.toFixed(1)} שעות`;
-                                    if (emp.employee_type === 'hourly' && rateInfo?.rate > 0) {
-                                      summaryPayment = hoursCount * rateInfo.rate;
-                                    }
+                                    summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
+                                  } else {
+                                    const hoursCount = regularSessions.reduce((sum, s) => sum + (s.hours || 0), 0);
+                                    const agg = aggregateGlobalDayForDate(regularSessions, employeesById);
+                                    summaryPayment = agg.total;
+                                    summaryText = hoursCount > 0 ? `${hoursCount.toFixed(1)} שעות` : '-';
+                                    extraInfo = summaryPayment > 0 ? `₪${summaryPayment.toLocaleString()}` : '';
                                   }
                                 }
+
+                                const isSelected = multiMode && selectedDates.some(d => d.getTime() === day.getTime()) && selectedEmployees.includes(emp.id);
 
                                 return (
                                     <TableCell
                                         key={emp.id}
-                                        className="text-center cursor-pointer hover:bg-blue-50 transition-colors p-2"
-                                        onClick={() => setEditingCell({ day, employee: emp, existingSessions: regularSessions })}
+                                        className={`text-center transition-colors p-2 ${isSelected ? 'bg-blue-50' : ''} ${multiMode ? '' : 'cursor-pointer hover:bg-blue-50'}`}
+                                        onClick={() => {
+                                          if (!multiMode) {
+                                            setEditingCell({ day, employee: emp, existingSessions: regularSessions });
+                                          }
+                                        }}
                                     >
                                         <div className="font-semibold text-sm">{summaryText}</div>
+                                        {extraInfo && (
+                                          <div className="text-xs text-slate-500">{extraInfo}</div>
+                                        )}
 
-                                        {/* --- WARNINGS --- */}
+                {/* --- WARNINGS --- */}
                                         {rateInfo?.reason === 'לא התחילו לעבוד עדיין' && (
                                           <div className="text-xs text-red-700">טרם התחיל</div>
                                         )}
@@ -202,12 +239,12 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
                                           <div className="text-xs text-red-700">לא הוגדר תעריף</div>
                                         )}
 
-                                        {summaryPayment > 0 && (
+                                        {summaryPayment > 0 && emp.employee_type !== 'global' && (
                                           <div className="text-xs text-green-700">₪{summaryPayment.toLocaleString()}</div>
                                         )}
 
                                         {adjustmentTotal !== 0 && (
-                                          <div className={`text-xs ${adjustmentTotal > 0 ? 'text-green-700' : 'text-red-700'}`}>
+                                          <div className={`text-xs ${adjustmentTotal > 0 ? 'text-green-700' : 'text-red-700'}`}> 
                                             {adjustmentTotal > 0 ? '+' : '-'}₪{Math.abs(adjustmentTotal).toLocaleString()}
                                           </div>
                                         )}
@@ -251,59 +288,54 @@ export default function TimeEntryTable({ employees, workSessions, services, getR
         </Card>
         {/* The Dialog for editing/adding entries */}
         <Dialog open={!!editingCell} onOpenChange={(isOpen) => !isOpen && setEditingCell(null)}>
-        <DialogContent className="max-w-3xl">
-            <DialogHeader>
-            <DialogTitle>
-                רישום עבור: {editingCell?.employee.name} | {editingCell && format(editingCell.day, 'dd/MM/yyyy', { locale: he })}
-            </DialogTitle>
-            <DialogDescription className="sr-only">
-              הזן או ערוך את פרטי שעות העבודה או המפגשים עבור היום הנבחר.
-            </DialogDescription>
-            </DialogHeader>
+          <DialogContent wide className="max-w-none w-[98vw] max-w-[1100px] p-0 overflow-hidden">
             {editingCell && (
-              <Tabs defaultValue={editingCell.existingSessions.length ? 'edit' : 'add'}>
-                <TabsList className="grid w-full grid-cols-2 mb-4">
-                  <TabsTrigger value="add">הוספת רישום חדש</TabsTrigger>
-                  <TabsTrigger value="edit" disabled={!editingCell.existingSessions.length}>עריכת רישומים קיימים</TabsTrigger>
-                </TabsList>
-                <TabsContent value="add">
-                  <TimeEntryForm
-                    employee={editingCell.employee}
-                    services={services}
-                    selectedDate={editingCell.day}
-                    getRateForDate={getRateForDate}
-                    onSubmit={(updatedRows) => {
-                      onTableSubmit({
-                        employee: editingCell.employee,
-                        day: editingCell.day,
-                        updatedRows,
-                      });
-                      setEditingCell(null);
-                    }}
-                  />
-                </TabsContent>
-                <TabsContent value="edit">
-                  <TimeEntryForm
-                    employee={editingCell.employee}
-                    services={services}
-                    initialRows={editingCell.existingSessions}
-                    selectedDate={editingCell.day}
-                    getRateForDate={getRateForDate}
-                    allowAddRow={false}
-                    onSubmit={(updatedRows) => {
-                      onTableSubmit({
-                        employee: editingCell.employee,
-                        day: editingCell.day,
-                        updatedRows,
-                      });
-                      setEditingCell(null);
-                    }}
-                  />
-                </TabsContent>
-              </Tabs>
+              <TimeEntryForm
+                employee={editingCell.employee}
+                services={services}
+                initialRows={editingCell.existingSessions}
+                selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
+                getRateForDate={getRateForDate}
+                onSubmit={(result) => {
+                  if (!result) {
+                    setEditingCell(null);
+                    return;
+                  }
+                  onTableSubmit({ employee: editingCell.employee, day: editingCell.day, dayType: result.dayType, updatedRows: result.rows });
+                  setEditingCell(null);
+                }}
+              />
             )}
-        </DialogContent>
+          </DialogContent>
         </Dialog>
+        <ImportModal
+          open={importOpen}
+          onOpenChange={setImportOpen}
+          employees={employees}
+          services={services}
+          getRateForDate={getRateForDate}
+          onImported={onImported}
+        />
+        <MultiDateEntryModal
+          open={multiModalOpen}
+          onClose={() => setMultiModalOpen(false)}
+          employees={employees}
+          services={services}
+          selectedEmployees={selectedEmployees}
+          selectedDates={selectedDates}
+          getRateForDate={getRateForDate}
+          onSaved={() => {
+            onImported();
+            setSelectedDates([]);
+            setSelectedEmployees(employees.map(e => e.id));
+            setMultiMode(false);
+            setMultiModalOpen(false);
+          }}
+        />
     </>
     );
+}
+
+export default function TimeEntryTable(props) {
+  return <TimeEntryTableInner {...props} />;
 }

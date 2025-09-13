@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.1.0**
-**Last Updated: 2025-09-10**
+**Version: 1.3.11**
+**Last Updated: 2025-09-13**
 
 ## 1. Vision & Purpose
 
@@ -53,8 +53,9 @@ Contains general information about each employee.
 | :--- | :--- | :--- | :--- |
 | `id` | `uuid` | Auto-generated unique identifier | **Primary Key** |
 | `name` | `text` | Employee's full name | Not NULL |
-| `employee_type`| `text` | Employee type ('hourly' or 'instructor') | Not NULL |
-| `current_rate` | `numeric` | General hourly rate (relevant **only** for hourly employees) | |
+| `employee_type`| `text` | Employee type ('hourly', 'instructor', 'global') | Not NULL |
+| `current_rate` | `numeric` | General hourly or monthly rate snapshot | |
+| `working_days` | `jsonb` | Array of working day codes (e.g., `["SUN","MON"]`) | Default: `["SUN","MON","TUE","WED","THU"]` |
 | `is_active` | `boolean`| Whether the employee is currently active | Default: `true` |
 | ... | ... | Additional fields: `employee_id`, `phone`, `email`, `start_date`, `notes` | |
 
@@ -91,11 +92,69 @@ The work log. Each row represents a completed work session.
 | `employee_id` | `uuid` | References the `Employees` table | **Foreign Key** |
 | `service_id` | `uuid` | References the `Services` table (for instructors) | **Foreign Key** |
 | `date` | `date` | The date the work was performed | Not NULL |
-| `hours` | `numeric` | Number of hours (for hourly employees) | |
+| `entry_type` | `text` | 'session', 'hours', 'adjustment', or 'paid_leave' | Not NULL |
+| `hours` | `numeric` | Number of hours (display-only for globals) | |
 | `sessions_count`| `int8` | Number of sessions (for instructors) | |
 | `students_count`| `int8` | Number of students (for `per_student` model) | |
 | `rate_used` | `numeric`| A "snapshot" of the rate used at the time of calculation | |
 | `total_payment`| `numeric`| A "snapshot" of the final calculated amount | |
+
+#### WorkSessions Calculation Rules
+
+- `rate_used` is loaded from `RateHistory` on each create/update. Instructors resolve it by `(employee_id, service_id, date)`; hourly and global employees resolve it by `(employee_id, date)`.
+- `service_id` is mandatory for instructor sessions. Saving is blocked if no matching rate exists for the date.
+- `effectiveWorkingDays(employee, month)` counts calendar days whose weekday exists in `employee.working_days`. If the result is `0`, saving is blocked.
+- `total_payment` is computed per row and stored:
+  - Instructors: `sessions_count * students_count * rate_used` (or without students when not per-student).
+  - Hourly employees: `hours * rate_used`.
+  - Global hours: `monthly_rate / effectiveWorkingDays(employee, month)` (each row represents one day; hours field is ignored and multiple rows on the same date count once).
+  - Paid leave: same daily rate as global hours, stored with `entry_type='paid_leave'`.
+  - Monthly totals and reports sum `total_payment` from `WorkSessions` rows only, deduplicating global rows by day; no external base salary is added.
+  - Unpaid absence = no row. Paid leave is explicitly recorded with an `entry_type='paid_leave'` row.
+  - Each row may include optional `notes` (free text, max 300 chars).
+
+### Multi-date Quick Entry UX
+
+Users can enable **"בחר תאריכים להזנה מרובה"** in the time-entry table to select multiple dates and employees. Clicking **"הזן"** opens a modal listing all selected dates as stacked mini-forms—one row per date and employee. Each field has an **"העתק מהרישום הקודם"** button to copy from the previous row.
+Global employees see an hours field for reference only and a toggle between regular day and paid leave; pay is still one daily rate per row.
+Saving creates a `WorkSessions` record for every employee × date combination selected.
+
+### Hebrew Data Import
+
+The import modal supports either pasting text or uploading a `.csv` file. Lines starting with `#` are treated as comments and skipped. The employee is chosen inside the modal; the file must not contain an employee column. Supported delimiters are comma, TAB, semicolon and pipe—auto detected with a manual override.
+
+**Header Mapping**
+
+| Hebrew             | Internal field |
+|-------------------|----------------|
+| תאריך            | `date` (DD/MM/YYYY → YYYY-MM-DD) |
+| סוג רישום        | `entry_type` (`שיעור`=`session`, `שעות`=`hours`, `התאמה`=`adjustment`, `חופשה בתשלום`=`paid_leave`) |
+| שירות            | `service_name` |
+| שעות             | `hours` |
+| מספר שיעורים     | `sessions_count` |
+| מספר תלמידים     | `students_count` |
+| סכום התאמה       | `adjustment_amount` |
+| הערות            | `notes` |
+
+The preview shows up to 100 rows with per-row error messages. Duplicate rows are flagged and skipped unless the user opts in to import them.
+
+**Templates**
+
+Buttons in the modal allow downloading a CSV template (UTF‑8 with BOM) and a basic Excel placeholder. Both templates include instructional comment lines and example rows marked “(דוגמה)” that should be deleted before upload.
+
+**Validation Rules**
+
+- `date` must parse to ISO format.
+- `session` rows require `service_name`, `sessions_count` ≥1, `students_count` ≥1 and a rate snapshot.
+- `hours` rows require a rate snapshot; hourly employees must supply `hours`, while global employees ignore it and use a daily rate.
+- `paid_leave` rows are allowed only for global employees and use the global daily rate.
+- `adjustment` rows require an `adjustment_amount` and ignore other fields.
+
+Only valid rows are inserted into `WorkSessions`; the summary dialog lists inserted, failed and skipped rows.
+
+### Global Single-Day Editor
+- When editing a global employee for a specific date, the modal aggregates all segments under one day header. A single day type selector controls the entire day, and adding hour segments does **not** multiply pay. Removing the last segment is blocked with a notice.
+- The month view sums the hours of all segments per day for global employees, showing `X שעות` while pay remains counted once per day.
 
 ---
 
@@ -158,3 +217,9 @@ This guide is for a new developer (or AI) joining the project who needs to set u
     *   Build the React application into the `/dist` folder.
     *   Package the app with Electron into an executable installer.
 3.  The final installer/application will be located in the `/release` directory (which is created outside the project folder).
+
+## Recent Updates
+
+- Date filters in reports accept manual input or calendar selection and support multiple formats.
+- Hours KPI counts time for hourly employees only; employee type filter now includes global staff.
+- Detailed entries report can group by employee type with subtotals.

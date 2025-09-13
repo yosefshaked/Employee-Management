@@ -8,8 +8,9 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getColorForService } from '@/lib/colorUtils';
 
-export default function DetailedEntriesReport({ sessions, employees, services, isLoading }) {
-  const [groupBy, setGroupBy] = useState('none');
+export default function DetailedEntriesReport({ sessions, employees, services, isLoading, initialGroupBy = 'none' }) {
+  const [groupBy, setGroupBy] = useState(initialGroupBy);
+  const EMPLOYEE_TYPE_LABELS = { global: 'גלובלי', hourly: 'שעתי', instructor: 'מדריך' };
 
   if (isLoading) {
     return <Skeleton className="h-60 w-full" />;
@@ -19,6 +20,7 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
   
   const getServiceName = (session) => {
     const employee = getEmployee(session.employee_id);
+    if (session.entry_type === 'paid_leave') return 'חופשה בתשלום';
     if (employee?.employee_type === 'hourly' || employee?.employee_type === 'global') return 'שעות עבודה';
     const service = services.find(s => s.id === session.service_id);
     return service ? service.name : 'שירות לא ידוע';
@@ -32,6 +34,7 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
     if (groupBy === 'date') key = session.date;
     else if (groupBy === 'service') key = getServiceName(session);
     else if (groupBy === 'employee') key = getEmployee(session.employee_id)?.name || 'לא ידוע';
+    else if (groupBy === 'employeeType') key = EMPLOYEE_TYPE_LABELS[getEmployee(session.employee_id)?.employee_type] || 'לא ידוע';
     
     if (key && groupBy !== 'none') {
       if (!acc[key]) acc[key] = [];
@@ -74,13 +77,14 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
         <h3 className="text-lg font-semibold">רישומי עבודה מפורטים</h3>
         <div className="flex gap-2 items-center">
           <Label className="text-sm font-medium text-slate-600">קבץ לפי:</Label>
-          <Select onValueChange={setGroupBy} defaultValue="none">
+          <Select onValueChange={setGroupBy} defaultValue={initialGroupBy}>
             <SelectTrigger className="w-[180px] bg-white border-slate-300"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="none">ללא קיבוץ</SelectItem>
               <SelectItem value="date">תאריך</SelectItem>
               <SelectItem value="service">סוג רישום</SelectItem>
               <SelectItem value="employee">שם עובד</SelectItem>
+              <SelectItem value="employeeType">סוג עובד</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -98,7 +102,7 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
           ) : (
             sortedGroupEntries.map(([group, groupSessions]) => (
               <div key={group} className="mb-2">
-                <h4 className="font-bold text-base p-2 bg-slate-100 border-b border-t">{group} ({groupSessions.length} רישומים)</h4>
+                <h4 className="sticky top-0 z-10 font-bold text-base p-2 bg-slate-100 border-b border-t">{group} – ₪{groupSessions.reduce((s, r) => s + (r.total_payment || 0), 0).toFixed(2)}</h4>
                 <Table>
                   <TableBody>{groupSessions.map(session => renderSessionRow(session))}</TableBody>
                 </Table>

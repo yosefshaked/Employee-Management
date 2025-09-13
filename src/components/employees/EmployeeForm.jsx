@@ -22,7 +22,8 @@ export default function EmployeeForm({ employee, onSubmit, onCancel }) {
     email: employee?.email || '',
     start_date: employee?.start_date || new Date().toISOString().split('T')[0],
     is_active: employee?.is_active !== undefined ? employee.is_active : true,
-    notes: employee?.notes || ''
+    notes: employee?.notes || '',
+    working_days: employee?.working_days || ['SUN','MON','TUE','WED','THU']
   });
 
   useEffect(() => {
@@ -36,7 +37,8 @@ export default function EmployeeForm({ employee, onSubmit, onCancel }) {
     email: employee?.email || '',
     start_date: employee?.start_date || new Date().toISOString().split('T')[0],
     is_active: employee?.is_active !== undefined ? employee.is_active : true,
-    notes: employee?.notes || ''
+    notes: employee?.notes || '',
+    working_days: employee?.working_days || ['SUN','MON','TUE','WED','THU']
   });
   
   // Also reset the instructor-specific rates
@@ -123,6 +125,24 @@ useEffect(() => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  const toggleWorkingDay = (day) => {
+    setFormData(prev => {
+      const exists = prev.working_days.includes(day);
+      const working_days = exists ? prev.working_days.filter(d => d !== day) : [...prev.working_days, day];
+      return { ...prev, working_days };
+    });
+  };
+
+  const daysMap = [
+    { code: 'SUN', label: 'א׳' },
+    { code: 'MON', label: 'ב׳' },
+    { code: 'TUE', label: 'ג׳' },
+    { code: 'WED', label: 'ד׳' },
+    { code: 'THU', label: 'ה׳' },
+    { code: 'FRI', label: 'ו׳' },
+    { code: 'SAT', label: 'ש׳' },
+  ];
+
   // Helper object for dynamic labels
   const rateLabels = {
     hourly: 'תעריף שעתי (₪) *',
@@ -199,6 +219,19 @@ useEffect(() => {
                 <span className="text-sm text-slate-600">{formData.is_active ? 'פעיל' : 'לא פעיל'}</span>
               </div>
             </div>
+            {formData.employee_type === 'global' && (
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold text-slate-700">ימי עבודה</Label>
+                <div className="grid grid-cols-7 gap-2">
+                  {daysMap.map(d => (
+                    <div key={d.code} className="flex flex-col items-center">
+                      <Switch checked={formData.working_days.includes(d.code)} onCheckedChange={() => toggleWorkingDay(d.code)} />
+                      <span className="text-xs mt-1">{d.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           {formData.employee_type === 'instructor' && (
             <div className="space-y-4 pt-4 border-t">

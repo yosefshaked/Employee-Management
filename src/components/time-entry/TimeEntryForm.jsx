@@ -1,140 +1,131 @@
 import React, { useState, useMemo } from 'react';
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
-import { Calendar as CalendarIcon, Save, Plus, Trash2 } from "lucide-react";
-import { format } from "date-fns";
-import { he } from "date-fns/locale";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import SingleDayEntryShell from './shared/SingleDayEntryShell.jsx';
+import GlobalSegment from './segments/GlobalSegment.jsx';
+import HourlySegment from './segments/HourlySegment.jsx';
+import InstructorSegment from './segments/InstructorSegment.jsx';
+import { calculateGlobalDailyRate } from '@/lib/payroll.js';
+import { sumHours, removeSegment } from './dayUtils.js';
+import ConfirmDialog from '@/components/ui/ConfirmDialog.jsx';
 
-// This is our central calculation logic
-const calculateRowPayment = (row, employee, services, getRateForDate) => {
-  const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
-  const { rate } = getRateForDate(employee.id, row.date, isHourlyOrGlobal ? null : row.service_id);
-  
-  if (employee.employee_type === 'hourly') {
-    return (parseFloat(row.hours) || 0) * rate;
-  }
-  if (employee.employee_type === 'global') {
-    return 0;
-  }
-  if (employee.employee_type === 'instructor') {
-    const service = services.find(s => s.id === row.service_id);
-    if (service) {
-      if (service.payment_model === 'per_student') {
-        return (parseInt(row.sessions_count, 10) || 1) * (parseInt(row.students_count, 10) || 0) * rate;
-      } else {
-        return (parseInt(row.sessions_count, 10) || 1) * rate;
-      }
-    }
-  }
-  return 0;
-};
+export default function TimeEntryForm({ employee, services = [], onSubmit, getRateForDate, initialRows = null, selectedDate }) {
+  const isGlobal = employee.employee_type === 'global';
+  const isHourly = employee.employee_type === 'hourly';
 
-export default function TimeEntryForm({ employee, services, onSubmit, getRateForDate, initialRows = null, selectedDate, allowAddRow = true }) {
-  
-  const createNewRow = (dateToUse) => ({
-    id: crypto.randomUUID(),
-    isNew: true,
-    date: dateToUse ? format(new Date(dateToUse), 'yyyy-MM-dd') : new Date().toISOString().split('T')[0],
-    service_id: '',
-    hours: '',
-    sessions_count: '1',
-    students_count: '',
-    notes: ''
-  });
-  
-  const [rows, setRows] = useState(() => {
-    if (initialRows && initialRows.length > 0) return initialRows;
-    return [createNewRow(selectedDate)];
-  });
+  const createSeg = () => ({ id: crypto.randomUUID(), hours: '', service_id: '', sessions_count: '', students_count: '', notes: '', _status: 'new' });
+  const [segments, setSegments] = useState(
+    initialRows && initialRows.length > 0
+      ? initialRows.map(r => ({ ...r, id: r.id || crypto.randomUUID(), _status: 'existing' }))
+      : [createSeg()]
+  );
+  const [dayType, setDayType] = useState('regular');
+  const [errors, setErrors] = useState({});
+  const [pendingDelete, setPendingDelete] = useState(null);
 
-  const totalCalculatedPayment = useMemo(() => {
-    return rows.reduce((sum, row) => {
-      return sum + calculateRowPayment(row, employee, services, getRateForDate);
-    }, 0);
-  }, [rows, employee, services, getRateForDate]);
+  const dailyRate = useMemo(() => {
+    if (!isGlobal) return 0;
+    const { rate } = getRateForDate(employee.id, selectedDate, null);
+    try { return calculateGlobalDailyRate(employee, selectedDate, rate); } catch { return 0; }
+  }, [employee, selectedDate, getRateForDate, isGlobal]);
 
-  const addRow = () => {
-    const referenceDate = rows.length > 0 ? rows[0].date : selectedDate;
-    setRows(prev => [...prev, createNewRow(referenceDate)]);
-  };
-  
-  const removeRow = (id) => {
-    setRows(prev => {
-      const newRows = prev.filter(row => row.id !== id);
-      return newRows.length > 0 ? newRows : [createNewRow(selectedDate)];
+  const addSeg = () => setSegments(prev => [...prev, createSeg()]);
+  const duplicateSeg = (id) => {
+    setSegments(prev => {
+      const idx = prev.findIndex(s => s.id === id);
+      const copy = { ...prev[idx], id: crypto.randomUUID(), _status: 'new' };
+      return [...prev.slice(0, idx + 1), copy, ...prev.slice(idx + 1)];
     });
   };
+  const deleteSeg = (id) => {
+    const target = segments.find(s => s.id === id);
+    if (!target) return;
+    if (target._status === 'new') {
+      const res = removeSegment(segments, id);
+      if (res.removed) setSegments(res.rows);
+      return;
+    }
+    const active = segments.filter(s => s._status !== 'deleted');
+    if (active.length <= 1) return;
+    setPendingDelete(id);
+  };
+  const confirmDelete = () => {
+    setSegments(prev => prev.map(s => s.id === pendingDelete ? { ...s, _status: 'deleted' } : s));
+    setPendingDelete(null);
+  };
+  const changeSeg = (id, patch) => setSegments(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
 
-  const handleRowChange = (id, field, value) => { setRows(prev => prev.map(row => row.id === id ? { ...row, [field]: value } : row)); };
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSubmit(rows);
+  const validate = () => {
+    const err = {};
+    segments.filter(s => s._status !== 'deleted').forEach(s => {
+      if (isGlobal || isHourly) {
+        const h = parseFloat(s.hours);
+        if (!h || h <= 0) err[s.id] = 'שעות נדרשות וגדולות מ־0';
+      } else {
+        if (!s.service_id) err[s.id] = 'חסר שירות';
+        if (!(parseInt(s.sessions_count) >= 1)) err[s.id] = 'מספר שיעורים נדרש';
+        if (!(parseInt(s.students_count) >= 1)) err[s.id] = 'מספר תלמידים נדרש';
+      }
+    });
+    setErrors(err);
+    return Object.keys(err).length === 0;
   };
 
-  return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <div className="space-y-4">
-        {rows.map((row) => {
-          const selectedService = services.find(s => s.id === row.service_id);
-          const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
-          const { rate } = getRateForDate(employee.id, row.date, isHourlyOrGlobal ? null : row.service_id);
-          const rowPayment = calculateRowPayment(row, employee, services, getRateForDate);
+  const handleSave = (e) => {
+    e.preventDefault();
+    if (!validate()) return;
+    onSubmit({ rows: segments, dayType });
+  };
 
-          return (
-            <div key={row.id} className="p-4 border rounded-lg bg-slate-50 relative space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1"><Label>תאריך</Label><Popover><PopoverTrigger asChild><Button variant="outline" className="w-full justify-start text-right font-normal bg-white"><CalendarIcon className="ml-2 h-4 w-4" />{format(new Date(row.date), 'dd/MM/yyyy')}</Button></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={new Date(row.date)} onSelect={(date) => date && handleRowChange(row.id, 'date', format(date, 'yyyy-MM-dd'))} initialFocus locale={he} /></PopoverContent></Popover></div>
-                {(isHourlyOrGlobal) ? (
-                  <div className="space-y-1"><Label>שעות עבודה</Label><Input type="number" step="0.1" value={row.hours || ''} onChange={(e) => handleRowChange(row.id, 'hours', e.target.value)} required className="bg-white" /></div>
-                ) : (
-                  <div className="space-y-1"><Label>שירות</Label><Select value={row.service_id} onValueChange={(serviceId) => handleRowChange(row.id, 'service_id', serviceId)} required><SelectTrigger className="bg-white"><SelectValue placeholder="בחר שירות..." /></SelectTrigger><SelectContent>{services.map(s => (<SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>))}</SelectContent></Select></div>
-                )}
-              </div>
-              {employee.employee_type === 'instructor' && selectedService && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1"><Label>כמות מפגשים</Label><Input type="number" value={row.sessions_count || ''} onChange={(e) => handleRowChange(row.id, 'sessions_count', e.target.value)} required className="bg-white" /></div>
-                  {selectedService.payment_model === 'per_student' && (
-                    <div className="space-y-1"><Label>כמות תלמידים</Label><Input type="number" value={row.students_count || ''} onChange={(e) => handleRowChange(row.id, 'students_count', e.target.value)} required className="bg-white" /></div>
-                  )}
-                </div>
-              )}
-              <div className="text-sm text-slate-600 bg-slate-100 p-2 rounded-md text-right">
-                {employee.employee_type === 'global' 
-                  ? `שכר חודשי: ₪${rate.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`
-                  : `תעריף: ₪${rate.toFixed(2)}`
-                }
-                {' | '}
-                סה"כ לשורה: <span className="font-bold text-slate-800">₪{rowPayment.toFixed(2)}</span>
-              </div>
-              {typeof row.id === 'string' && rows.length > 1 && (
-                <Button variant="ghost" size="icon" onClick={() => removeRow(row.id)} className="absolute top-1 left-1 h-7 w-7 text-red-500 hover:bg-red-50">
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      
-      <Alert variant="info" className="bg-blue-50 border-blue-200">
-        <AlertTitle className="text-blue-800 font-semibold">סיכום כולל לרישומים</AlertTitle>
-        <AlertDescription className="text-blue-700">
-          סה״כ לתשלום עבור כל הרישומים שהוזנו: <span className="font-bold">₪{totalCalculatedPayment.toFixed(2)}</span>
-        </AlertDescription>
-      </Alert>
-      
-        <div className={`flex ${allowAddRow ? 'justify-between' : 'justify-end'} items-center pt-4`}>
-          {allowAddRow && (
-            <Button type="button" variant="outline" onClick={addRow}><Plus className="w-4 h-4 ml-2" />הוסף רישום</Button>
-          )}
-          <Button type="submit" className="bg-gradient-to-r from-green-500 to-blue-500 text-white"><Save className="w-4 h-4 ml-2" />שמור רישומים</Button>
-        </div>
+  const summary = useMemo(() => {
+    const active = segments.filter(s => s._status !== 'deleted');
+    if (isGlobal) return `שכר יומי: ₪${dailyRate.toFixed(2)}`;
+    if (isHourly) {
+      const { rate } = getRateForDate(employee.id, selectedDate, null);
+      const h = sumHours(active);
+      return `שכר יומי: ₪${(h * rate).toFixed(2)} | סה"כ שעות: ${h}`;
+    }
+    const total = active.reduce((acc, s) => {
+      const { rate } = getRateForDate(employee.id, selectedDate, s.service_id || null);
+      return acc + (parseFloat(s.sessions_count || 0) * parseFloat(s.students_count || 0) * rate);
+    }, 0);
+    return `שכר יומי: ₪${total.toFixed(2)}`;
+  }, [segments, isGlobal, isHourly, dailyRate, employee, selectedDate, getRateForDate]);
+
+  const renderSegment = (seg, idx) => {
+    if (isGlobal) {
+      return <GlobalSegment key={seg.id} segment={seg} onChange={changeSeg} onDuplicate={duplicateSeg} onDelete={deleteSeg} isFirst={idx === 0} dailyRate={dailyRate} error={errors[seg.id]} />;
+    }
+    if (isHourly) {
+      const { rate } = getRateForDate(employee.id, selectedDate, null);
+      return <HourlySegment key={seg.id} segment={seg} onChange={changeSeg} onDuplicate={duplicateSeg} onDelete={deleteSeg} rate={rate} error={errors[seg.id]} />;
+    }
+    const { rate } = getRateForDate(employee.id, selectedDate, seg.service_id || null);
+    return <InstructorSegment key={seg.id} segment={seg} services={services} onChange={changeSeg} onDuplicate={duplicateSeg} onDelete={deleteSeg} rate={rate} errors={{ service: !seg.service_id && errors[seg.id], sessions_count: errors[seg.id] && seg.service_id ? errors[seg.id] : null, students_count: errors[seg.id] && seg.service_id ? errors[seg.id] : null }} />;
+  };
+
+  const addLabel = isHourly || isGlobal ? 'הוסף מקטע שעות' : 'הוסף רישום';
+
+  return (
+    <form onSubmit={handleSave} className="flex flex-col w-[min(98vw,1100px)] max-w-[98vw] h-[min(92vh,calc(100dvh-2rem))]">
+      <SingleDayEntryShell
+        employee={employee}
+        date={selectedDate}
+        showDayType={isGlobal}
+        dayType={dayType}
+        onDayTypeChange={setDayType}
+        segments={segments.filter(s => s._status !== 'deleted')}
+        renderSegment={renderSegment}
+        onAddSegment={addSeg}
+        addLabel={addLabel}
+        summary={summary}
+        onCancel={() => onSubmit(null)}
+      />
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={() => setPendingDelete(null)}
+        onConfirm={confirmDelete}
+        title="מחיקה בלתי הפיכה"
+        description="את/ה עומד/ת למחוק רישום מהמסד. הפעולה בלתי הפיכה ולא ניתן לשחזר."
+      />
     </form>
   );
 }

@@ -3,9 +3,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
-import { Filter } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { Calendar as CalendarIcon, Filter } from "lucide-react";
+import { parseDateStrict } from '@/lib/date.js';
+import { format } from 'date-fns';
 
-export default function ReportsFilters({ filters, setFilters, employees, isLoading, services = [] }) {
+export default function ReportsFilters({ filters, setFilters, employees, services = [], onDateBlur }) {
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value }));
   };
@@ -39,20 +44,54 @@ export default function ReportsFilters({ filters, setFilters, employees, isLoadi
 
           <div className="space-y-2">
             <Label className="text-sm font-semibold">תאריך מ</Label>
-            <Input
-              type="date"
-              value={filters.dateFrom}
-              onChange={(e) => handleFilterChange('dateFrom', e.target.value)}
-            />
+            <div className="flex items-center gap-2">
+              <Input
+                type="text"
+                placeholder="DD/MM/YYYY"
+                value={filters.dateFrom}
+                onChange={(e) => handleFilterChange('dateFrom', e.target.value)}
+                onBlur={() => onDateBlur && onDateBlur('dateFrom', filters.dateFrom)}
+              />
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="icon"><CalendarIcon className="w-4 h-4" /></Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0">
+                  <Calendar
+                    mode="single"
+                    selected={parseDateStrict(filters.dateFrom).date}
+                    onSelect={(date) => date && handleFilterChange('dateFrom', format(date, 'dd/MM/yyyy'))}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
 
           <div className="space-y-2">
             <Label className="text-sm font-semibold">תאריך עד</Label>
-            <Input
-              type="date"
-              value={filters.dateTo}
-              onChange={(e) => handleFilterChange('dateTo', e.target.value)}
-            />
+            <div className="flex items-center gap-2">
+              <Input
+                type="text"
+                placeholder="DD/MM/YYYY"
+                value={filters.dateTo}
+                onChange={(e) => handleFilterChange('dateTo', e.target.value)}
+                onBlur={() => onDateBlur && onDateBlur('dateTo', filters.dateTo)}
+              />
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" size="icon"><CalendarIcon className="w-4 h-4" /></Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0">
+                  <Calendar
+                    mode="single"
+                    selected={parseDateStrict(filters.dateTo).date}
+                    onSelect={(date) => date && handleFilterChange('dateTo', format(date, 'dd/MM/yyyy'))}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -68,6 +107,7 @@ export default function ReportsFilters({ filters, setFilters, employees, isLoadi
                 <SelectItem value="all">כל הסוגים</SelectItem>
                 <SelectItem value="hourly">עובדים שעתיים</SelectItem>
                 <SelectItem value="instructor">מדריכים</SelectItem>
+                <SelectItem value="global">עובדים גלובליים</SelectItem>
               </SelectContent>
             </Select>
           </div>

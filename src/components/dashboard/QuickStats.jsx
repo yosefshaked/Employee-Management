@@ -2,115 +2,30 @@ import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Users, Clock, TrendingUp, DollarSign } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { format, startOfMonth, parseISO, isSameMonth } from "date-fns";
+import { format, startOfMonth, endOfMonth } from "date-fns";
 import { he } from "date-fns/locale";
 import { InfoTooltip } from "../InfoTooltip";
+import { computePeriodTotals } from '@/lib/payroll.js';
 
-const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
-
-export default function QuickStats({ employees, workSessions, services, currentDate, isLoading, rateHistories = [] }) {
-
-  const getRateForDate = (employeeId, date, serviceId = null) => {
-    const employee = employees.find(e => e.id === employeeId);
-    if (!employee) return { rate: 0, reason: 'אין עובד כזה' };
-
-    const targetServiceId = (employee.employee_type === 'hourly' || employee.employee_type === 'global')
-      ? GENERIC_RATE_SERVICE_ID
-      : serviceId;
-
-    const dateStr = format(new Date(date), 'yyyy-MM-dd');
-
-    if (employee.start_date && employee.start_date > dateStr) {
-      return { rate: 0, reason: 'לא התחילו לעבוד עדיין' };
-    }
-
-    const relevantRates = rateHistories
-      .filter(r =>
-        r.employee_id === employeeId &&
-        r.service_id === targetServiceId &&
-        r.effective_date <= dateStr
-      )
-      .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
-
-    if (relevantRates.length > 0) {
-      return {
-        rate: relevantRates[0].rate,
-        effectiveDate: relevantRates[0].effective_date
-      };
-    }
-
-    return { rate: 0, reason: 'לא הוגדר תעריף' };
-  };
+export default function QuickStats({ employees, workSessions, services, currentDate, isLoading }) {
 
   const calculateMonthlyStats = () => {
     if (!workSessions || !employees || !services) {
       return { totalPayment: 0, totalHours: 0, uniqueWorkDays: 0, activeEmployees: 0 };
     }
-
-    const currentMonthSessions = workSessions.filter(session => {
-      if (!isSameMonth(parseISO(session.date), currentDate)) return false;
-      const emp = employees.find(e => e.id === session.employee_id);
-      if (emp && emp.start_date && session.date < emp.start_date) return false;
-      return true;
+    const start = startOfMonth(currentDate);
+    const end = endOfMonth(currentDate);
+    const res = computePeriodTotals({
+      workSessions,
+      employees,
+      services,
+      startDate: format(start, 'yyyy-MM-dd'),
+      endDate: format(end, 'yyyy-MM-dd')
     });
-
-    let totalPayment = 0;
-    let totalHours = 0;
-
-    currentMonthSessions.forEach(session => {
-      const employee = employees.find(e => e.id === session.employee_id);
-      if (!employee) return;
-
-      if (session.entry_type === 'adjustment') {
-        totalPayment += session.total_payment || 0;
-        return;
-      }
-
-      if (employee.employee_type === 'instructor') {
-        const service = services.find(s => s.id === session.service_id);
-        const rate = getRateForDate(employee.id, session.date, session.service_id).rate;
-        let sessionPay = 0;
-        if (service && service.payment_model === 'per_student') {
-          sessionPay = (session.sessions_count || 0) * (session.students_count || 0) * rate;
-        } else {
-          sessionPay = (session.sessions_count || 0) * rate;
-        }
-        totalPayment += sessionPay;
-        if (service && service.duration_minutes) {
-          totalHours += (service.duration_minutes / 60) * (session.sessions_count || 0);
-        }
-      } else if (employee.employee_type === 'hourly') {
-        const rate = getRateForDate(employee.id, session.date).rate;
-        totalPayment += (session.hours || 0) * rate;
-        totalHours += session.hours || 0;
-      } else if (employee.employee_type === 'global') {
-        totalHours += session.hours || 0;
-      }
-    });
-
-    const globalWithWork = new Set(
-      currentMonthSessions
-        .filter(s => s.entry_type !== 'adjustment')
-        .map(s => s.employee_id)
-        .filter(id => {
-          const emp = employees.find(e => e.id === id);
-          return emp && emp.employee_type === 'global';
-        })
-    );
-
-    globalWithWork.forEach(empId => {
-      totalPayment += getRateForDate(empId, startOfMonth(currentDate)).rate;
-    });
-
-    const workDaySet = new Set(
-      currentMonthSessions.map(session => `${session.employee_id}-${session.date}`)
-    );
-    const uniqueWorkDays = workDaySet.size;
-
     return {
-      totalPayment,
-      totalHours,
-      uniqueWorkDays,
+      totalPayment: res.totalPay,
+      totalHours: res.totalHours,
+      uniqueWorkDays: res.diagnostics.uniquePaidDays,
       activeEmployees: employees.filter(e => e.is_active !== false).length
     };
   };
@@ -118,15 +33,15 @@ export default function QuickStats({ employees, workSessions, services, currentD
   const statsData = calculateMonthlyStats();
   const tooltipTextsHe = [
     'מספר עובדים שמסומנים כפעילים',
-    'לעובדי שעה וגלובלי: סכום שעות.' + '\n' + ' למדריכים: לפי משך שירות × מספר מפגשים',
+    'נספרות שעות עבור עובדים שעתיים בלבד',
     'עובד נספר פעם אחת לכל יום עבודה בחודש',
-    'סכום תשלומים מהרישומים + שכר גלובלי אם לעובד יש רישום כלשהו בחודש'
+    'סכום תשלומים מהרישומים'
   ];
   const tooltipTexts = [
     'Counts only employees marked active',
-    'Hourly/Global: sum hours.' + '\n' + 'For Instructors: duration × sessions',
+    'Hours counted only for hourly employees',
     'Each employee counted once per work day in the month',
-    'Total session payments + global base if employee has any entry this month'
+    'Total payments from work sessions'
   ];
   
   // === שינוי 3: עדכון מערך הנתונים לתצוגה ===
