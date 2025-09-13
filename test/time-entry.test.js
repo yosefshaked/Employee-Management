@@ -119,7 +119,7 @@ describe('segment duplication and deletion', () => {
     assert.equal(res.rows.length, 1);
   });
 
-  it('trash_existing_marks_and_deletes_on_save', () => {
+  it('mark_deleted_then_cancel_before_save_restores_segment', () => {
     const rows = [{ id: 'a', _status: 'existing' }, { id: 'b', _status: 'existing' }];
     let res = toggleDelete(rows, 'a');
     assert.equal(res.rows[0]._status, 'deleted');
@@ -127,7 +127,7 @@ describe('segment duplication and deletion', () => {
     assert.equal(res.rows[0]._status, 'existing');
   });
 
-  it('prevent_delete_last_segment_toggle', () => {
+  it('prevent_delete_last_segment_instantly_blocks', () => {
     const rows = [{ id: 'a', _status: 'existing' }];
     const res = toggleDelete(rows, 'a');
     assert.equal(res.changed, false);
@@ -141,6 +141,17 @@ describe('segment duplication and deletion', () => {
   it('table_shows_sum_hours_for_global_date', () => {
     const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryTable.jsx'),'utf8');
     assert(content.includes('שעות סה"כ'));
+  });
+});
+
+describe('destructive deletion copy', () => {
+  it('delete modals contain required Hebrew text', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'),'utf8');
+    assert(content.includes('מחיקה לצמיתות'));
+    assert(content.includes('אישור מחיקה לצמיתות'));
+    assert(content.includes('המחיקה תתבצע לצמיתות במסד הנתונים ואין אפשרות לשחזר'));
+    assert(content.includes('להמשך הקלד/י: מחק'));
+    assert(content.includes('אני מבין/ה שהמחיקה בלתי הפיכה'));
   });
 });
 
