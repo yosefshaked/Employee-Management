@@ -10,13 +10,14 @@ import TimeEntryForm from './TimeEntryForm';
 import ImportModal from '@/components/import/ImportModal.jsx';
 import EmployeePicker from '../employees/EmployeePicker.jsx';
 import MultiDateEntryModal from './MultiDateEntryModal.jsx';
-import { aggregateGlobalDays } from '@/lib/payroll.js';
+import { aggregateGlobalDays, aggregateGlobalDayForDate } from '@/lib/payroll.js';
 function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
   const [multiMode, setMultiMode] = useState(false);
   const [selectedDates, setSelectedDates] = useState([]);
   const [selectedEmployees, setSelectedEmployees] = useState(employees.map(e => e.id));
+  const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees]);
   const [importOpen, setImportOpen] = useState(false);
   const [multiModalOpen, setMultiModalOpen] = useState(false);
   const daysInMonth = useMemo(() => {
@@ -41,7 +42,6 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
     const start = startOfMonth(currentMonth);
     const end = endOfMonth(currentMonth);
     const totals = {};
-    const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
     employees.forEach(emp => {
       totals[emp.id] = { hours: 0, sessions: 0, payment: 0 };
     });
@@ -79,7 +79,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
       if (empTotals) empTotals.payment += v.dailyAmount;
     });
     return totals;
-  }, [workSessions, employees, currentMonth]);
+  }, [workSessions, employees, employeesById, currentMonth]);
 
   const toggleDateSelection = (day) => {
     setSelectedDates(prev => {
@@ -205,9 +205,10 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                     summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
                                   } else {
                                     const hoursCount = regularSessions.reduce((sum, s) => sum + (s.hours || 0), 0);
-                                    summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
-                                    summaryText = summaryPayment > 0 ? `₪${summaryPayment.toLocaleString()}` : '-';
-                                    extraInfo = hoursCount > 0 ? `שעות ${hoursCount.toFixed(1)}` : '';
+                                    const agg = aggregateGlobalDayForDate(regularSessions, employeesById);
+                                    summaryPayment = agg.total;
+                                    summaryText = hoursCount > 0 ? `${hoursCount.toFixed(1)} שעות` : '-';
+                                    extraInfo = summaryPayment > 0 ? `₪${summaryPayment.toLocaleString()}` : '';
                                   }
                                 }
 

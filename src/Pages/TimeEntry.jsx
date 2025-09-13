@@ -120,6 +120,16 @@ export default function TimeEntry() {
               return null;
             }
           }
+        } else if (employee.employee_type === 'global') {
+          if (!row.entry_type) {
+            toast.error('יש לבחור סוג יום.', { duration: 15000 });
+            return null;
+          }
+          const hoursValue = parseFloat(row.hours);
+          if (row.entry_type === 'hours' && (isNaN(hoursValue) || hoursValue <= 0)) {
+            toast.error("יש להזין מספר שעות גדול מ-0.", { duration: 15000 });
+            return null;
+          }
         }
 
         const { rate: rateUsed, reason } = getRateForDate(employee.id, row.date, serviceIdForRate);
@@ -218,6 +228,15 @@ export default function TimeEntry() {
               toast.error(`חובה להזין מספר תלמידים (גדול מ-0) עבור "${service.name}"`, { duration: 15000 });
               return 'validation_error';
             }
+          }
+        } else if (employee.employee_type === 'global') {
+          if (!row.entry_type) {
+            toast.error('יש לבחור סוג יום.', { duration: 15000 });
+            return 'validation_error';
+          }
+          if (row.entry_type === 'hours' && row.isNew && (isNaN(hoursValue) || hoursValue <= 0)) {
+            toast.error("יש להזין מספר שעות גדול מ-0.", { duration: 15000 });
+            return 'validation_error';
           }
         }
 

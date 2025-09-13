@@ -153,6 +153,22 @@ describe('no days text in table for globals', () => {
   });
 });
 
+describe('global hours segments', () => {
+  it('TimeEntryTable shows hours count for globals', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryTable.jsx'), 'utf8');
+    assert(content.includes('hoursCount.toFixed(1)} שעות'));
+  });
+  it('EntryRow requires hours for new global segments', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','EntryRow.jsx'), 'utf8');
+    assert(content.includes('required={row.isNew}'));
+  });
+  it('TimeEntryForm has add segment microcopy', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'), 'utf8');
+    assert(content.includes('הוסף מקטע שעות'));
+    assert(content.includes('נדרש לפחות מקטע אחד ליום גלובלי'));
+  });
+});
+
 describe('multi-date modal layout', () => {
   it('uses wide dialog with footer outside body', () => {
     const content = fs.readFileSync(

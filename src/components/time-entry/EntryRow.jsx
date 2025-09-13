@@ -169,6 +169,8 @@ export default function EntryRow({
                 step="0.1"
                 value={row.hours}
                 onChange={(e) => handleChange('hours', e.target.value)}
+                required={row.isNew}
+                min={row.isNew ? 0.1 : 0}
                 className="w-full bg-white h-10 text-base leading-6"
               />
               {errors.hours && <p className="text-sm text-red-600 mt-1">{errors.hours}</p>}

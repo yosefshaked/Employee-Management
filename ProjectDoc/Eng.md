@@ -1,6 +1,6 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.3.9**
+**Version: 1.3.10**
 **Last Updated: 2025-09-13**
 
 ## 1. Vision & Purpose
@@ -154,6 +154,7 @@ Only valid rows are inserted into `WorkSessions`; the summary dialog lists inser
 
 ### Global Single-Day Editor
 - When editing a global employee for a specific date, the modal aggregates all segments under one day header. A single day type selector controls the entire day, and adding hour segments does **not** multiply pay. Removing the last segment is blocked with a notice.
+- The month view sums the hours of all segments per day for global employees, showing `X שעות` while pay remains counted once per day.
 
 ---
 
