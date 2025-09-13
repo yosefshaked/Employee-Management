@@ -3,7 +3,9 @@ import { useLocation } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTooltip } from "../components/InfoTooltip";
 import { Button } from "@/components/ui/button";
-import { BarChart3, Download, Calendar, TrendingUp } from "lucide-react";
+import { BarChart3, Download, TrendingUp } from "lucide-react";
+import CombinedHoursCard from "@/components/dashboard/CombinedHoursCard.jsx";
+import { selectHourlyHours, selectMeetingHours, selectGlobalHours } from "@/selectors.js";
 import { format, startOfMonth } from "date-fns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "../supabaseClient";
@@ -193,6 +195,18 @@ export default function Reports() {
   const toParsed = parseDateStrict(filters.dateTo);
   const isPartialRange = !(fromParsed.ok && toParsed.ok && isFullMonthRange(fromParsed.date, toParsed.date));
 
+  const baseFilters = {
+    dateFrom: fromParsed.ok ? toISODateString(fromParsed.date) : null,
+    dateTo: toParsed.ok ? toISODateString(toParsed.date) : null,
+    employeeType: filters.employeeType,
+    selectedEmployee: filters.selectedEmployee || null,
+    serviceId: filters.serviceId
+  };
+
+  const hourlyHours = selectHourlyHours(workSessions, employees, baseFilters);
+  const meetingHours = selectMeetingHours(workSessions, services, employees, baseFilters);
+  const globalHours = selectGlobalHours(workSessions, employees, baseFilters);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">
       <div className="max-w-7xl mx-auto space-y-8">
@@ -230,17 +244,7 @@ export default function Reports() {
               <div><p className="text-sm text-slate-600">סה״כ תשלום</p><p className="text-2xl font-bold text-slate-900">₪{totals.totalPay.toLocaleString()}</p></div>
             </CardContent>
           </Card>
-          <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
-            <CardContent className="p-6 flex items-center gap-4 relative">
-              <div className="absolute left-4 top-4"><InfoTooltip text={"שעות נספרות רק עבור עובדים שעתיים."} /></div>
-              <div className="p-3 bg-blue-100 rounded-lg"><Calendar className="w-6 h-6 text-blue-600" /></div>
-              <div>
-                <p className="text-sm text-slate-600">סך שעות (עובדים שעתיים)</p>
-                <p className="text-2xl font-bold text-slate-900">{totals.totalHours.toFixed(1)}</p>
-                <p className="text-xs text-slate-500">נספרות עבור עובדים שעתיים בלבד</p>
-              </div>
-            </CardContent>
-          </Card>
+          <CombinedHoursCard hourly={hourlyHours} meeting={meetingHours} global={globalHours} isLoading={isLoading} />
           <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
             <CardContent className="p-6 flex items-center gap-4 relative">
               <div className="absolute left-4 top-4"><InfoTooltip text={"סה\"כ מפגשים הוא מספר כל המפגשים שנערכו בתקופת הדוח.\nלעובדים שעתיים - לא נספרים מפגשים.\nלמדריכים - נספרים כל המפגשים שבוצעו בפועל."} /></div>

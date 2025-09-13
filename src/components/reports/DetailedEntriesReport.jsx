@@ -28,6 +28,18 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
   
   const sortedSessions = [...sessions].sort((a, b) => new Date(b.date) - new Date(a.date));
 
+  const sessionHours = (session) => {
+    const emp = getEmployee(session.employee_id);
+    if (!emp) return 0;
+    if (session.entry_type === 'hours') return parseFloat(session.hours) || 0;
+    if (session.entry_type === 'session') {
+      if (session.hours != null) return parseFloat(session.hours) || 0;
+      const service = services.find(s => s.id === session.service_id);
+      if (service?.duration_minutes) return (service.duration_minutes / 60) * (session.sessions_count || 0);
+    }
+    return 0;
+  };
+
   // --- לוגיקת הקיבוץ ---
   const groupedSessions = sortedSessions.reduce((acc, session) => {
     let key;
@@ -102,7 +114,9 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
           ) : (
             sortedGroupEntries.map(([group, groupSessions]) => (
               <div key={group} className="mb-2">
-                <h4 className="sticky top-0 z-10 font-bold text-base p-2 bg-slate-100 border-b border-t">{group} – ₪{groupSessions.reduce((s, r) => s + (r.total_payment || 0), 0).toFixed(2)}</h4>
+                <h4 className="sticky top-0 z-10 font-bold text-base p-2 bg-slate-100 border-b border-t">
+                  {group} – ₪{groupSessions.reduce((s, r) => s + (r.total_payment || 0), 0).toFixed(2)} • {groupSessions.reduce((s, r) => s + sessionHours(r), 0).toFixed(1)} שעות
+                </h4>
                 <Table>
                   <TableBody>{groupSessions.map(session => renderSessionRow(session))}</TableBody>
                 </Table>

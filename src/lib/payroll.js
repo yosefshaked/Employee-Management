@@ -122,9 +122,19 @@ export function computePeriodTotals({
 
   filtered.forEach(row => {
     const emp = employeesById[row.employee_id];
-    if (!emp || emp.employee_type === 'global') return;
-    if (!perEmp[row.employee_id]) perEmp[row.employee_id] = { employee_id: row.employee_id, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
+    if (!emp) return;
+    if (!perEmp[row.employee_id]) {
+      perEmp[row.employee_id] = { employee_id: row.employee_id, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
+    }
     const bucket = perEmp[row.employee_id];
+    if (emp.employee_type === 'global') {
+      if (row.entry_type === 'hours') {
+        const hours = row.hours || 0;
+        result.totalHours += hours;
+        bucket.hours += hours;
+      }
+      return;
+    }
     if (row.entry_type === 'adjustment') {
       const pay = row.total_payment || 0;
       result.totalPay += pay;
