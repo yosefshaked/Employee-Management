@@ -135,69 +135,69 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <TooltipProvider>
-        <DialogContent
-          className="p-0 flex flex-col max-w-none w-[min(98vw,1200px)] h-[min(92vh,calc(100dvh-2rem))]"
-        >
-          <DialogHeader className="sticky top-0 bg-background z-20 p-4 border-b">
-            <DialogTitle>הזנה מרובה</DialogTitle>
-          </DialogHeader>
+        <DialogContent className="p-0">
+          <div className="flex flex-col h-[min(92vh,calc(100dvh-2rem))] w-[min(98vw,1200px)]">
+            <DialogHeader className="sticky top-0 z-20 border-b bg-background px-4 py-3">
+              <DialogTitle>הזנה מרובה</DialogTitle>
+            </DialogHeader>
 
-          <div className="flex-1 overflow-y-auto p-4 flex flex-col space-y-3">
-            <div className="flex text-sm text-slate-600">
-              <span>טיפ: אפשר להעתיק ערכים מהרישום הקודם עם האייקון ליד כל שדה.</span>
-              <span className="ml-auto">מולאו {filledCount} מתוך {rows.length} שורות</span>
-            </div>
-            {showBanner && (
-              <div className="bg-amber-50 border border-amber-200 p-4 flex justify-between items-center text-sm">
-                <span>חלק מהשורות מכילות שגיאות.</span>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setShowBanner(false)}>חזור לתיקון</Button>
-                  <Button size="sm" onClick={saveValidOnly}>שמור רק תקינים</Button>
-                </div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3" data-testid="modal-body">
+              <div className="flex text-sm text-slate-600">
+                <span>טיפ: אפשר להעתיק ערכים מהרישום הקודם עם האייקון ליד כל שדה.</span>
+                <span className="ml-auto">מולאו {filledCount} מתוך {rows.length} שורות</span>
               </div>
-            )}
-            {groupedRows.map(([empId, items], idx) => {
-              const emp = employeesById[empId];
-              const isCollapsed = collapsed[empId];
-              return (
-                <div key={empId} className="space-y-3">
-                  <div
-                    className="flex items-center bg-slate-100 px-3 py-2 rounded-xl ring-1 ring-slate-200 cursor-pointer" 
-                    onClick={() => toggleEmp(empId)}
-                  >
-                    <span className="truncate max-w-[60%] text-[17px] font-semibold">{emp.name}</span>
-                    <span className="ml-auto text-sm text-slate-600">{formatDatesCount(items.length)}</span>
-                    <ChevronUp className={`h-4 w-4 mr-1 transition-transform ${isCollapsed ? 'rotate-180' : ''}`} />
+              {showBanner && (
+                <div className="bg-amber-50 border border-amber-200 p-4 flex justify-between items-center text-sm">
+                  <span>חלק מהשורות מכילות שגיאות.</span>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setShowBanner(false)}>חזור לתיקון</Button>
+                    <Button size="sm" onClick={saveValidOnly}>שמור רק תקינים</Button>
                   </div>
-                  {!isCollapsed && (
-                    <div className="flex flex-col gap-3 mt-2">
-                      {items.map(({ row, index }) => (
-                        <EntryRow
-                          key={`${row.employee_id}-${row.date}-${index}`}
-                          value={row}
-                          employee={emp}
-                          services={services}
-                          getRateForDate={getRateForDate}
-                          onChange={(patch) => updateRow(index, patch)}
-                          onCopyField={(field) => handleCopy(index, field)}
-                          showSummary={true}
-                          readOnlyDate
-                          rowId={`row-${index}`}
-                          flashField={flash && flash.index === index ? flash.field : null}
-                          errors={showErrors ? validation[index].errors : {}}
-                        />
-                      ))}
-                    </div>
-                  )}
-                  {idx !== groupedRows.length - 1 && <Separator className="my-4" />}
                 </div>
-              );
-            })}
-          </div>
+              )}
+              {groupedRows.map(([empId, items], idx) => {
+                const emp = employeesById[empId];
+                const isCollapsed = collapsed[empId];
+                return (
+                  <div key={empId} className="space-y-3">
+                    <div
+                      className="flex items-center bg-slate-100 px-3 py-2 rounded-xl ring-1 ring-slate-200 cursor-pointer"
+                      onClick={() => toggleEmp(empId)}
+                    >
+                      <span className="truncate max-w-[60%] text-[17px] font-semibold">{emp.name}</span>
+                      <span className="ml-auto text-sm text-slate-600">{formatDatesCount(items.length)}</span>
+                      <ChevronUp className={`h-4 w-4 mr-1 transition-transform ${isCollapsed ? 'rotate-180' : ''}`} />
+                    </div>
+                    {!isCollapsed && (
+                      <div className="flex flex-col gap-3 mt-2">
+                        {items.map(({ row, index }) => (
+                          <EntryRow
+                            key={`${row.employee_id}-${row.date}-${index}`}
+                            value={row}
+                            employee={emp}
+                            services={services}
+                            getRateForDate={getRateForDate}
+                            onChange={(patch) => updateRow(index, patch)}
+                            onCopyField={(field) => handleCopy(index, field)}
+                            showSummary={true}
+                            readOnlyDate
+                            rowId={`row-${index}`}
+                            flashField={flash && flash.index === index ? flash.field : null}
+                            errors={showErrors ? validation[index].errors : {}}
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {idx !== groupedRows.length - 1 && <Separator className="my-4" />}
+                  </div>
+                );
+              })}
+            </div>
 
-          <div className="sticky bottom-0 bg-background z-20 p-4 border-t flex justify-end gap-2" data-testid="modal-footer">
-            <Button variant="outline" onClick={onClose}>בטל</Button>
-            <Button onClick={handleSave}>שמור רישומים</Button>
+            <div className="sticky bottom-0 z-20 bg-background border-t px-4 py-3 flex justify-end gap-2" data-testid="modal-footer">
+              <Button variant="outline" onClick={onClose}>בטל</Button>
+              <Button onClick={handleSave}>שמור רישומים</Button>
+            </div>
           </div>
         </DialogContent>
       </TooltipProvider>

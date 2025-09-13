@@ -91,3 +91,16 @@ describe('no days text in table for globals', () => {
     assert(!content.includes(' ימים'));
   });
 });
+
+describe('multi-date modal layout', () => {
+  it('renders footer outside scroll body', () => {
+    const content = fs.readFileSync(
+      path.join('src', 'components', 'time-entry', 'MultiDateEntryModal.jsx'),
+      'utf8'
+    );
+    const bodyIndex = content.indexOf('data-testid="modal-body"');
+    const footerIndex = content.indexOf('data-testid="modal-footer"');
+    assert(bodyIndex !== -1 && footerIndex !== -1);
+    assert(footerIndex > bodyIndex);
+  });
+});
