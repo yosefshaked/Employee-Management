@@ -65,3 +65,97 @@ export function aggregateGlobalDayForDate(rows, employeesById) {
   });
   return { byKey, total };
 }
+
+export function clampDateString(dateStr) {
+  const d = new Date(dateStr);
+  if (!isNaN(d) && dateStr === d.toISOString().slice(0, 10)) return dateStr;
+  const [y, m] = dateStr.split('-').map(Number);
+  const last = new Date(y, m, 0);
+  return `${y}-${String(m).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
+}
+
+export function computePeriodTotals({
+  workSessions = [],
+  employees = [],
+  services = [],
+  startDate,
+  endDate,
+  serviceFilter = 'all',
+  employeeFilter = '',
+  employeeTypeFilter = 'all'
+}) {
+  const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
+  const servicesById = Object.fromEntries(services.map(s => [s.id, s]));
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const filtered = workSessions.filter(row => {
+    const d = new Date(row.date);
+    if (d < start || d > end) return false;
+    const emp = employeesById[row.employee_id];
+    if (!emp) return false;
+    if (employeeFilter && row.employee_id !== employeeFilter) return false;
+    if (employeeTypeFilter !== 'all' && emp.employee_type !== employeeTypeFilter) return false;
+    if (serviceFilter !== 'all' && row.service_id !== serviceFilter) return false;
+    if (emp.start_date && row.date < emp.start_date) return false;
+    return true;
+  });
+
+  const result = {
+    totalPay: 0,
+    totalHours: 0,
+    totalSessions: 0,
+    totalsByEmployee: [],
+    diagnostics: { uniquePaidDays: 0, paidLeaveDays: 0, adjustmentsSum: 0 },
+    filteredSessions: filtered
+  };
+
+  const perEmp = {};
+
+  const globalAgg = aggregateGlobalDays(filtered, employeesById);
+  globalAgg.forEach((val, key) => {
+    const [empId] = key.split('|');
+    result.totalPay += val.dailyAmount;
+    result.diagnostics.uniquePaidDays++;
+    if (val.dayType === 'paid_leave') result.diagnostics.paidLeaveDays++;
+    if (!perEmp[empId]) perEmp[empId] = { employee_id: empId, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
+    perEmp[empId].pay += val.dailyAmount;
+    perEmp[empId].daysPaid++;
+  });
+
+  filtered.forEach(row => {
+    const emp = employeesById[row.employee_id];
+    if (!emp || emp.employee_type === 'global') return;
+    if (!perEmp[row.employee_id]) perEmp[row.employee_id] = { employee_id: row.employee_id, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
+    const bucket = perEmp[row.employee_id];
+    if (row.entry_type === 'adjustment') {
+      const pay = row.total_payment || 0;
+      result.totalPay += pay;
+      result.diagnostics.adjustmentsSum += pay;
+      bucket.pay += pay;
+      bucket.adjustments += pay;
+      return;
+    }
+    if (row.entry_type === 'session') {
+      const pay = row.total_payment || 0;
+      const service = servicesById[row.service_id];
+      const hours = service && service.duration_minutes ? (service.duration_minutes / 60) * (row.sessions_count || 0) : 0;
+      result.totalPay += pay;
+      result.totalHours += hours;
+      result.totalSessions += row.sessions_count || 0;
+      bucket.pay += pay;
+      bucket.hours += hours;
+      bucket.sessions += row.sessions_count || 0;
+    } else if (row.entry_type === 'hours') {
+      const pay = row.total_payment || 0;
+      const hours = row.hours || 0;
+      result.totalPay += pay;
+      result.totalHours += hours;
+      bucket.pay += pay;
+      bucket.hours += hours;
+    }
+  });
+
+  result.totalsByEmployee = Object.values(perEmp);
+  return result;
+}
+

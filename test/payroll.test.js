@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { effectiveWorkingDays, calculateGlobalDailyRate, aggregateGlobalDays, aggregateGlobalDayForDate } from '../src/lib/payroll.js';
+import { computePeriodTotals, clampDateString } from '../src/lib/payroll.js';
 import { eachMonthOfInterval } from 'date-fns';
 
 const empSunThu = { working_days: ['SUN','MON','TUE','WED','THU'] };
@@ -124,5 +125,79 @@ describe('aggregateGlobalDayForDate', () => {
     ];
     const agg = aggregateGlobalDayForDate(rows, { e1: emp });
     assert.equal(agg.total, daily * 2);
+  });
+});
+
+describe('computePeriodTotals aggregator', () => {
+  const employees = [
+    { id: 'g1', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] },
+    { id: 'h1', employee_type: 'hourly' },
+    { id: 'i1', employee_type: 'instructor' }
+  ];
+  const services = [
+    { id: 's1', duration_minutes: 60 },
+    { id: 's2', duration_minutes: 30 }
+  ];
+  const rows = [
+    { employee_id: 'g1', date: '2024-02-05', entry_type: 'hours', total_payment: 100, rate_used: 3000 },
+    { employee_id: 'g1', date: '2024-02-05', entry_type: 'hours', total_payment: 100, rate_used: 3000 },
+    { employee_id: 'g1', date: '2024-02-06', entry_type: 'paid_leave', total_payment: 100, rate_used: 3000 },
+    { employee_id: 'h1', date: '2024-02-05', entry_type: 'hours', total_payment: 200, hours: 8 },
+    { employee_id: 'i1', date: '2024-02-05', entry_type: 'session', total_payment: 150, sessions_count: 3, students_count: 5, service_id: 's1' },
+    { employee_id: 'i1', date: '2024-02-06', entry_type: 'session', total_payment: 100, sessions_count: 2, students_count: 2, service_id: 's2' },
+    { employee_id: 'h1', date: '2024-02-07', entry_type: 'adjustment', total_payment: 50 }
+  ];
+
+  const res = computePeriodTotals({
+    workSessions: rows,
+    employees,
+    services,
+    startDate: '2024-02-01',
+    endDate: '2024-02-28'
+  });
+
+  it('global_many_segments_one_day_counts_once', () => {
+    const emp = res.totalsByEmployee.find(e => e.employee_id === 'g1');
+    assert.equal(emp.pay, 200);
+    assert.equal(res.diagnostics.uniquePaidDays, 2);
+  });
+
+  it('instructors_sessions_times_students_times_rate', () => {
+    const emp = res.totalsByEmployee.find(e => e.employee_id === 'i1');
+    assert.equal(emp.pay, 250);
+    assert.equal(emp.sessions, 5);
+    assert.equal(Math.round(res.totalHours * 10) / 10, 12);
+  });
+
+  it('hourly_hours_times_rate', () => {
+    const emp = res.totalsByEmployee.find(e => e.employee_id === 'h1');
+    assert.equal(emp.pay, 250);
+    assert.equal(emp.hours, 8);
+  });
+
+  it('adjustments_affect_payment_only', () => {
+    assert.equal(res.diagnostics.adjustmentsSum, 50);
+    assert.equal(res.totalPay, 700);
+  });
+
+  it('reports_header_equals_sum_of_table', () => {
+    const sum = res.totalsByEmployee.reduce((s, e) => s + e.pay, 0);
+    assert.equal(sum, res.totalPay);
+  });
+  it('dashboard_uses_same_aggregator', () => {
+    const dash = computePeriodTotals({
+      workSessions: rows,
+      employees,
+      services,
+      startDate: '2024-02-01',
+      endDate: '2024-02-28'
+    });
+    assert.equal(dash.totalPay, res.totalPay);
+  });
+});
+
+describe('clampDateString', () => {
+  it('invalid_end_date_clamped_or_blocked', () => {
+    assert.equal(clampDateString('2023-09-31'), '2023-09-30');
   });
 });

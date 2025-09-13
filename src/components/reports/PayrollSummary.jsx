@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { aggregateGlobalDays } from '@/lib/payroll.js';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,7 +37,7 @@ const InstructorDetailsRow = ({ details }) => (
   </TableRow>
 );
 
-export default function PayrollSummary({ sessions, employees, services, isLoading, getRateForDate }) {
+export default function PayrollSummary({ sessions, employees, services, isLoading, getRateForDate, employeeTotals = [] }) {
   const [expandedRows, setExpandedRows] = useState({});
 
   const EMPLOYEE_TYPE_CONFIG = {
@@ -71,30 +70,11 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
     setExpandedRows(prev => ({...prev, [employeeId]: !prev[employeeId]}));
   };
 
+  const totalsMap = Object.fromEntries(employeeTotals.map(t => [t.employee_id, t]));
   const employeesSummary = employees.map(employee => {
     const employeeSessions = sessions.filter(
       s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
     );
-    const agg = aggregateGlobalDays(employeeSessions, { [employee.id]: employee });
-    const sessionTotals = employeeSessions.reduce((acc, session) => {
-      if (session.entry_type === 'adjustment') {
-        acc.totalAdjustments += session.total_payment || 0;
-      } else {
-        const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || session.entry_type === 'paid_leave');
-        if (!isGlobalDay) acc.sessionPayment += session.total_payment || 0;
-        if (session.entry_type === 'hours') {
-          acc.totalHours += session.hours || 0;
-        } else if (session.entry_type === 'session') {
-          acc.totalSessions += session.sessions_count || 0;
-        }
-      }
-      return acc;
-    }, { sessionPayment: 0, totalHours: 0, totalSessions: 0, totalAdjustments: 0 });
-    let globalSum = 0;
-    agg.forEach(v => { globalSum += v.dailyAmount; });
-    const finalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments + globalSum;
-    const baseSalary = employee.employee_type === 'global' ? getRateForDate(employee.id, new Date()).rate : null;
-
     let serviceDetails = {};
     if (employee.employee_type === 'instructor') {
       employeeSessions.forEach(session => {
@@ -115,17 +95,18 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
         detail.avgRate = detail.totalPayment / (detail.sessionsCount || 1);
       });
     }
-
+    const totals = totalsMap[employee.id] || { pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
+    const baseSalary = employee.employee_type === 'global' ? getRateForDate(employee.id, new Date()).rate : null;
     return {
       id: employee.id,
       name: employee.name,
       employeeType: employee.employee_type,
       baseSalary,
-      totalAdjustments: sessionTotals.totalAdjustments,
+      totalAdjustments: totals.adjustments,
       isActive: employee.is_active,
-      totalPayment: finalPayment,
-      totalHours: Math.round(sessionTotals.totalHours * 10) / 10,
-      totalSessions: sessionTotals.totalSessions,
+      totalPayment: totals.pay,
+      totalHours: Math.round(totals.hours * 10) / 10,
+      totalSessions: totals.sessions,
       details: Object.values(serviceDetails)
     };
   }).filter(emp => {

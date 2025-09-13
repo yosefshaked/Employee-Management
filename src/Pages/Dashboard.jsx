@@ -9,30 +9,26 @@ export default function Dashboard() {
   const [employees, setEmployees] = useState([]);
   const [workSessions, setWorkSessions] = useState([]);
   const [services, setServices] = useState([]);
-  const [rateHistories, setRateHistories] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [employeesData, sessionsData, servicesData, ratesData] = await Promise.all([
+      const [employeesData, sessionsData, servicesData] = await Promise.all([
         supabase.from('Employees').select('*').eq('is_active', true),
         // === התיקון הסופי והנכון באמת: מיון לפי created_at ===
         supabase.from('WorkSessions').select('*').order('created_at', { ascending: false }),
-        supabase.from('Services').select('*'),
-        supabase.from('RateHistory').select('*')
+        supabase.from('Services').select('*')
       ]);
 
       if (employeesData.error) throw employeesData.error;
       if (sessionsData.error) throw sessionsData.error;
       if (servicesData.error) throw servicesData.error;
-      if (ratesData.error) throw ratesData.error;
 
       setEmployees(employeesData.data || []);
       setWorkSessions(sessionsData.data || []);
       setServices(servicesData.data || []);
-      setRateHistories(ratesData.data || []);
 
     } catch (error) {
       console.error("Error loading dashboard data:", error);
@@ -54,13 +50,12 @@ export default function Dashboard() {
           <p className="text-slate-600">סקירה כללית של הפעילות במערכת</p>
         </div>
         
-        <QuickStats 
-          employees={employees} 
+        <QuickStats
+          employees={employees}
           workSessions={workSessions}
           services={services}
           currentDate={currentDate}
-          isLoading={isLoading} 
-          rateHistories={rateHistories}
+          isLoading={isLoading}
         />
         
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
