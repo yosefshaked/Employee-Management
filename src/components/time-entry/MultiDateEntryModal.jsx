@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
@@ -135,13 +135,22 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <TooltipProvider>
-        <DialogContent className="p-0">
-          <div className="flex flex-col h-[min(92vh,calc(100dvh-2rem))] w-[min(98vw,1200px)]">
-            <DialogHeader className="sticky top-0 z-20 border-b bg-background px-4 py-3">
+        <DialogContent className="p-0 overflow-hidden">
+          <div
+            data-testid="md-container"
+            className="flex flex-col w-[min(98vw,1200px)] h-[min(92vh,calc(100dvh-2rem))] max-w-[98vw]"
+          >
+            <div
+              data-testid="md-header"
+              className="sticky top-0 z-20 bg-background border-b px-4 py-3"
+            >
               <DialogTitle>הזנה מרובה</DialogTitle>
-            </DialogHeader>
+            </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-3" data-testid="modal-body">
+            <div
+              className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3"
+              data-testid="md-body"
+            >
               <div className="flex text-sm text-slate-600">
                 <span>טיפ: אפשר להעתיק ערכים מהרישום הקודם עם האייקון ליד כל שדה.</span>
                 <span className="ml-auto">מולאו {filledCount} מתוך {rows.length} שורות</span>
@@ -194,7 +203,10 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
               })}
             </div>
 
-            <div className="sticky bottom-0 z-20 bg-background border-t px-4 py-3 flex justify-end gap-2" data-testid="modal-footer">
+            <div
+              data-testid="md-footer"
+              className="shrink-0 bg-background border-t px-4 py-3 flex justify-end gap-2"
+            >
               <Button variant="outline" onClick={onClose}>בטל</Button>
               <Button onClick={handleSave}>שמור רישומים</Button>
             </div>

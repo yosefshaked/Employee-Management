@@ -98,9 +98,10 @@ describe('multi-date modal layout', () => {
       path.join('src', 'components', 'time-entry', 'MultiDateEntryModal.jsx'),
       'utf8'
     );
-    const bodyIndex = content.indexOf('data-testid="modal-body"');
-    const footerIndex = content.indexOf('data-testid="modal-footer"');
+    const bodyIndex = content.indexOf('data-testid="md-body"');
+    const footerIndex = content.indexOf('data-testid="md-footer"');
     assert(bodyIndex !== -1 && footerIndex !== -1);
     assert(footerIndex > bodyIndex);
+    assert(!content.includes('sticky bottom-0'));
   });
 });
