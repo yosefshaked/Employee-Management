@@ -33,15 +33,15 @@ export default function QuickStats({ employees, workSessions, services, currentD
   const statsData = calculateMonthlyStats();
   const tooltipTextsHe = [
     'מספר עובדים שמסומנים כפעילים',
-    'לעובדי שעה וגלובלי: סכום שעות.' + '\n' + ' למדריכים: לפי משך שירות × מספר מפגשים',
+    'נספרות שעות עבור עובדים שעתיים בלבד',
     'עובד נספר פעם אחת לכל יום עבודה בחודש',
-    'סכום תשלומים מהרישומים + שכר גלובלי אם לעובד יש רישום כלשהו בחודש'
+    'סכום תשלומים מהרישומים'
   ];
   const tooltipTexts = [
     'Counts only employees marked active',
-    'Hourly/Global: sum hours.' + '\n' + 'For Instructors: duration × sessions',
+    'Hours counted only for hourly employees',
     'Each employee counted once per work day in the month',
-    'Total session payments + global base if employee has any entry this month'
+    'Total payments from work sessions'
   ];
   
   // === שינוי 3: עדכון מערך הנתונים לתצוגה ===

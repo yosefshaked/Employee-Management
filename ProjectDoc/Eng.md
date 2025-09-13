@@ -1,6 +1,6 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.3.10**
+**Version: 1.3.11**
 **Last Updated: 2025-09-13**
 
 ## 1. Vision & Purpose
@@ -217,3 +217,9 @@ This guide is for a new developer (or AI) joining the project who needs to set u
     *   Build the React application into the `/dist` folder.
     *   Package the app with Electron into an executable installer.
 3.  The final installer/application will be located in the `/release` directory (which is created outside the project folder).
+
+## Recent Updates
+
+- Date filters in reports accept manual input or calendar selection and support multiple formats.
+- Hours KPI counts time for hourly employees only; employee type filter now includes global staff.
+- Detailed entries report can group by employee type with subtotals.

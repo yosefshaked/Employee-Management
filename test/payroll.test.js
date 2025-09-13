@@ -166,7 +166,7 @@ describe('computePeriodTotals aggregator', () => {
     const emp = res.totalsByEmployee.find(e => e.employee_id === 'i1');
     assert.equal(emp.pay, 250);
     assert.equal(emp.sessions, 5);
-    assert.equal(Math.round(res.totalHours * 10) / 10, 12);
+    assert.equal(Math.round(res.totalHours * 10) / 10, 8);
   });
 
   it('hourly_hours_times_rate', () => {

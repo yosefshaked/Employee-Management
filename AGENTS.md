@@ -18,4 +18,5 @@
 - WorkSessions inserts should omit `id` so the database can generate it; include `id` only when updating existing records.
 - Payroll calculations now rely solely on `WorkSessions.rate_used` and `total_payment`; avoid adding external salary adjustments in reports.
 - Global employees use `working_days` for daily rate proration and `paid_leave` rows for paid days off.
+- Reports date filters accept `DD/MM/YYYY`, `D/M/YY`, or ISO strings and hours KPIs count only hourly employees.
 

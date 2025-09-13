@@ -77,7 +77,6 @@ export function clampDateString(dateStr) {
 export function computePeriodTotals({
   workSessions = [],
   employees = [],
-  services = [],
   startDate,
   endDate,
   serviceFilter = 'all',
@@ -85,7 +84,6 @@ export function computePeriodTotals({
   employeeTypeFilter = 'all'
 }) {
   const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
-  const servicesById = Object.fromEntries(services.map(s => [s.id, s]));
   const start = new Date(startDate);
   const end = new Date(endDate);
   const filtered = workSessions.filter(row => {
@@ -137,13 +135,9 @@ export function computePeriodTotals({
     }
     if (row.entry_type === 'session') {
       const pay = row.total_payment || 0;
-      const service = servicesById[row.service_id];
-      const hours = service && service.duration_minutes ? (service.duration_minutes / 60) * (row.sessions_count || 0) : 0;
       result.totalPay += pay;
-      result.totalHours += hours;
       result.totalSessions += row.sessions_count || 0;
       bucket.pay += pay;
-      bucket.hours += hours;
       bucket.sessions += row.sessions_count || 0;
     } else if (row.entry_type === 'hours') {
       const pay = row.total_payment || 0;

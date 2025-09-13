@@ -1,15 +1,16 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTooltip } from "../components/InfoTooltip";
 import { Button } from "@/components/ui/button";
 import { BarChart3, Download, Calendar, TrendingUp } from "lucide-react";
-import { format, endOfMonth, startOfMonth } from "date-fns";
+import { format, startOfMonth } from "date-fns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "../supabaseClient";
 
 import ReportsFilters from "../components/reports/ReportsFilters";
-import { parseDateStrict, toISODateString, isValidRange } from '@/lib/date.js';
+import { parseDateStrict, toISODateString, isValidRange, isFullMonthRange } from '@/lib/date.js';
+import { toast } from 'sonner';
 import DetailedEntriesReport from "../components/reports/DetailedEntriesReport";
 import MonthlyReport from "../components/reports/MonthlyReport";
 import PayrollSummary from "../components/reports/PayrollSummary";
@@ -68,11 +69,16 @@ export default function Reports() {
     employeeType: 'all',
     serviceId: 'all',
   });
-  const [dateErrors, setDateErrors] = useState({ dateFrom: null, dateTo: null, range: null });
+  const lastValid = useRef({ dateFrom: format(startOfMonth(new Date()), 'dd/MM/yyyy'), dateTo: format(new Date(), 'dd/MM/yyyy') });
 
   const handleDateBlur = (key, value) => {
     const res = parseDateStrict(value);
-    setDateErrors(prev => ({ ...prev, [key]: res.ok ? null : 'תאריך לא תקין. פורמט תקין: 30/09/2025' }));
+    if (res.ok) {
+      lastValid.current[key] = value;
+    } else {
+      toast('תאריך לא תקין. השתמש/י בפורמט DD/MM/YYYY.');
+      setFilters(prev => ({ ...prev, [key]: lastValid.current[key] }));
+    }
   };
 
   const applyFilters = useCallback(() => {
@@ -84,12 +90,11 @@ export default function Reports() {
       return;
     }
     if (!isValidRange(fromRes.date, toRes.date)) {
-      setDateErrors(prev => ({ ...prev, range: "טווח תאריכים לא תקין (תאריך 'עד' לפני 'מ')" }));
+      toast("טווח תאריכים לא תקין (תאריך 'עד' לפני 'מ')");
       setFilteredSessions([]);
       setTotals({ totalPay: 0, totalHours: 0, totalSessions: 0, totalsByEmployee: [] });
       return;
     }
-    setDateErrors(prev => ({ ...prev, range: null }));
     const res = computePeriodTotals({
       workSessions,
       employees,
@@ -107,7 +112,7 @@ export default function Reports() {
       totalSessions: res.totalSessions,
       totalsByEmployee: res.totalsByEmployee
     });
-  }, [workSessions, employees, services, filters, setDateErrors]);
+  }, [workSessions, employees, services, filters]);
 
   useEffect(() => {
     loadInitialData();
@@ -184,9 +189,9 @@ export default function Reports() {
     };
 
   // Show a warning when the selected range is a partial month
-  const fromDate = new Date(filters.dateFrom);
-  const toDate = new Date(filters.dateTo);
-  const isPartialRange = fromDate.getDate() !== 1 || toDate.getDate() !== endOfMonth(toDate).getDate();
+  const fromParsed = parseDateStrict(filters.dateFrom);
+  const toParsed = parseDateStrict(filters.dateTo);
+  const isPartialRange = !(fromParsed.ok && toParsed.ok && isFullMonthRange(fromParsed.date, toParsed.date));
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">
@@ -214,7 +219,6 @@ export default function Reports() {
           setFilters={setFilters}
           employees={employees}
           services={services}
-          errors={dateErrors}
           onDateBlur={handleDateBlur}
         />
 
@@ -228,9 +232,13 @@ export default function Reports() {
           </Card>
           <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
             <CardContent className="p-6 flex items-center gap-4 relative">
-              <div className="absolute left-4 top-4"><InfoTooltip text={"סה\"כ שעות הוא סך כל השעות שעובדים עבדו בתקופת הדוח.\nלעובדים שעתיים - נספרות שעות בפועל.\nלמדריכים - השעות מחושבות לפי מספר מפגשים וזמן מפגש."} /></div>
+              <div className="absolute left-4 top-4"><InfoTooltip text={"שעות נספרות רק עבור עובדים שעתיים."} /></div>
               <div className="p-3 bg-blue-100 rounded-lg"><Calendar className="w-6 h-6 text-blue-600" /></div>
-              <div><p className="text-sm text-slate-600">סה״כ שעות (מוערך)</p><p className="text-2xl font-bold text-slate-900">{totals.totalHours.toFixed(1)}</p></div>
+              <div>
+                <p className="text-sm text-slate-600">סך שעות (עובדים שעתיים)</p>
+                <p className="text-2xl font-bold text-slate-900">{totals.totalHours.toFixed(1)}</p>
+                <p className="text-xs text-slate-500">נספרות עבור עובדים שעתיים בלבד</p>
+              </div>
             </CardContent>
           </Card>
           <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">

@@ -14,7 +14,7 @@ export function InfoTooltip({ text }) {
             ?
           </span>
         </TooltipTrigger>
-        <TooltipContent side="left" className="whitespace-pre-line text-right">
+        <TooltipContent side="left" className="whitespace-pre-line text-right z-50">
           {text}
         </TooltipContent>
       </Tooltip>
