@@ -95,34 +95,68 @@ export default function EntryRow({
   );
 
   return (
-    <div className="w-full rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5 relative focus-within:ring-2 focus-within:ring-sky-300" id={rowId}>
+    <div
+      className="w-full rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5 relative focus-within:ring-2 focus-within:ring-sky-300"
+      id={rowId}
+    >
       {readOnlyDate ? (
-        <div className="absolute top-2 right-2 text-xs font-medium text-slate-600 bg-slate-50 ring-1 ring-slate-200 rounded-full px-2 py-0.5">
-          {format(new Date(row.date + 'T00:00:00'), 'dd/MM')}
+        <div className="flex justify-between mb-3">
+          <div className="text-xs font-medium text-slate-600 bg-slate-50 ring-1 ring-slate-200 rounded-full px-2 py-0.5">
+            {format(new Date(row.date + 'T00:00:00'), 'dd/MM')}
+          </div>
+          {allowRemove && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onRemove}
+              className="h-7 w-7 text-red-500 hover:bg-red-50"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       ) : (
-        <div className="space-y-1">
+        <div className="space-y-1 mb-3">
           <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
             {CopyBtn('date')}
             <span>תאריך</span>
           </Label>
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="outline" className="w-full justify-start text-right font-normal bg-white h-10 text-base leading-6">
+              <Button
+                variant="outline"
+                className="w-full justify-start text-right font-normal bg-white h-10 text-base leading-6"
+              >
                 <CalendarIcon className="ml-2 h-4 w-4" />
                 {format(new Date(row.date + 'T00:00:00'), 'dd/MM/yyyy')}
               </Button>
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0">
-              <Calendar mode="single" selected={new Date(row.date + 'T00:00:00')} onSelect={(d) => d && handleChange('date', format(d, 'yyyy-MM-dd'))} initialFocus locale={he} />
+              <Calendar
+                mode="single"
+                selected={new Date(row.date + 'T00:00:00')}
+                onSelect={(d) => d && handleChange('date', format(d, 'yyyy-MM-dd'))}
+                initialFocus
+                locale={he}
+              />
             </PopoverContent>
           </Popover>
+          {allowRemove && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onRemove}
+              className="h-7 w-7 text-red-500 hover:bg-red-50"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       )}
 
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3 mt-3">
+      <div className="grid grid-cols-12 gap-x-4 gap-y-4 mt-3 auto-rows-auto items-start">
         {employee.employee_type === 'hourly' && (
-          <div className={`space-y-1 min-w-[160px] ${flash === 'hours' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
+          <div className={`space-y-1 min-w-0 col-span-12 sm:col-span-6 md:col-span-4 ${flash === 'hours' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
             <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
               {CopyBtn('hours')}
               <span>שעות עבודה</span>
@@ -142,7 +176,7 @@ export default function EntryRow({
         {employee.employee_type === 'global' && (
           <>
             {!hideDayType && (
-              <div className={`space-y-1 min-w-[180px] ${flash === 'entry_type' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
+              <div className={`space-y-1 min-w-0 col-span-12 sm:col-span-6 md:col-span-4 ${flash === 'entry_type' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
                 <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
                   {CopyBtn('dayType')}
                   <span>סוג יום</span>
@@ -159,7 +193,7 @@ export default function EntryRow({
                 {errors.dayType && <p className="text-sm text-red-600 mt-1">{errors.dayType}</p>}
               </div>
             )}
-            <div className={`space-y-1 min-w-[160px] ${flash === 'hours' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
+            <div className={`space-y-1 min-w-0 col-span-12 sm:col-span-6 md:col-span-4 ${flash === 'hours' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
               <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
                 {CopyBtn('hours')}
                 <span className="flex items-center gap-1">שעות<InfoTooltip text="בגלובלי השכר מחושב לפי יום; שדה השעות להצגה בלבד." /></span>
@@ -179,7 +213,7 @@ export default function EntryRow({
         )}
 
         {employee.employee_type === 'instructor' && (
-          <div className={`space-y-1 min-w-[320px] ${flash === 'service_id' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
+          <div className={`space-y-1 min-w-0 col-span-12 md:col-span-7 lg:col-span-8 ${flash === 'service_id' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
             <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
               {CopyBtn('service_id')}
               <span>שירות</span>
@@ -200,7 +234,7 @@ export default function EntryRow({
 
         {employee.employee_type === 'instructor' && selectedService && (
           <>
-            <div className={`space-y-1 min-w-[160px] ${flash === 'sessions_count' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
+            <div className={`space-y-1 min-w-0 col-span-6 md:col-span-3 lg:col-span-2 ${flash === 'sessions_count' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
               <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
                 {CopyBtn('sessions_count')}
                 <span>כמות מפגשים</span>
@@ -214,7 +248,7 @@ export default function EntryRow({
               {errors.sessions_count && <p className="text-sm text-red-600 mt-1">{errors.sessions_count}</p>}
             </div>
             {selectedService.payment_model === 'per_student' && (
-              <div className={`space-y-1 min-w-[160px] ${flash === 'students_count' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
+              <div className={`space-y-1 min-w-0 col-span-6 md:col-span-2 lg:col-span-2 ${flash === 'students_count' ? 'ring-2 ring-sky-300 rounded-md p-1' : ''}`}>
                 <Label className="flex items-center gap-1 text-sm font-medium text-slate-700">
                   {CopyBtn('students_count')}
                   <span>כמות תלמידים</span>
@@ -233,15 +267,14 @@ export default function EntryRow({
 
         {employee.employee_type !== 'instructor' && employee.employee_type !== 'hourly' && employee.employee_type !== 'global' && null}
 
-        <div className="space-y-1 min-w-[320px] col-span-full">
+        <div className="space-y-1 col-span-12 min-w-0">
           <Label className="text-sm font-medium text-slate-700">הערות</Label>
           <Textarea
             value={row.notes}
             onChange={(e) => handleChange('notes', e.target.value)}
-            className="bg-white text-base leading-6"
+            className="bg-white text-base leading-6 min-h-[88px] resize-y"
             placeholder="הערה חופשית (לא חובה)"
             maxLength={300}
-            rows={2}
           />
         </div>
 
@@ -254,17 +287,6 @@ export default function EntryRow({
             <span className="block text-xs text-slate-500">נספר לפי יום — רישום זה לא מכפיל שכר</span>
           )}
         </div>
-      )}
-
-      {allowRemove && (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onRemove}
-          className="absolute top-1 left-1 h-7 w-7 text-red-500 hover:bg-red-50"
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
       )}
     </div>
   );

@@ -247,7 +247,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
             </div>
 
             <div
-              className="flex-1 min-h-0 overflow-y-auto px-4 py-4 space-y-3 relative"
+              className="flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-24 space-y-3 relative"
               data-testid="md-body"
             >
               {hasGlobal && !dayType && (
