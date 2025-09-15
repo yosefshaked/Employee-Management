@@ -11,7 +11,7 @@ import ImportModal from '@/components/import/ImportModal.jsx';
 import EmployeePicker from '../employees/EmployeePicker.jsx';
 import MultiDateEntryModal from './MultiDateEntryModal.jsx';
 import { aggregateGlobalDays, aggregateGlobalDayForDate } from '@/lib/payroll.js';
-function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported }) {
+function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported, onDeleted }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
   const [multiMode, setMultiMode] = useState(false);
@@ -184,8 +184,9 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                 const adjustments = dailySessions.filter(s =>
                                   s.entry_type === 'adjustment'
                                 );
+                                const paidLeave = dailySessions.find(s => s.entry_type === 'paid_leave');
                                 const regularSessions = dailySessions.filter(s =>
-                                  s.entry_type !== 'adjustment'
+                                  s.entry_type !== 'adjustment' && s.entry_type !== 'paid_leave'
                                 );
                                 const adjustmentTotal = adjustments.reduce((sum, s) => sum + (s.total_payment || 0), 0);
 
@@ -195,7 +196,9 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                 const rateInfo = getRateForDate(emp.id, day);
                                 const showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
 
-                                if (regularSessions.length > 0) {
+                                if (paidLeave) {
+                                  summaryText = 'חופשה בתשלום';
+                                } else if (regularSessions.length > 0) {
                                   if (emp.employee_type === 'instructor') {
                                     summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
                                     const sessionCount = regularSessions.reduce((sum, s) => sum + (s.sessions_count || 0), 0);
@@ -221,7 +224,13 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                         className={`text-center transition-colors p-2 ${isSelected ? 'bg-blue-50' : ''} ${multiMode ? '' : 'cursor-pointer hover:bg-blue-50'}`}
                                         onClick={() => {
                                           if (!multiMode) {
-                                            setEditingCell({ day, employee: emp, existingSessions: regularSessions });
+                                            const payload = { day, employee: emp, existingSessions: regularSessions };
+                                            if (paidLeave) {
+                                              payload.dayType = 'paid_leave';
+                                              payload.paidLeaveId = paidLeave.id;
+                                              payload.paidLeaveNotes = paidLeave.notes || '';
+                                            }
+                                            setEditingCell(payload);
                                           }
                                         }}
                                     >
@@ -288,25 +297,47 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
         </Card>
         {/* The Dialog for editing/adding entries */}
         <Dialog open={!!editingCell} onOpenChange={(isOpen) => !isOpen && setEditingCell(null)}>
-          <DialogContent wide className="max-w-none w-[98vw] max-w-[1100px] p-0 overflow-hidden">
-            {editingCell && (
-              <TimeEntryForm
-                employee={editingCell.employee}
-                services={services}
-                initialRows={editingCell.existingSessions}
-                selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
-                getRateForDate={getRateForDate}
-                onSubmit={(result) => {
-                  if (!result) {
-                    setEditingCell(null);
-                    return;
-                  }
-                  onTableSubmit({ employee: editingCell.employee, day: editingCell.day, dayType: result.dayType, updatedRows: result.rows });
+        <DialogContent wide className="max-w-none w-[98vw] max-w-[1100px] p-0 overflow-hidden">
+          <DialogHeader>
+            <DialogTitle className="sr-only">עריכת רישומי זמן</DialogTitle>
+            <DialogDescription className="sr-only">טופס עריכת רישומים</DialogDescription>
+          </DialogHeader>
+          {editingCell && (
+            <TimeEntryForm
+              employee={editingCell.employee}
+              services={services}
+              initialRows={editingCell.existingSessions}
+              initialDayType={editingCell.dayType || 'regular'}
+              paidLeaveId={editingCell.paidLeaveId}
+              paidLeaveNotes={editingCell.paidLeaveNotes}
+              selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
+              getRateForDate={getRateForDate}
+              onSubmit={async (result) => {
+                if (!result) {
                   setEditingCell(null);
-                }}
-              />
-            )}
-          </DialogContent>
+                  return;
+                }
+                try {
+                  await onTableSubmit({
+                    employee: editingCell.employee,
+                    day: editingCell.day,
+                    dayType: result.dayType,
+                    updatedRows: result.rows,
+                    paidLeaveId: result.paidLeaveId,
+                    paidLeaveNotes: result.paidLeaveNotes,
+                  });
+                  setEditingCell(null);
+                } catch {
+                  // keep modal open on error
+                }
+              }}
+              onDeleted={(id) => {
+                setEditingCell(prev => prev ? { ...prev, existingSessions: prev.existingSessions.filter(s => s.id !== id) } : prev);
+                onDeleted([id]);
+              }}
+            />
+          )}
+        </DialogContent>
         </Dialog>
         <ImportModal
           open={importOpen}

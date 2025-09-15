@@ -14,6 +14,7 @@ import { InfoTooltip } from '@/components/InfoTooltip.jsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { useEffect, useState } from 'react';
+import ConfirmPermanentDeleteModal from './ConfirmPermanentDeleteModal.jsx';
 
 export function computeRowPayment(row, employee, services, getRateForDate) {
   const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
@@ -62,6 +63,7 @@ export default function EntryRow({
   const selectedService = services.find(s => s.id === row.service_id);
   const rowPayment = computeRowPayment(row, employee, services, getRateForDate);
   const [flash, setFlash] = useState(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (flashField) {
@@ -108,7 +110,7 @@ export default function EntryRow({
             <Button
               variant="ghost"
               size="icon"
-              onClick={onRemove}
+              onClick={() => setConfirmOpen(true)}
               className="h-7 w-7 text-red-500 hover:bg-red-50"
             >
               <Trash2 className="h-4 w-4" />
@@ -276,7 +278,7 @@ export default function EntryRow({
         <div className="space-y-1 col-span-12 min-w-0">
           <Label className="text-sm font-medium text-slate-700">הערות</Label>
           <Textarea
-            value={row.notes}
+            value={row.notes ?? ''}
             onChange={(e) => handleChange('notes', e.target.value)}
             className="bg-white text-base leading-6 min-h-[88px] resize-y"
             placeholder="הערה חופשית (לא חובה)"
@@ -293,6 +295,31 @@ export default function EntryRow({
             <span className="block text-xs text-slate-500">נספר לפי יום — רישום זה לא מכפיל שכר</span>
           )}
         </div>
+      )}
+      {allowRemove && (
+        <ConfirmPermanentDeleteModal
+          isOpen={confirmOpen}
+          onClose={() => setConfirmOpen(false)}
+          onConfirm={async () => {
+            await onRemove();
+          }}
+          summary={{
+            employeeName: employee.name,
+            date: format(new Date(row.date + 'T00:00:00'), 'dd/MM/yyyy'),
+            entryTypeLabel:
+              employee.employee_type === 'instructor'
+                ? 'מפגש'
+                : 'שעות',
+            hours:
+              employee.employee_type === 'instructor'
+                ? null
+                : row.hours,
+            meetings:
+              employee.employee_type === 'instructor'
+                ? row.sessions_count
+                : null
+          }}
+        />
       )}
     </div>
   );

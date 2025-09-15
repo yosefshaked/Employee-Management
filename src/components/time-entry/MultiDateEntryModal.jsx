@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
@@ -10,6 +10,7 @@ import { format } from 'date-fns';
 import { useTimeEntry } from './useTimeEntry.js';
 import { ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
+import he from '@/i18n/he.json';
 import { calculateGlobalDailyRate, aggregateGlobalDays } from '@/lib/payroll.js';
 
 function validateRow(row, employee, services, getRateForDate, dayTypeMap) {
@@ -145,6 +146,11 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
     }
   };
 
+  const removeRow = (index) => {
+    setRows(prev => prev.filter((_, i) => i !== index));
+    toast.success(he['toast.delete.success']);
+  };
+
   const groupedRows = useMemo(() => {
     const map = new Map();
     rows.forEach((row, index) => {
@@ -203,6 +209,10 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
           className="max-w-none w-[98vw] max-w-[1200px] p-0 overflow-hidden"
           style={{ maxHeight: 'none' }}
         >
+          <DialogHeader>
+            <DialogTitle className="sr-only">הזנה מרובה</DialogTitle>
+            <DialogDescription className="sr-only">טופס הזנת רישומים למספר תאריכים</DialogDescription>
+          </DialogHeader>
           <div
             data-testid="md-container"
             className="flex flex-col w-full h-[min(92vh,calc(100dvh-2rem))]"
@@ -303,6 +313,8 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
                                 errors={showErrors ? validation[index].errors : {}}
                                 isDuplicate={!!duplicateMap[index]}
                                 hideDayType={emp.employee_type === 'global'}
+                                allowRemove
+                                onRemove={() => removeRow(index)}
                               />
                             ))}
                           </div>

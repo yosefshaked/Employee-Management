@@ -35,7 +35,7 @@ export default function GlobalSegment({ segment, onChange, onDuplicate, onDelete
         </div>
         <div className="space-y-1">
           <Label className="text-sm font-medium text-slate-700">הערות</Label>
-          <Textarea value={segment.notes} onChange={e => onChange(segment.id, { notes: e.target.value })} className="bg-white text-base leading-6" rows={2} maxLength={300} placeholder="הערה חופשית (לא חובה)" />
+          <Textarea value={segment.notes ?? ''} onChange={e => onChange(segment.id, { notes: e.target.value })} className="bg-white text-base leading-6" rows={2} maxLength={300} placeholder="הערה חופשית (לא חובה)" />
         </div>
       </div>
       <div className="mt-4 text-sm text-right text-slate-700">

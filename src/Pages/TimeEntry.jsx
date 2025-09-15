@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
+import { hasDuplicateSession } from '@/lib/workSessionsUtils.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -85,6 +86,15 @@ export default function TimeEntry() {
     }
     
     return { rate: 0, reason: 'לא הוגדר תעריף' };
+  };
+
+  const findConflicts = (employeeId, dateStr) => {
+    return workSessions.filter(ws =>
+      ws.employee_id === employeeId &&
+      ws.date === dateStr &&
+      ws.entry_type !== 'paid_leave' &&
+      ws.entry_type !== 'adjustment'
+    );
   };
 
   const handleSessionSubmit = async (rows) => {
@@ -166,8 +176,19 @@ export default function TimeEntry() {
           toast.error('paid_leave only allowed for global employees', { duration: 15000 });
           return null;
         }
-
-        return {
+        if (entryType === 'paid_leave') {
+          const conflicts = findConflicts(employee.id, row.date);
+          if (conflicts.length > 0) {
+            const details = conflicts.map(c => {
+              const hrs = c.hours ? `, ${c.hours} שעות` : '';
+              const d = format(new Date(c.date + 'T00:00:00'), 'dd/MM/yyyy');
+              return `${employee.name} ${d}${hrs} (ID ${c.id})`;
+            }).join('\n');
+            toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 10000 });
+            return null;
+          }
+        }
+        const session = {
           employee_id: employee.id,
           date: row.date,
           entry_type: entryType,
@@ -179,6 +200,11 @@ export default function TimeEntry() {
           rate_used: rateUsed,
           total_payment: totalPayment,
         };
+        if (hasDuplicateSession(workSessions, session)) {
+          toast.error('רישום זה כבר קיים', { duration: 15000 });
+          return null;
+        }
+        return session;
       }).filter(Boolean);
 
       if (sessionsToInsert.length === 0) {
@@ -198,17 +224,15 @@ export default function TimeEntry() {
     }
   };
 
-  const handleTableSubmit = async ({ employee, day, dayType, updatedRows }) => {
+  const handleTableSubmit = async ({ employee, day, dayType, updatedRows, paidLeaveId, paidLeaveNotes }) => {
     setIsLoading(true);
     try {
       const toInsert = [];
       const toUpdate = [];
-      const toDelete = [];
+      if (paidLeaveId && dayType !== 'paid_leave' && updatedRows.length > 0 && !updatedRows[0].id) {
+        updatedRows[0].id = paidLeaveId;
+      }
       for (const row of updatedRows) {
-        if (row._status === 'deleted' && row.id) {
-          toDelete.push(row.id);
-          continue;
-        }
         const hoursValue = parseFloat(row.hours);
         const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
         if (employee.employee_type === 'hourly') {
@@ -267,7 +291,7 @@ export default function TimeEntry() {
           rate_used: rateUsed,
           total_payment: totalPayment,
         };
-        if (row.id && row._status !== 'new') sessionData.id = row.id;
+        if (row.id) sessionData.id = row.id;
         if (employee.employee_type === 'hourly') {
           sessionData.entry_type = 'hours';
           sessionData.hours = hoursValue || 0;
@@ -287,11 +311,65 @@ export default function TimeEntry() {
           sessionData.sessions_count = parseInt(row.sessions_count, 10) || 1;
           sessionData.students_count = parseInt(row.students_count, 10) || null;
         }
-        if (!row.id || row._status === 'new') toInsert.push(sessionData); else toUpdate.push(sessionData);
+        if (hasDuplicateSession(workSessions, sessionData)) {
+          toast.error('רישום זה כבר קיים', { duration: 15000 });
+          return;
+        }
+        if (row.id) {
+          toUpdate.push(sessionData);
+        } else {
+          toInsert.push(sessionData);
+        }
       }
-      if (toDelete.length > 0) {
-        const { error: delErr } = await supabase.from('WorkSessions').delete().in('id', toDelete);
-        if (delErr) throw delErr;
+      if (dayType === 'paid_leave') {
+        const dateStr = format(day, 'yyyy-MM-dd');
+        const conflicts = findConflicts(employee.id, dateStr);
+        if (conflicts.length > 0) {
+          const details = conflicts.map(c => {
+            const hrs = c.hours ? `, ${c.hours} שעות` : '';
+            const d = format(new Date(c.date + 'T00:00:00'), 'dd/MM/yyyy');
+            return `${employee.name} ${d}${hrs} (ID ${c.id})`;
+          }).join('\n');
+          toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 10000 });
+          return;
+        }
+        const { rate: rateUsed, reason } = getRateForDate(employee.id, day, GENERIC_RATE_SERVICE_ID);
+        if (!rateUsed) {
+          toast.error(reason || 'לא הוגדר תעריף עבור תאריך זה', { duration: 15000 });
+          return;
+        }
+        let totalPayment = 0;
+        if (employee.employee_type === 'global') {
+          try {
+            const dailyRate = calculateGlobalDailyRate(employee, day, rateUsed);
+            totalPayment = dailyRate;
+          } catch (err) {
+            toast.error(err.message, { duration: 15000 });
+            return;
+          }
+        }
+        const plRow = {
+          employee_id: employee.id,
+          date: format(day, 'yyyy-MM-dd'),
+          notes: paidLeaveNotes || null,
+          rate_used: rateUsed,
+          total_payment: totalPayment,
+          entry_type: 'paid_leave',
+          hours: null,
+          service_id: null,
+          sessions_count: null,
+          students_count: null,
+        };
+        if (hasDuplicateSession(workSessions, plRow)) {
+          toast.error('רישום זה כבר קיים', { duration: 15000 });
+          return;
+        }
+        if (paidLeaveId) {
+          plRow.id = paidLeaveId;
+          toUpdate.push(plRow);
+        } else {
+          toInsert.push(plRow);
+        }
       }
       if (toInsert.length > 0) {
         const { error: insErr } = await supabase.from('WorkSessions').insert(toInsert);
@@ -306,9 +384,15 @@ export default function TimeEntry() {
     } catch (error) {
       console.error('Error submitting from table:', error);
       toast.error(`שגיאה בעדכון הרישומים: ${error.message}`);
+      throw error;
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSessionsDeleted = (ids) => {
+    const idsSet = new Set(ids.map(String));
+    setWorkSessions(prev => prev.filter(ws => !idsSet.has(String(ws.id))));
   };
   
   const selectedEmployee = employees.find(e => e.id === selectedEmployeeId);
@@ -351,7 +435,7 @@ export default function TimeEntry() {
                   <TimeEntryForm
                     employee={selectedEmployee}
                     services={services}
-                    onSubmit={handleSessionSubmit}
+                    onSubmit={(res) => handleSessionSubmit(res.rows)}
                     getRateForDate={getRateForDate}
                   />
                 )}
@@ -379,6 +463,7 @@ export default function TimeEntry() {
               getRateForDate={getRateForDate}
               onTableSubmit={handleTableSubmit}
               onImported={loadInitialData}
+              onDeleted={handleSessionsDeleted}
             />
           </TabsContent>
         </Tabs>
