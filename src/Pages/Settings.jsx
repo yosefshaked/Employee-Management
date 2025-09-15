@@ -36,7 +36,7 @@ function createNewRule() {
   });
 }
 
-function HolidayRuleRow({ rule, onChange, onRemove, allowHalfDay }) {
+function HolidayRuleRow({ rule, onChange, onRemove, onSave, allowHalfDay, isSaving }) {
   const typeOptions = useMemo(() => {
     if (allowHalfDay) return HOLIDAY_OPTIONS;
     return HOLIDAY_OPTIONS.filter(option => option.value !== 'half_day');
@@ -80,15 +80,28 @@ function HolidayRuleRow({ rule, onChange, onRemove, allowHalfDay }) {
         <Badge variant="outline">{HOLIDAY_TYPE_LABELS[rule.type] || 'הגדרה מותאמת'}</Badge>
       </TableCell>
       <TableCell className="text-center">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => onRemove(rule.id)}
-          className="text-red-600 hover:bg-red-50"
-          aria-label="מחק כלל חג"
-        >
-          <Trash2 className="w-4 h-4" />
-        </Button>
+        <div className="flex items-center justify-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onSave(rule.id)}
+            disabled={isSaving}
+            className="gap-1"
+            aria-label="שמור כלל חג"
+          >
+            <Save className="w-4 h-4" />
+            {isSaving ? 'שומר...' : 'שמור'}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => onRemove(rule.id)}
+            className="text-red-600 hover:bg-red-50"
+            aria-label="מחק כלל חג"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        </div>
       </TableCell>
     </TableRow>
   );
@@ -185,6 +198,12 @@ export default function Settings() {
       toast.error('שמירת ההגדרות נכשלה');
     }
     setIsSaving(false);
+  };
+
+  const handleRuleSave = async (ruleId) => {
+    const hasRule = (policy.holiday_rules || []).some(rule => rule.id === ruleId);
+    if (!hasRule) return;
+    await handleSave();
   };
 
   const upcomingHoliday = findHolidayForDate(policy);
@@ -303,15 +322,15 @@ export default function Settings() {
                   <TableRow>
                     <TableHead className="text-right">שם חג</TableHead>
                     <TableHead className="text-right">סוג חג</TableHead>
-                    <TableHead className="text-right">תאריך התחלה</TableHead>
-                    <TableHead className="text-right">תאריך סיום</TableHead>
-                    <TableHead className="text-right">תגית</TableHead>
-                    <TableHead className="w-12"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {(policy.holiday_rules || []).length === 0 ? (
-                    <TableRow>
+                  <TableHead className="text-right">תאריך התחלה</TableHead>
+                  <TableHead className="text-right">תאריך סיום</TableHead>
+                  <TableHead className="text-right">תגית</TableHead>
+                  <TableHead className="w-32 text-right">פעולות</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(policy.holiday_rules || []).length === 0 ? (
+                  <TableRow>
                       <TableCell colSpan={6} className="text-center text-slate-500 py-8">
                         לא הוגדרו חגים. הוסף כלל חדש כדי להתחיל.
                       </TableCell>
@@ -323,7 +342,9 @@ export default function Settings() {
                         rule={rule}
                         onChange={handleRuleChange}
                         onRemove={handleRuleRemove}
+                        onSave={handleRuleSave}
                         allowHalfDay={policy.allow_half_day}
+                        isSaving={isSaving}
                       />
                     ))
                   )}
