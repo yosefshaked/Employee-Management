@@ -95,9 +95,23 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
   const handleSave = (e) => {
     e.preventDefault();
     if (dayType === 'paid_leave') {
-      const remaining = segments.filter(s => s._status !== 'deleted');
-      if (remaining.length > 0) {
-        toast.error(he['error.paidLeaveRequiresEmpty']);
+      const conflicts = segments.filter(s => {
+        if (s._status === 'deleted') return false;
+        if (s._status === 'existing') return true;
+        const hasData =
+          (s.hours && parseFloat(s.hours) > 0) ||
+          s.service_id ||
+          s.sessions_count ||
+          s.students_count;
+        return hasData;
+      });
+      if (conflicts.length > 0) {
+        const dateStr = format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy');
+        const details = conflicts.map(c => {
+          const hrs = c.hours ? `, ${c.hours} שעות` : '';
+          return `${employee.name} ${dateStr}${hrs} (ID ${c.id})`;
+        }).join('\n');
+        toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`);
         return;
       }
       onSubmit({ rows: [], dayType, paidLeaveId, paidLeaveNotes });

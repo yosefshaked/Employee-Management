@@ -88,6 +88,15 @@ export default function TimeEntry() {
     return { rate: 0, reason: 'לא הוגדר תעריף' };
   };
 
+  const findConflicts = (employeeId, dateStr) => {
+    return workSessions.filter(ws =>
+      ws.employee_id === employeeId &&
+      ws.date === dateStr &&
+      ws.entry_type !== 'paid_leave' &&
+      ws.entry_type !== 'adjustment'
+    );
+  };
+
   const handleSessionSubmit = async (rows) => {
     try {
       const employee = employees.find(e => e.id === selectedEmployeeId);
@@ -166,6 +175,18 @@ export default function TimeEntry() {
         if (entryType === 'paid_leave' && employee.employee_type !== 'global') {
           toast.error('paid_leave only allowed for global employees', { duration: 15000 });
           return null;
+        }
+        if (entryType === 'paid_leave') {
+          const conflicts = findConflicts(employee.id, row.date);
+          if (conflicts.length > 0) {
+            const details = conflicts.map(c => {
+              const hrs = c.hours ? `, ${c.hours} שעות` : '';
+              const d = format(new Date(c.date + 'T00:00:00'), 'dd/MM/yyyy');
+              return `${employee.name} ${d}${hrs} (ID ${c.id})`;
+            }).join('\n');
+            toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 15000 });
+            return null;
+          }
         }
         const session = {
           employee_id: employee.id,
@@ -301,6 +322,17 @@ export default function TimeEntry() {
         }
       }
       if (dayType === 'paid_leave') {
+        const dateStr = format(day, 'yyyy-MM-dd');
+        const conflicts = findConflicts(employee.id, dateStr);
+        if (conflicts.length > 0) {
+          const details = conflicts.map(c => {
+            const hrs = c.hours ? `, ${c.hours} שעות` : '';
+            const d = format(new Date(c.date + 'T00:00:00'), 'dd/MM/yyyy');
+            return `${employee.name} ${d}${hrs} (ID ${c.id})`;
+          }).join('\n');
+          toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 15000 });
+          return;
+        }
         const { rate: rateUsed, reason } = getRateForDate(employee.id, day, GENERIC_RATE_SERVICE_ID);
         if (!rateUsed) {
           toast.error(reason || 'לא הוגדר תעריף עבור תאריך זה', { duration: 15000 });
