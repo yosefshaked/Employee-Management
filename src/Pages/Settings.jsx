@@ -321,7 +321,7 @@ export default function Settings() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="text-right">שם חג</TableHead>
-                    <TableHead className="text-right">סוג חג</TableHead>
+                    <TableHead className="text-right">סוג חופשה</TableHead>
                   <TableHead className="text-right">תאריך התחלה</TableHead>
                   <TableHead className="text-right">תאריך סיום</TableHead>
                   <TableHead className="text-right">תגית</TableHead>

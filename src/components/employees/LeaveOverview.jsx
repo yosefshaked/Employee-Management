@@ -8,8 +8,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Switch } from '@/components/ui/switch';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { Loader2, ShieldCheck } from 'lucide-react';
+import { Loader2, ShieldCheck, Info } from 'lucide-react';
 import { supabase } from '@/supabaseClient';
 import { selectLeaveRemaining, selectHolidayForDate } from '@/selectors.js';
 import { DEFAULT_LEAVE_POLICY, HOLIDAY_TYPE_LABELS } from '@/lib/leave.js';
@@ -232,7 +233,7 @@ export default function LeaveOverview({
             ) : (
               <>
                 <div className="space-y-1">
-                  <Label className="text-sm font-semibold text-slate-700">סוג חג</Label>
+                  <Label className="text-sm font-semibold text-slate-700">סוג חופשה</Label>
                   <Select
                     value={formState.holidayType || 'employee_paid'}
                     onValueChange={(value) => handleFormChange({ holidayType: value, usageAmount: determineUsageAmount(value) })}
@@ -310,7 +311,25 @@ export default function LeaveOverview({
               <TableRow>
                 <TableHead className="text-right">עובד</TableHead>
                 <TableHead className="text-right">מכסה שנתית</TableHead>
-                <TableHead className="text-right">יתרת פתיחה</TableHead>
+                <TableHead className="text-right">
+                  <div className="flex flex-row-reverse items-center justify-end gap-1">
+                    <span>יתרת צבירה משנה קודמת</span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="inline-flex h-5 w-5 items-center justify-center rounded-full text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                          aria-label="יתרת חופשה שהועברה משנה קודמת לפי מדיניות הארגון."
+                        >
+                          <Info className="h-4 w-4" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" align="end">
+                        יתרת חופשה שהועברה משנה קודמת לפי מדיניות הארגון.
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
+                </TableHead>
                 <TableHead className="text-right">נוצל</TableHead>
                 <TableHead className="text-right">יתרה נוכחית</TableHead>
                 <TableHead className="text-right">סטטוס</TableHead>
@@ -344,7 +363,7 @@ export default function LeaveOverview({
                       </TableCell>
                       <TableCell>
                         <Badge variant={statusVariant}>
-                          {remaining < 0 ? 'במינוס' : 'בתקין'}
+                          {remaining < 0 ? 'במינוס' : 'תקין'}
                         </Badge>
                       </TableCell>
                     </TableRow>
