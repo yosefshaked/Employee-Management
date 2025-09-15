@@ -68,7 +68,17 @@ export function normalizeHolidayRule(rule) {
 }
 
 export function normalizeLeavePolicy(value) {
-  const policy = value || {};
+  let policy = value;
+  if (!policy) {
+    policy = {};
+  } else if (typeof policy === 'string') {
+    try {
+      policy = JSON.parse(policy);
+    } catch (error) {
+      console.warn('Failed to parse leave policy JSON', error);
+      policy = {};
+    }
+  }
   return {
     allow_half_day: Boolean(policy.allow_half_day),
     allow_negative_balance: Boolean(policy.allow_negative_balance),

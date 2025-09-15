@@ -13,6 +13,18 @@ import { DEFAULT_LEAVE_POLICY, normalizeLeavePolicy } from "@/lib/leave.js";
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
+const getLedgerTimestamp = (entry = {}) => {
+  const raw = entry.date || entry.entry_date || entry.effective_date || entry.change_date || entry.created_at;
+  if (!raw) return 0;
+  const parsed = new Date(raw);
+  const value = parsed.getTime();
+  return Number.isNaN(value) ? 0 : value;
+};
+
+const sortLeaveLedger = (entries = []) => {
+  return [...entries].sort((a, b) => getLedgerTimestamp(a) - getLedgerTimestamp(b));
+};
+
 export default function Employees() {
   const [employees, setEmployees] = useState([]);
   const [rateHistories, setRateHistories] = useState([]);
@@ -35,7 +47,7 @@ export default function Employees() {
         supabase.from('RateHistory').select('*'),
         supabase.from('Services').select('*'),
         supabase.from('Settings').select('settings_value').eq('key', 'leave_policy').single(),
-        supabase.from('LeaveBalances').select('*').order('date', { ascending: true })
+        supabase.from('LeaveBalances').select('*')
       ]);
 
       if (employeesData.error) throw employeesData.error;
@@ -47,7 +59,7 @@ export default function Employees() {
       setRateHistories(ratesData.data);
       const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
       setServices(filteredServices);
-      setLeaveBalances(leaveLedgerData.data || []);
+      setLeaveBalances(sortLeaveLedger(leaveLedgerData.data || []));
 
       if (settingsData.error) {
         if (settingsData.error.code !== 'PGRST116') throw settingsData.error;

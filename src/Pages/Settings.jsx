@@ -228,7 +228,7 @@ export default function Settings() {
 
                 {policy.allow_negative_balance && (
                   <div className="border rounded-lg p-4 bg-slate-50">
-                    <Label className="text-sm font-semibold text-slate-700">מינוס מינימלי (ימים)</Label>
+                    <Label className="text-sm font-semibold text-slate-700">כמות חריגה מימי החופש המוגדרים</Label>
                     <Input
                       type="number"
                       step="0.5"
@@ -305,7 +305,7 @@ export default function Settings() {
                     <TableHead className="text-right">סוג חג</TableHead>
                     <TableHead className="text-right">תאריך התחלה</TableHead>
                     <TableHead className="text-right">תאריך סיום</TableHead>
-                    <TableHead className="text-right">תיאור</TableHead>
+                    <TableHead className="text-right">תגית</TableHead>
                     <TableHead className="w-12"></TableHead>
                   </TableRow>
                 </TableHeader>
