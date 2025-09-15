@@ -141,7 +141,8 @@ export default function Reports() {
 
       setEmployees(employeesData.data || []);
       setWorkSessions(sessionsData.data || []);
-      setServices(servicesData.data || []);
+      const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
+      setServices(filteredServices);
       setRateHistories(ratesData.data || []);
     } catch (error) {
       console.error("Error loading data:", error);

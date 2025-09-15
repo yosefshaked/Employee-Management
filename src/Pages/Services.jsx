@@ -6,6 +6,8 @@ import ServiceList from "../components/services/ServiceList";
 import ServiceForm from "../components/services/ServiceForm";
 import { supabase } from "../supabaseClient";
 
+const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+
 export default function Services() {
   const [services, setServices] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -23,7 +25,8 @@ export default function Services() {
       toast.error("שגיאה בטעינת השירותים");
       console.error('Error fetching services:', error);
     } else {
-      setServices(data);
+      const filteredServices = (data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
+      setServices(filteredServices);
     }
     setIsLoading(false);
   };

@@ -5,6 +5,8 @@ import MonthlyCalendar from '../components/dashboard/MonthlyCalendar';
 import RecentActivity from '../components/dashboard/RecentActivity';
 import { toast } from "sonner";
 
+const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+
 export default function Dashboard() {
   const [employees, setEmployees] = useState([]);
   const [workSessions, setWorkSessions] = useState([]);
@@ -28,7 +30,8 @@ export default function Dashboard() {
 
       setEmployees(employeesData.data || []);
       setWorkSessions(sessionsData.data || []);
-      setServices(servicesData.data || []);
+      const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
+      setServices(filteredServices);
 
     } catch (error) {
       console.error("Error loading dashboard data:", error);

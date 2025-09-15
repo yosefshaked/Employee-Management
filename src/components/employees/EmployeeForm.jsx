@@ -56,7 +56,10 @@ useEffect(() => {
     // Load services only if the employee is an instructor
     if (formData.employee_type === 'instructor') {
       const { data: servicesData } = await supabase.from('Services').select('*').order('name');
-      setServices(servicesData || []);
+      const filteredServices = (servicesData || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
+      setServices(filteredServices);
+    } else {
+      setServices([]);
     }
 
     // Load rate history FOR ANY existing employee

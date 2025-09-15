@@ -24,6 +24,10 @@ export default function RateHistoryManager({ rateHistory, services, employeeType
     onChange([...rateHistory, newEntry]);
   };
 
+  const availableServices = employeeType === 'instructor'
+    ? services.filter(service => service.id !== GENERIC_RATE_SERVICE_ID)
+    : services;
+
   return (
     <div className="space-y-4">
       <h3 className="text-lg font-semibold">היסטוריית תעריפים</h3>
@@ -35,7 +39,7 @@ export default function RateHistoryManager({ rateHistory, services, employeeType
               <Select value={entry.service_id} onValueChange={(val) => handleChange(index, 'service_id', val)}>
                 <SelectTrigger><SelectValue placeholder="בחר שירות" /></SelectTrigger>
                 <SelectContent>
-                  {services.map(service => (
+                  {availableServices.map(service => (
                     <SelectItem key={service.id} value={service.id}>{service.name}</SelectItem>
                   ))}
                 </SelectContent>

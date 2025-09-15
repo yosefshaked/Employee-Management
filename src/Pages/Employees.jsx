@@ -9,6 +9,8 @@ import { searchVariants } from "@/lib/layoutSwap";
 import EmployeeForm from "../components/employees/EmployeeForm";
 import { supabase } from "../supabaseClient";
 
+const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+
 export default function Employees() {
   const [employees, setEmployees] = useState([]);
   const [rateHistories, setRateHistories] = useState([]);
@@ -35,7 +37,8 @@ export default function Employees() {
 
       setEmployees(employeesData.data);
       setRateHistories(ratesData.data);
-      setServices(servicesData.data); 
+      const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
+      setServices(filteredServices);
     } catch (error) {
       console.error('Error fetching data:', error);
       toast.error("שגיאה בטעינת הנתונים");
@@ -65,7 +68,6 @@ export default function Employees() {
     try {
       // Separate the rate from the main employee data to avoid saving it in the Employees table
       const { current_rate, ...employeeDetails } = employeeData;
-      const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
       const isNewEmployee = !editingEmployee;
       let employeeId;
 
