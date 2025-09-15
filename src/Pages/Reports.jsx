@@ -18,6 +18,7 @@ import MonthlyReport from "../components/reports/MonthlyReport";
 import PayrollSummary from "../components/reports/PayrollSummary";
 import ChartsOverview from "../components/reports/ChartsOverview";
 import { computePeriodTotals } from '@/lib/payroll.js';
+import { DEFAULT_LEAVE_POLICY, normalizeLeavePolicy } from '@/lib/leave.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -31,6 +32,8 @@ export default function Reports() {
   const location = useLocation(); // מאפשר לנו לגשת למידע על הכתובת הנוכחית
   const [activeTab, setActiveTab] = useState(location.state?.openTab || "overview");
   const [rateHistories, setRateHistories] = useState([]);
+  const [leaveBalances, setLeaveBalances] = useState([]);
+  const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
 
   const getRateForDate = (employeeId, date, serviceId = null) => {
     const employee = employees.find(e => e.id === employeeId);
@@ -127,23 +130,33 @@ export default function Reports() {
   const loadInitialData = async () => {
     setIsLoading(true);
     try {
-      const [employeesData, sessionsData, servicesData, ratesData] = await Promise.all([
+      const [employeesData, sessionsData, servicesData, ratesData, settingsData, leaveData] = await Promise.all([
         supabase.from('Employees').select('*').order('name'),
         supabase.from('WorkSessions').select('*'),
         supabase.from('Services').select('*'),
-        supabase.from('RateHistory').select('*')
+        supabase.from('RateHistory').select('*'),
+        supabase.from('Settings').select('value').eq('key', 'leave_policy').single(),
+        supabase.from('LeaveBalances').select('*')
       ]);
 
       if (employeesData.error) throw employeesData.error;
       if (sessionsData.error) throw sessionsData.error;
       if (servicesData.error) throw servicesData.error;
       if (ratesData.error) throw ratesData.error;
+      if (leaveData.error) throw leaveData.error;
 
       setEmployees(employeesData.data || []);
       setWorkSessions(sessionsData.data || []);
       const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
       setServices(filteredServices);
       setRateHistories(ratesData.data || []);
+      setLeaveBalances(leaveData.data || []);
+      if (settingsData.error) {
+        if (settingsData.error.code !== 'PGRST116') throw settingsData.error;
+        setLeavePolicy(DEFAULT_LEAVE_POLICY);
+      } else {
+        setLeavePolicy(normalizeLeavePolicy(settingsData.data?.value));
+      }
     } catch (error) {
       console.error("Error loading data:", error);
     }
@@ -270,7 +283,18 @@ export default function Reports() {
               <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
               <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
               <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="payroll"><PayrollSummary sessions={filteredSessions} employees={employees} services={services} getRateForDate={getRateForDate} isLoading={isLoading} employeeTotals={totals.totalsByEmployee} /></TabsContent>
+              <TabsContent value="payroll">
+                <PayrollSummary
+                  sessions={filteredSessions}
+                  employees={employees}
+                  services={services}
+                  getRateForDate={getRateForDate}
+                  isLoading={isLoading}
+                  employeeTotals={totals.totalsByEmployee}
+                  leaveBalances={leaveBalances}
+                  leavePolicy={leavePolicy}
+                />
+              </TabsContent>
             </Tabs>
           </CardContent>
         </Card>

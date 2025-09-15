@@ -12,6 +12,7 @@ import Adjustments from './Pages/Adjustments.jsx';
 import Reports from './Pages/Reports.jsx';
 import ReportsErrorBoundary from './components/reports/ReportsErrorBoundary.js';
 import Services from './Pages/Services.jsx';
+import Settings from './Pages/Settings.jsx';
 
 // קומפוננטה ראשית שמגדירה את הניווט (עכשיו עם לוגיקת טעינה)
 function App() {
@@ -28,6 +29,7 @@ function App() {
         <Route path="/Adjustments" element={<Adjustments />} />
         <Route path="/Reports" element={<ReportsErrorBoundary><Reports /></ReportsErrorBoundary>} />
         <Route path="/Services" element={<Services />} />
+        <Route path="/Settings" element={<Settings />} />
       </Routes>
     </Layout>
   );

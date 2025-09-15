@@ -1,4 +1,10 @@
 import { sumHourlyHours } from './lib/payroll.js';
+import {
+  DEFAULT_LEAVE_POLICY,
+  findHolidayForDate,
+  computeEmployeeLeaveSummary,
+  normalizeLeavePolicy,
+} from './lib/leave.js';
 
 function entryMatchesFilters(row, emp, filters = {}) {
   const { dateFrom, dateTo, selectedEmployee, employeeType = 'all', serviceId = 'all' } = filters;
@@ -57,5 +63,38 @@ export function selectTotalHours(entries = [], services = [], employees = [], fi
     selectMeetingHours(entries, services, employees, filters) +
     selectGlobalHours(entries, employees, filters)
   );
+}
+
+export function selectHolidayForDate(policy = DEFAULT_LEAVE_POLICY, date = new Date()) {
+  return findHolidayForDate(normalizeLeavePolicy(policy), date);
+}
+
+export function selectLeaveRemaining(
+  employeeId,
+  date = new Date(),
+  {
+    employees = [],
+    leaveBalances = [],
+    policy = DEFAULT_LEAVE_POLICY,
+  } = {},
+) {
+  const employee = employees.find(emp => emp.id === employeeId);
+  if (!employee) {
+    return {
+      remaining: 0,
+      used: 0,
+      quota: 0,
+      carryIn: 0,
+      allocations: 0,
+      adjustments: 0,
+      year: new Date(date).getFullYear(),
+    };
+  }
+  return computeEmployeeLeaveSummary({
+    employee,
+    leaveBalances,
+    policy,
+    date,
+  });
 }
 

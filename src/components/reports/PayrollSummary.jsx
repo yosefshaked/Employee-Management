@@ -1,16 +1,27 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import { selectLeaveRemaining } from '@/selectors.js';
+import { DEFAULT_LEAVE_POLICY } from '@/lib/leave.js';
 
 const EMPLOYEE_TYPES = {
   hourly: 'שעתי',
   instructor: 'מדריך',
   global: 'גלובלי'
 };
+
+function resolveLeaveDelta(entry = {}) {
+  if (typeof entry.days_delta === 'number') return entry.days_delta;
+  if (typeof entry.delta_days === 'number') return entry.delta_days;
+  if (typeof entry.delta === 'number') return entry.delta;
+  if (typeof entry.amount === 'number') return entry.amount;
+  if (typeof entry.days === 'number') return entry.days;
+  return 0;
+}
 
 // קומפוננטה קטנה לשורות הפירוט עם עיצוב משופר
 const InstructorDetailsRow = ({ details }) => (
@@ -37,7 +48,16 @@ const InstructorDetailsRow = ({ details }) => (
   </TableRow>
 );
 
-export default function PayrollSummary({ sessions, employees, services, isLoading, getRateForDate, employeeTotals = [] }) {
+export default function PayrollSummary({
+  sessions,
+  employees,
+  services,
+  isLoading,
+  getRateForDate,
+  employeeTotals = [],
+  leaveBalances = [],
+  leavePolicy = DEFAULT_LEAVE_POLICY,
+}) {
   const [expandedRows, setExpandedRows] = useState({});
 
   const EMPLOYEE_TYPE_CONFIG = {
@@ -58,6 +78,21 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
     }
   };
 
+  const toggleRow = (employeeId) => {
+    setExpandedRows(prev => ({...prev, [employeeId]: !prev[employeeId]}));
+  };
+
+  const totalsMap = Object.fromEntries(employeeTotals.map(t => [t.employee_id, t]));
+  const leaveByEmployee = useMemo(() => {
+    const map = new Map();
+    (leaveBalances || []).forEach(entry => {
+      if (!entry || !entry.employee_id) return;
+      if (!map.has(entry.employee_id)) map.set(entry.employee_id, []);
+      map.get(entry.employee_id).push(entry);
+    });
+    return map;
+  }, [leaveBalances]);
+
   if (isLoading) {
     return (
       <div className="space-y-2">
@@ -65,12 +100,6 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
       </div>
     );
   }
-
-  const toggleRow = (employeeId) => {
-    setExpandedRows(prev => ({...prev, [employeeId]: !prev[employeeId]}));
-  };
-
-  const totalsMap = Object.fromEntries(employeeTotals.map(t => [t.employee_id, t]));
   const employeesSummary = employees.map(employee => {
     const employeeSessions = sessions.filter(
       s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
@@ -97,6 +126,21 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
     }
     const totals = totalsMap[employee.id] || { pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
     const baseSalary = employee.employee_type === 'global' ? getRateForDate(employee.id, new Date()).rate : null;
+    const leaveEntries = leaveByEmployee.get(employee.id) || [];
+    const systemPaidCount = leaveEntries.filter(entry => (entry.source || '').includes('system_paid')).length;
+    const employeePaidDays = leaveEntries.reduce((sum, entry) => {
+      const delta = resolveLeaveDelta(entry);
+      const source = entry.source || '';
+      if (source.includes('system_paid')) return sum;
+      if (source.includes('employee_paid')) return sum + Math.abs(delta);
+      if (delta < 0) return sum + Math.abs(delta);
+      return sum;
+    }, 0);
+    const leaveSummary = selectLeaveRemaining(employee.id, new Date(), {
+      employees,
+      leaveBalances,
+      policy: leavePolicy,
+    });
     return {
       id: employee.id,
       name: employee.name,
@@ -107,7 +151,10 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
       totalPayment: totals.pay,
       totalHours: Math.round(totals.hours * 10) / 10,
       totalSessions: totals.sessions,
-      details: Object.values(serviceDetails)
+      details: Object.values(serviceDetails),
+      systemPaidCount,
+      employeePaidDays,
+      leaveRemaining: leaveSummary.remaining,
     };
   }).filter(emp => {
     const hasActivity = emp.totalPayment !== 0 || emp.totalHours > 0 || emp.totalSessions > 0;
@@ -126,6 +173,9 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
             <TableHead className="text-right">סוג</TableHead>
             <TableHead className="text-right">שכר בסיס</TableHead>
             <TableHead className="text-right">סה"כ פעילות</TableHead>
+            <TableHead className="text-right">חגים (מערכת)</TableHead>
+            <TableHead className="text-right">חגים (מכסה)</TableHead>
+            <TableHead className="text-right">יתרת חופשה</TableHead>
             <TableHead className="text-right">התאמות</TableHead>
             <TableHead className="text-right">סה״כ לתשלום</TableHead>
             <TableHead className="text-right">סטטוס</TableHead>
@@ -153,6 +203,11 @@ export default function PayrollSummary({ sessions, employees, services, isLoadin
                 </TableCell>
                 <TableCell className="font-semibold">
                   {EMPLOYEE_TYPE_CONFIG[employee.employeeType]?.activity(employee) || '-'}
+                </TableCell>
+                <TableCell className="font-semibold text-slate-600 text-right">{employee.systemPaidCount}</TableCell>
+                <TableCell className="font-semibold text-slate-600 text-right">{employee.employeePaidDays.toFixed(1)}</TableCell>
+                <TableCell className={employee.leaveRemaining < 0 ? 'text-right text-red-600 font-semibold' : 'text-right font-semibold text-slate-700'}>
+                  {employee.leaveRemaining.toFixed(1)}
                 </TableCell>
                 <TableCell className={`font-semibold ${employee.totalAdjustments >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
                   {employee.totalAdjustments !== null && employee.totalAdjustments !== 0 ? `₪${employee.totalAdjustments.toLocaleString()}` : '-'}

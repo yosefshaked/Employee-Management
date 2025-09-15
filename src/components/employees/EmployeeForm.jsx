@@ -23,7 +23,8 @@ export default function EmployeeForm({ employee, onSubmit, onCancel }) {
     start_date: employee?.start_date || new Date().toISOString().split('T')[0],
     is_active: employee?.is_active !== undefined ? employee.is_active : true,
     notes: employee?.notes || '',
-    working_days: employee?.working_days || ['SUN','MON','TUE','WED','THU']
+    working_days: employee?.working_days || ['SUN','MON','TUE','WED','THU'],
+    annual_leave_days: employee?.annual_leave_days ?? 0
   });
 
   useEffect(() => {
@@ -38,7 +39,8 @@ export default function EmployeeForm({ employee, onSubmit, onCancel }) {
     start_date: employee?.start_date || new Date().toISOString().split('T')[0],
     is_active: employee?.is_active !== undefined ? employee.is_active : true,
     notes: employee?.notes || '',
-    working_days: employee?.working_days || ['SUN','MON','TUE','WED','THU']
+    working_days: employee?.working_days || ['SUN','MON','TUE','WED','THU'],
+    annual_leave_days: employee?.annual_leave_days ?? 0
   });
   
   // Also reset the instructor-specific rates
@@ -210,6 +212,17 @@ useEffect(() => {
             <div className="space-y-2">
               <Label htmlFor="start_date" className="text-sm font-semibold text-slate-700">תאריך התחלה</Label>
               <Input id="start_date" type="date" value={formData.start_date} onChange={(e) => handleChange('start_date', e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="annual_leave_days" className="text-sm font-semibold text-slate-700">מכסת חופשה שנתית (ימים)</Label>
+              <Input
+                id="annual_leave_days"
+                type="number"
+                min={0}
+                step="0.5"
+                value={formData.annual_leave_days}
+                onChange={(e) => handleChange('annual_leave_days', e.target.value)}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="is_active" className="text-sm font-semibold text-slate-700">סטטוס עובד</Label>
