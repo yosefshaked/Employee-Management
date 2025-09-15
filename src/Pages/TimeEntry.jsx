@@ -47,7 +47,8 @@ export default function TimeEntry() {
       setEmployees(employeesData.data || []);
       setWorkSessions(sessionsData.data || []);
       setRateHistories(ratesData.data || []);
-      setServices(servicesData.data || []);
+      const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
+      setServices(filteredServices);
     } catch (error) { 
       console.error("Error loading data:", error);
       toast.error("שגיאה בטעינת הנתונים"); 
