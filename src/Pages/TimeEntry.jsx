@@ -184,7 +184,7 @@ export default function TimeEntry() {
               const d = format(new Date(c.date + 'T00:00:00'), 'dd/MM/yyyy');
               return `${employee.name} ${d}${hrs} (ID ${c.id})`;
             }).join('\n');
-            toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 15000 });
+            toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 10000 });
             return null;
           }
         }
@@ -330,7 +330,7 @@ export default function TimeEntry() {
             const d = format(new Date(c.date + 'T00:00:00'), 'dd/MM/yyyy');
             return `${employee.name} ${d}${hrs} (ID ${c.id})`;
           }).join('\n');
-          toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 15000 });
+          toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 10000 });
           return;
         }
         const { rate: rateUsed, reason } = getRateForDate(employee.id, day, GENERIC_RATE_SERVICE_ID);

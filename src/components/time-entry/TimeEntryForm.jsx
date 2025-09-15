@@ -111,7 +111,7 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
           const hrs = c.hours ? `, ${c.hours} שעות` : '';
           return `${employee.name} ${dateStr}${hrs} (ID ${c.id})`;
         }).join('\n');
-        toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`);
+        toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 10000 });
         return;
       }
       onSubmit({ rows: [], dayType, paidLeaveId, paidLeaveNotes });
