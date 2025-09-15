@@ -34,7 +34,7 @@ export default function Employees() {
         supabase.from('Employees').select('*').order('name'),
         supabase.from('RateHistory').select('*'),
         supabase.from('Services').select('*'),
-        supabase.from('Settings').select('value').eq('key', 'leave_policy').single(),
+        supabase.from('Settings').select('settings_value').eq('key', 'leave_policy').single(),
         supabase.from('LeaveBalances').select('*').order('date', { ascending: true })
       ]);
 
@@ -53,7 +53,7 @@ export default function Employees() {
         if (settingsData.error.code !== 'PGRST116') throw settingsData.error;
         setLeavePolicy(DEFAULT_LEAVE_POLICY);
       } else {
-        setLeavePolicy(normalizeLeavePolicy(settingsData.data?.value));
+        setLeavePolicy(normalizeLeavePolicy(settingsData.data?.settings_value));
       }
     } catch (error) {
       console.error('Error fetching data:', error);

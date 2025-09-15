@@ -134,9 +134,16 @@ export default function LeaveOverview({
         toast.error('חריגה ממכסה ימי החופשה המותרים');
         return;
       }
-      if (leavePolicy.allow_negative_balance && projected < -Number(leavePolicy.negative_floor_days || 0)) {
-        toast.error('חריגה ממכסה ימי החופשה המותרים');
-        return;
+      if (leavePolicy.allow_negative_balance) {
+        const rawFloor = Number(leavePolicy.negative_floor_days ?? 0);
+        let floorLimit = 0;
+        if (!Number.isNaN(rawFloor)) {
+          floorLimit = rawFloor <= 0 ? rawFloor : -Math.abs(rawFloor);
+        }
+        if (projected < floorLimit) {
+          toast.error('חריגה ממכסה ימי החופשה המותרים');
+          return;
+        }
       }
     }
     setIsSubmitting(true);

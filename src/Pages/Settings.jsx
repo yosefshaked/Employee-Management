@@ -105,14 +105,14 @@ export default function Settings() {
       try {
         const { data, error } = await supabase
           .from('Settings')
-          .select('value')
+          .select('settings_value')
           .eq('key', 'leave_policy')
           .single();
         if (error) {
           if (error.code !== 'PGRST116') throw error;
           setPolicy(DEFAULT_LEAVE_POLICY);
         } else {
-          setPolicy(normalizeLeavePolicy(data?.value));
+          setPolicy(normalizeLeavePolicy(data?.settings_value));
         }
       } catch (error) {
         console.error('Error loading leave policy', error);
@@ -129,7 +129,15 @@ export default function Settings() {
 
   const handleNumberChange = (key) => (event) => {
     const value = event.target.value;
-    setPolicy(prev => ({ ...prev, [key]: value === '' ? 0 : Number(value) }));
+    if (value === '') {
+      setPolicy(prev => ({ ...prev, [key]: 0 }));
+      return;
+    }
+    const numeric = Number(value);
+    setPolicy(prev => ({
+      ...prev,
+      [key]: Number.isNaN(numeric) ? prev[key] : numeric,
+    }));
   };
 
   const handleRuleChange = (id, updates) => {
@@ -161,7 +169,14 @@ export default function Settings() {
       const normalized = normalizeLeavePolicy(policy);
       const { error } = await supabase
         .from('Settings')
-        .upsert({ key: 'leave_policy', value: normalized }, { onConflict: 'key' });
+        .upsert({
+          key: 'leave_policy',
+          settings_value: normalized,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'key',
+          returning: 'minimal',
+        });
       if (error) throw error;
       setPolicy(normalized);
       toast.success('הגדרות החופשה נשמרו בהצלחה');
@@ -216,7 +231,6 @@ export default function Settings() {
                     <Label className="text-sm font-semibold text-slate-700">מינוס מינימלי (ימים)</Label>
                     <Input
                       type="number"
-                      min={0}
                       step="0.5"
                       value={policy.negative_floor_days}
                       onChange={handleNumberChange('negative_floor_days')}

@@ -135,7 +135,7 @@ export default function Reports() {
         supabase.from('WorkSessions').select('*'),
         supabase.from('Services').select('*'),
         supabase.from('RateHistory').select('*'),
-        supabase.from('Settings').select('value').eq('key', 'leave_policy').single(),
+        supabase.from('Settings').select('settings_value').eq('key', 'leave_policy').single(),
         supabase.from('LeaveBalances').select('*')
       ]);
 
@@ -155,7 +155,7 @@ export default function Reports() {
         if (settingsData.error.code !== 'PGRST116') throw settingsData.error;
         setLeavePolicy(DEFAULT_LEAVE_POLICY);
       } else {
-        setLeavePolicy(normalizeLeavePolicy(settingsData.data?.value));
+        setLeavePolicy(normalizeLeavePolicy(settingsData.data?.settings_value));
       }
     } catch (error) {
       console.error("Error loading data:", error);
