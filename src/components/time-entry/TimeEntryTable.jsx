@@ -11,6 +11,8 @@ import ImportModal from '@/components/import/ImportModal.jsx';
 import EmployeePicker from '../employees/EmployeePicker.jsx';
 import MultiDateEntryModal from './MultiDateEntryModal.jsx';
 import { aggregateGlobalDays, aggregateGlobalDayForDate } from '@/lib/payroll.js';
+import { Badge } from '@/components/ui/badge';
+import { HOLIDAY_TYPE_LABELS } from '@/lib/leave.js';
 function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported, onDeleted }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
@@ -195,9 +197,13 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                 let extraInfo = '';
                                 const rateInfo = getRateForDate(emp.id, day);
                                 const showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
+                                let leaveKind = null;
+                                let leaveLabel = null;
 
                                 if (paidLeave) {
-                                  summaryText = 'חופשה בתשלום';
+                                  leaveKind = paidLeave.leave_type || paidLeave.leave_kind || paidLeave.metadata?.leave_type || paidLeave.metadata?.leave_kind || null;
+                                  leaveLabel = leaveKind ? (HOLIDAY_TYPE_LABELS[leaveKind] || leaveKind) : null;
+                                  summaryText = leaveLabel || 'חופשה';
                                 } else if (regularSessions.length > 0) {
                                   if (emp.employee_type === 'instructor') {
                                     summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
@@ -229,6 +235,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                               payload.dayType = 'paid_leave';
                                               payload.paidLeaveId = paidLeave.id;
                                               payload.paidLeaveNotes = paidLeave.notes || '';
+                                              payload.leaveType = leaveKind || null;
                                             }
                                             setEditingCell(payload);
                                           }
@@ -237,6 +244,11 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                         <div className="font-semibold text-sm">{summaryText}</div>
                                         {extraInfo && (
                                           <div className="text-xs text-slate-500">{extraInfo}</div>
+                                        )}
+                                        {paidLeave && (
+                                          <div className="mt-1 flex justify-center">
+                                            <Badge variant="secondary">{leaveLabel || 'חופשה'}</Badge>
+                                          </div>
                                         )}
 
                 {/* --- WARNINGS --- */}
@@ -310,8 +322,10 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
               initialDayType={editingCell.dayType || 'regular'}
               paidLeaveId={editingCell.paidLeaveId}
               paidLeaveNotes={editingCell.paidLeaveNotes}
+              initialLeaveType={editingCell.leaveType}
               selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
               getRateForDate={getRateForDate}
+              allowDayTypeSelection
               onSubmit={async (result) => {
                 if (!result) {
                   setEditingCell(null);
@@ -325,6 +339,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                     updatedRows: result.rows,
                     paidLeaveId: result.paidLeaveId,
                     paidLeaveNotes: result.paidLeaveNotes,
+                    leaveType: result.leaveType,
                   });
                   setEditingCell(null);
                 } catch {

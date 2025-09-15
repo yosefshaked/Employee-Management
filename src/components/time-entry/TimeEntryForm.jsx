@@ -12,8 +12,23 @@ import { format } from 'date-fns';
 import he from '@/i18n/he.json';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { HOLIDAY_TYPE_LABELS } from '@/lib/leave.js';
 
-export default function TimeEntryForm({ employee, services = [], onSubmit, getRateForDate, initialRows = null, selectedDate, onDeleted, initialDayType = 'regular', paidLeaveId = null, paidLeaveNotes: initialPaidLeaveNotes = '' }) {
+export default function TimeEntryForm({
+  employee,
+  services = [],
+  onSubmit,
+  getRateForDate,
+  initialRows = null,
+  selectedDate,
+  onDeleted,
+  initialDayType = 'regular',
+  paidLeaveId = null,
+  paidLeaveNotes: initialPaidLeaveNotes = '',
+  allowDayTypeSelection = false,
+  initialLeaveType = null,
+}) {
   const isGlobal = employee.employee_type === 'global';
   const isHourly = employee.employee_type === 'hourly';
 
@@ -26,8 +41,11 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
   });
   const [dayType, setDayType] = useState(initialDayType);
   const [paidLeaveNotes, setPaidLeaveNotes] = useState(initialPaidLeaveNotes);
+  const [leaveType, setLeaveType] = useState(initialLeaveType || '');
   const [errors, setErrors] = useState({});
   const [pendingDelete, setPendingDelete] = useState(null);
+
+  const leaveTypeOptions = useMemo(() => Object.entries(HOLIDAY_TYPE_LABELS || {}), []);
 
   const dailyRate = useMemo(() => {
     if (!isGlobal) return 0;
@@ -92,6 +110,13 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
     return Object.keys(err).length === 0;
   };
 
+  const handleDayTypeChange = (value) => {
+    setDayType(value);
+    if (value !== 'paid_leave') {
+      setLeaveType('');
+    }
+  };
+
   const handleSave = (e) => {
     e.preventDefault();
     if (dayType === 'paid_leave') {
@@ -114,11 +139,11 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
         toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 10000 });
         return;
       }
-      onSubmit({ rows: [], dayType, paidLeaveId, paidLeaveNotes });
+      onSubmit({ rows: [], dayType, paidLeaveId, paidLeaveNotes, leaveType });
       return;
     }
     if (!validate()) return;
-    onSubmit({ rows: segments, dayType, paidLeaveId });
+    onSubmit({ rows: segments, dayType, paidLeaveId, leaveType: null });
   };
 
   const summary = useMemo(() => {
@@ -136,22 +161,72 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
     return `שכר יומי: ₪${total.toFixed(2)}`;
   }, [segments, isGlobal, isHourly, dailyRate, employee, selectedDate, getRateForDate]);
 
+  const isLeaveDay = dayType === 'paid_leave';
+
   const renderSegment = (seg, idx) => {
     if (isGlobal) {
-      return <GlobalSegment key={seg.id} segment={seg} onChange={changeSeg} onDuplicate={duplicateSeg} onDelete={deleteSeg} isFirst={idx === 0} dailyRate={dailyRate} error={errors[seg.id]} />;
+      return (
+        <GlobalSegment
+          key={seg.id}
+          segment={seg}
+          onChange={changeSeg}
+          onDuplicate={duplicateSeg}
+          onDelete={deleteSeg}
+          isFirst={idx === 0}
+          dailyRate={dailyRate}
+          error={errors[seg.id]}
+          disabled={isLeaveDay}
+        />
+      );
     }
     if (isHourly) {
       const { rate } = getRateForDate(employee.id, selectedDate, null);
-      return <HourlySegment key={seg.id} segment={seg} onChange={changeSeg} onDuplicate={duplicateSeg} onDelete={deleteSeg} rate={rate} error={errors[seg.id]} />;
+      return (
+        <HourlySegment
+          key={seg.id}
+          segment={seg}
+          onChange={changeSeg}
+          onDuplicate={duplicateSeg}
+          onDelete={deleteSeg}
+          rate={rate}
+          error={errors[seg.id]}
+          disabled={isLeaveDay}
+        />
+      );
     }
     const { rate } = getRateForDate(employee.id, selectedDate, seg.service_id || null);
-    return <InstructorSegment key={seg.id} segment={seg} services={services} onChange={changeSeg} onDuplicate={duplicateSeg} onDelete={deleteSeg} rate={rate} errors={{ service: !seg.service_id && errors[seg.id], sessions_count: errors[seg.id] && seg.service_id ? errors[seg.id] : null, students_count: errors[seg.id] && seg.service_id ? errors[seg.id] : null }} />;
+    return (
+      <InstructorSegment
+        key={seg.id}
+        segment={seg}
+        services={services}
+        onChange={changeSeg}
+        onDuplicate={duplicateSeg}
+        onDelete={deleteSeg}
+        rate={rate}
+        errors={{ service: !seg.service_id && errors[seg.id], sessions_count: errors[seg.id] && seg.service_id ? errors[seg.id] : null, students_count: errors[seg.id] && seg.service_id ? errors[seg.id] : null }}
+        disabled={isLeaveDay}
+      />
+    );
   };
 
   const addLabel = isHourly || isGlobal ? 'הוסף מקטע שעות' : 'הוסף רישום';
 
   const renderPaidLeaveSegment = () => (
-    <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5">
+    <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5 space-y-4">
+      <div className="space-y-1">
+        <Label className="text-sm font-medium text-slate-700">סוג חופשה</Label>
+        <Select value={leaveType || ''} onValueChange={setLeaveType}>
+          <SelectTrigger className="bg-white h-10 text-base leading-6">
+            <SelectValue placeholder="בחר סוג חופשה" />
+          </SelectTrigger>
+          <SelectContent>
+            {leaveTypeOptions.map(([value, label]) => (
+              <SelectItem key={value} value={value}>{label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
       <div className="space-y-1">
         <Label className="text-sm font-medium text-slate-700">הערות</Label>
         <Textarea
@@ -171,9 +246,9 @@ export default function TimeEntryForm({ employee, services = [], onSubmit, getRa
       <SingleDayEntryShell
         employee={employee}
         date={selectedDate}
-        showDayType={isGlobal}
+        showDayType={allowDayTypeSelection ? true : isGlobal}
         dayType={dayType}
-        onDayTypeChange={setDayType}
+        onDayTypeChange={handleDayTypeChange}
         segments={dayType === 'paid_leave' ? [{ id: 'paid_leave_notes' }] : segments.filter(s => s._status !== 'deleted')}
         renderSegment={dayType === 'paid_leave' ? renderPaidLeaveSegment : renderSegment}
         onAddSegment={dayType === 'paid_leave' ? null : addSeg}

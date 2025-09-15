@@ -225,7 +225,8 @@ export default function TimeEntry() {
     }
   };
 
-  const handleTableSubmit = async ({ employee, day, dayType, updatedRows, paidLeaveId, paidLeaveNotes }) => {
+  const handleTableSubmit = async ({ employee, day, dayType, updatedRows, paidLeaveId, paidLeaveNotes, leaveType: _leaveType }) => {
+    void _leaveType;
     setIsLoading(true);
     try {
       const toInsert = [];
