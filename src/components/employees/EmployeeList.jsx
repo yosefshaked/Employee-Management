@@ -4,8 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Edit, UserCheck, UserX, Phone, Mail, Calendar } from "lucide-react";
-import { format, parseISO } from "date-fns";
-import { he } from "date-fns/locale";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"; // We might not need tooltip, but it's good to have it just in case. Let's remove it later if unused.
@@ -84,7 +82,9 @@ export default function EmployeeList({ employees, rateHistories, services, onEdi
                     latestRates[rate.service_id] = rate.rate;
                   }
                 });
-                instructorRatesDetails = Object.keys(latestRates).map(serviceId => {
+                instructorRatesDetails = Object.keys(latestRates)
+                  .filter(serviceId => serviceId !== GENERIC_RATE_SERVICE_ID)
+                  .map(serviceId => {
                   const service = services.find(s => s.id === serviceId);
                   return { name: service?.name || 'שירות לא ידוע', rate: latestRates[serviceId] };
                 });
