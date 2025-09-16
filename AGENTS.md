@@ -8,6 +8,7 @@
 - Lint any changed JavaScript or JSX files with `npx eslint <files>`.
 - Run `npm run build` to ensure the project builds.
 - No test script is configured; note this in your testing summary.
+- Run `npm run check:schema` before adding new persistence logic; if it reports missing columns, add a checklist note to the PR instead of coding around the gap.
 - Add any important information learned into this AGENTS.md file.
 - Use ProjectDoc/Eng.md to understand the overall project.
 
