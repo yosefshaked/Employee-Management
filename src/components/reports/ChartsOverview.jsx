@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, 
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { he } from "date-fns/locale";
+import { isLeaveEntryType } from '@/lib/leave.js';
 
 const COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#06B6D4'];
 
@@ -76,7 +77,8 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     );
     const agg = aggregateGlobalDays(employeeSessions, { [employee.id]: employee });
     const totals = employeeSessions.reduce((acc, session) => {
-      const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || session.entry_type === 'paid_leave');
+      const isLeave = isLeaveEntryType(session.entry_type);
+      const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || isLeave);
       if (!isGlobalDay) acc.payment += session.total_payment || 0;
       if (session.entry_type === 'session') {
         acc.totalSessions += session.sessions_count || 0;
@@ -117,7 +119,8 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       const employee = employeesById[session.employee_id];
       if (!employee || !employee.is_active) return;
       if (employee.start_date && session.date < employee.start_date) return;
-      const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || session.entry_type === 'paid_leave');
+      const isLeave = isLeaveEntryType(session.entry_type);
+      const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || isLeave);
       if (!isGlobalDay) payment += session.total_payment || 0;
       if (session.entry_type === 'hours') {
         hours += session.hours || 0;

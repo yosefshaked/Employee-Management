@@ -1,4 +1,5 @@
 import { startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
+import { isLeaveEntryType } from './leave.js';
 
 const DAY_NAMES = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
 
@@ -24,7 +25,8 @@ export function aggregateGlobalDays(rows, employeesById) {
   rows.forEach((row, index) => {
     const emp = employeesById[row.employee_id];
     if (!emp || emp.employee_type !== 'global') return;
-    if (row.entry_type !== 'hours' && row.entry_type !== 'paid_leave') return;
+    if (row.entry_type !== 'hours' && !isLeaveEntryType(row.entry_type)) return;
+    if (isLeaveEntryType(row.entry_type) && row.payable === false) return;
     const key = `${row.employee_id}|${row.date}`;
     const existing = map.get(key);
     if (!existing) {
@@ -35,7 +37,8 @@ export function aggregateGlobalDays(rows, employeesById) {
         dayType: row.entry_type,
         indices: [index],
         rateUsed: row.rate_used,
-        dailyAmount: amount
+        dailyAmount: amount,
+        payable: row.payable !== false,
       });
     } else {
       existing.indices.push(index);
@@ -53,13 +56,14 @@ export function aggregateGlobalDayForDate(rows, employeesById) {
   rows.forEach(row => {
     const emp = employeesById[row.employee_id];
     if (!emp || emp.employee_type !== 'global') return;
-    if (row.entry_type !== 'hours' && row.entry_type !== 'paid_leave') return;
+    if (row.entry_type !== 'hours' && !isLeaveEntryType(row.entry_type)) return;
+    if (isLeaveEntryType(row.entry_type) && row.payable === false) return;
     const key = `${row.employee_id}|${row.date}`;
     const amount = row.total_payment != null
       ? row.total_payment
       : (row.rate_used != null ? calculateGlobalDailyRate(emp, row.date, row.rate_used) : 0);
     if (!byKey.has(key)) {
-      byKey.set(key, { firstRowId: row.id, dailyAmount: amount });
+      byKey.set(key, { firstRowId: row.id, dailyAmount: amount, payable: row.payable !== false, dayType: row.entry_type });
       total += amount;
     }
   });
@@ -114,7 +118,7 @@ export function computePeriodTotals({
     const [empId] = key.split('|');
     result.totalPay += val.dailyAmount;
     result.diagnostics.uniquePaidDays++;
-    if (val.dayType === 'paid_leave') result.diagnostics.paidLeaveDays++;
+    if (isLeaveEntryType(val.dayType) && val.payable) result.diagnostics.paidLeaveDays++;
     if (!perEmp[empId]) perEmp[empId] = { employee_id: empId, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
     perEmp[empId].pay += val.dailyAmount;
     perEmp[empId].daysPaid++;
@@ -192,8 +196,8 @@ export function countGlobalEffectiveDays(entries = [], employees = [], filters =
     const emp = byId[row.employee_id];
     if (!emp || emp.employee_type !== 'global') return;
     if (!entryMatchesFilters(row, emp, filters)) return;
-    if (row.entry_type !== 'hours' && row.entry_type !== 'paid_leave') return;
-    if (excludePaidLeave && row.entry_type === 'paid_leave') return;
+    if (row.entry_type !== 'hours' && !isLeaveEntryType(row.entry_type)) return;
+    if (excludePaidLeave && isLeaveEntryType(row.entry_type)) return;
     days.add(`${row.employee_id}|${row.date}`);
   });
   return days.size;

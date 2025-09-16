@@ -47,7 +47,7 @@ describe('per-employee day type mapping', () => {
     const map = { g1: 'regular', g2: 'paid_leave' };
     await saveRows(rows, map);
     assert.equal(inserted[0].entry_type, 'hours');
-    assert.equal(inserted[1].entry_type, 'paid_leave');
+    assert.equal(inserted[1].entry_type, 'leave_system_paid');
   });
 });
 
@@ -132,7 +132,7 @@ describe('paid leave restrictions', () => {
     const getRateForDate = () => ({ rate: 3000 });
     const { saveRows } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
     await saveRows(rows, { g1: 'paid_leave' });
-    assert.equal(inserted[0].entry_type, 'paid_leave');
+    assert.equal(inserted[0].entry_type, 'leave_system_paid');
     const expected = calculateGlobalDailyRate(employees[0], '2024-02-01', 3000);
     assert.equal(inserted[0].total_payment, expected);
   });

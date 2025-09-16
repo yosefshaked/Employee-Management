@@ -1,4 +1,5 @@
 import { calculateGlobalDailyRate } from '../../lib/payroll.js';
+import { getEntryTypeForLeaveKind, isLeaveEntryType } from '../../lib/leave.js';
 
 export function useTimeEntry({ employees, services, getRateForDate, supabaseClient }) {
   const saveRows = async (rows, dayTypeMap = {}) => {
@@ -15,10 +16,10 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
       const originalType = row.entry_type;
       let entryType;
       if (employee.employee_type === 'global') {
-        entryType = empDayType === 'paid_leave' ? 'paid_leave' : 'hours';
+        entryType = empDayType === 'paid_leave' ? getEntryTypeForLeaveKind('system_paid') : 'hours';
       } else {
         entryType = employee.employee_type === 'instructor' ? 'session' : 'hours';
-        if (originalType === 'paid_leave') {
+        if (originalType && isLeaveEntryType(originalType)) {
           row.notes = row.notes ? `${row.notes} (סומן בעבר כחופשה)` : 'סומן בעבר כחופשה';
         }
       }
@@ -37,7 +38,7 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
         const dailyRate = calculateGlobalDailyRate(employee, row.date, rateUsed);
         totalPayment = dailyRate;
       }
-      inserts.push({
+      const payload = {
         employee_id: employee.id,
         date: row.date,
         entry_type: entryType,
@@ -48,7 +49,12 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
         notes: row.notes ? row.notes : null,
         rate_used: rateUsed,
         total_payment: totalPayment,
-      });
+      };
+      if (entryType && entryType.startsWith('leave_')) {
+        payload.payable = true;
+        payload.hours = 0;
+      }
+      inserts.push(payload);
     }
     if (!inserts.length) throw new Error('no valid rows');
     const { error } = await client.from('WorkSessions').insert(inserts);

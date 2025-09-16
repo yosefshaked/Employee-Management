@@ -13,6 +13,7 @@ import { he } from 'date-fns/locale';
 import { InfoTooltip } from '@/components/InfoTooltip.jsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
+import { isLeaveEntryType } from '@/lib/leave.js';
 import { useEffect, useState } from 'react';
 import ConfirmPermanentDeleteModal from './ConfirmPermanentDeleteModal.jsx';
 
@@ -156,7 +157,7 @@ export default function EntryRow({
         </div>
       )}
 
-      {employee.employee_type !== 'global' && row.entry_type === 'paid_leave' && (
+      {employee.employee_type !== 'global' && isLeaveEntryType(row.entry_type) && (
         <div className="mb-3 p-2 rounded-md bg-blue-50 text-blue-700 text-sm">
           רישום חופשה היסטורי עבור סוג עובד שאינו נתמך; לא ניתן ליצור רישום חופשה חדש עבור סוג זה.
         </div>

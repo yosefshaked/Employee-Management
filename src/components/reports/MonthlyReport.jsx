@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, TrendingUp } from "lucide-react";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { he } from "date-fns/locale";
+import { isLeaveEntryType } from '@/lib/leave.js';
 
 export default function MonthlyReport({ sessions, employees, services, workSessions = [], isLoading }) {
   if (isLoading) {
@@ -47,7 +48,8 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
     monthSessions.forEach(session => {
       const emp = employeesById[session.employee_id];
       if (!emp || (emp.start_date && session.date < emp.start_date)) return;
-      const isGlobalDay = emp.employee_type === 'global' && (session.entry_type === 'hours' || session.entry_type === 'paid_leave');
+      const isLeave = isLeaveEntryType(session.entry_type);
+      const isGlobalDay = emp.employee_type === 'global' && (session.entry_type === 'hours' || isLeave);
       if (!isGlobalDay) totalPayment += session.total_payment || 0;
       if (session.entry_type === 'session') {
         totalSessions += session.sessions_count || 0;

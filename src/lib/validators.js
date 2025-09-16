@@ -1,4 +1,5 @@
 import { calculateGlobalDailyRate } from './payroll.js';
+import { isLeaveEntryType } from './leave.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -33,7 +34,7 @@ export function validateRow(row, employee, services, getRateForDate) {
         errors.push(err.message);
       }
     }
-  } else if (row.entry_type === 'paid_leave') {
+  } else if (isLeaveEntryType(row.entry_type)) {
     if (empType !== 'global') errors.push('חופשה בתשלום רק לעובד גלובלי');
     if (row.service_id || row.hours || row.sessions_count || row.students_count || row.adjustment_amount) errors.push('שדות לא רלוונטיים');
     try {

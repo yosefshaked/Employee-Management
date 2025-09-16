@@ -12,6 +12,7 @@ import { ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import he from '@/i18n/he.json';
 import { calculateGlobalDailyRate, aggregateGlobalDays } from '@/lib/payroll.js';
+import { isLeaveEntryType } from '@/lib/leave.js';
 
 function validateRow(row, employee, services, getRateForDate, dayTypeMap) {
   const errors = {};
@@ -39,7 +40,7 @@ function validateRow(row, employee, services, getRateForDate, dayTypeMap) {
         errors.dayType = 'אין ימי עבודה בחודש';
       }
     }
-  } else if (row.entry_type === 'paid_leave') {
+  } else if (isLeaveEntryType(row.entry_type)) {
     errors.entry_type = 'סוג יום לא נתמך';
   }
   return { valid: Object.keys(errors).length === 0, errors };

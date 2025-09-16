@@ -21,7 +21,7 @@ const services = [
 const entries = [
   { employee_id: 'g1', entry_type: 'hours', hours: 2, date: '2024-02-01' },
   { employee_id: 'g1', entry_type: 'hours', hours: 3, date: '2024-02-01' },
-  { employee_id: 'g1', entry_type: 'paid_leave', hours: 4, date: '2024-02-02' },
+  { employee_id: 'g1', entry_type: 'leave_system_paid', hours: 4, date: '2024-02-02' },
   { employee_id: 'g2', entry_type: 'hours', hours: 4, date: '2024-02-01' },
   { employee_id: 'g2', entry_type: 'hours', hours: 1, date: '2024-03-01' },
   { employee_id: 'h1', entry_type: 'hours', hours: 8, date: '2024-02-01' },

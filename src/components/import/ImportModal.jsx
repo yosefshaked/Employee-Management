@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { parseText, parseFile, DELIMITERS } from '@/lib/parsers.js';
 import { mapRows } from '@/lib/csvMapping.js';
 import { validateRows } from '@/lib/validators.js';
+import { isLeaveEntryType } from '@/lib/leave.js';
 import { downloadCsvTemplate, downloadExcelTemplate } from '@/lib/excelTemplate.js';
 import { supabase } from '@/supabaseClient';
 
@@ -62,7 +63,7 @@ export default function ImportModal({ open, onOpenChange, employees, services, g
       hours: r.entry_type === 'hours' ? (employee.employee_type === 'hourly' ? r.hours : (employee.employee_type === 'global' ? (r.hours || null) : null)) : null,
       sessions_count: r.entry_type === 'session' ? r.sessions_count : null,
       students_count: r.entry_type === 'session' ? r.students_count : null,
-      notes: r.entry_type === 'paid_leave' ? 'paid_leave' : r.notes || null,
+      notes: isLeaveEntryType(r.entry_type) ? 'leave' : r.notes || null,
       rate_used: r.rate_used,
       total_payment: r.total_payment,
     }));

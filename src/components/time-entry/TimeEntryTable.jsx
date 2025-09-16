@@ -12,8 +12,8 @@ import EmployeePicker from '../employees/EmployeePicker.jsx';
 import MultiDateEntryModal from './MultiDateEntryModal.jsx';
 import { aggregateGlobalDays, aggregateGlobalDayForDate } from '@/lib/payroll.js';
 import { Badge } from '@/components/ui/badge';
-import { HOLIDAY_TYPE_LABELS } from '@/lib/leave.js';
-function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported, onDeleted }) {
+import { HOLIDAY_TYPE_LABELS, getLeaveKindFromEntryType, isLeaveEntryType } from '@/lib/leave.js';
+function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported, onDeleted, leavePolicy }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
   const [multiMode, setMultiMode] = useState(false);
@@ -65,7 +65,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
         empTotals.payment += s.total_payment || 0;
         return;
       }
-      if (emp.employee_type === 'global' && (s.entry_type === 'hours' || s.entry_type === 'paid_leave')) {
+      if (emp.employee_type === 'global' && (s.entry_type === 'hours' || isLeaveEntryType(s.entry_type))) {
         // payment handled via aggregation
       } else {
         empTotals.payment += s.total_payment || 0;
@@ -186,9 +186,9 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                 const adjustments = dailySessions.filter(s =>
                                   s.entry_type === 'adjustment'
                                 );
-                                const paidLeave = dailySessions.find(s => s.entry_type === 'paid_leave');
+                                const paidLeave = dailySessions.find(s => isLeaveEntryType(s.entry_type));
                                 const regularSessions = dailySessions.filter(s =>
-                                  s.entry_type !== 'adjustment' && s.entry_type !== 'paid_leave'
+                                  s.entry_type !== 'adjustment' && !isLeaveEntryType(s.entry_type)
                                 );
                                 const adjustmentTotal = adjustments.reduce((sum, s) => sum + (s.total_payment || 0), 0);
 
@@ -201,7 +201,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                 let leaveLabel = null;
 
                                 if (paidLeave) {
-                                  leaveKind = paidLeave.leave_type || paidLeave.leave_kind || paidLeave.metadata?.leave_type || paidLeave.metadata?.leave_kind || null;
+                                  leaveKind = getLeaveKindFromEntryType(paidLeave.entry_type) || paidLeave.leave_type || paidLeave.leave_kind || paidLeave.metadata?.leave_type || paidLeave.metadata?.leave_kind || null;
                                   leaveLabel = leaveKind ? (HOLIDAY_TYPE_LABELS[leaveKind] || leaveKind) : null;
                                   summaryText = leaveLabel || 'חופשה';
                                 } else if (regularSessions.length > 0) {
@@ -326,6 +326,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
               selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
               getRateForDate={getRateForDate}
               allowDayTypeSelection
+              allowHalfDay={leavePolicy?.allow_half_day}
               onSubmit={async (result) => {
                 if (!result) {
                   setEditingCell(null);

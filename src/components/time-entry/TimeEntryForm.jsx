@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import SingleDayEntryShell from './shared/SingleDayEntryShell.jsx';
 import GlobalSegment from './segments/GlobalSegment.jsx';
 import HourlySegment from './segments/HourlySegment.jsx';
@@ -28,6 +28,7 @@ export default function TimeEntryForm({
   paidLeaveNotes: initialPaidLeaveNotes = '',
   allowDayTypeSelection = false,
   initialLeaveType = null,
+  allowHalfDay = false,
 }) {
   const isGlobal = employee.employee_type === 'global';
   const isHourly = employee.employee_type === 'hourly';
@@ -45,7 +46,21 @@ export default function TimeEntryForm({
   const [errors, setErrors] = useState({});
   const [pendingDelete, setPendingDelete] = useState(null);
 
-  const leaveTypeOptions = useMemo(() => Object.entries(HOLIDAY_TYPE_LABELS || {}), []);
+  const leaveTypeOptions = useMemo(() => {
+    const base = allowHalfDay
+      ? ['system_paid', 'employee_paid', 'unpaid', 'half_day']
+      : ['system_paid', 'employee_paid', 'unpaid'];
+    return base
+      .map(value => [value, HOLIDAY_TYPE_LABELS[value]])
+      .filter(([, label]) => Boolean(label));
+  }, [allowHalfDay]);
+
+  useEffect(() => {
+    if (!allowHalfDay && leaveType === 'half_day') {
+      const [firstOption] = leaveTypeOptions;
+      setLeaveType(firstOption ? firstOption[0] : '');
+    }
+  }, [allowHalfDay, leaveType, leaveTypeOptions]);
 
   const dailyRate = useMemo(() => {
     if (!isGlobal) return 0;
@@ -114,12 +129,19 @@ export default function TimeEntryForm({
     setDayType(value);
     if (value !== 'paid_leave') {
       setLeaveType('');
+    } else if (!leaveType) {
+      const [firstOption] = leaveTypeOptions;
+      if (firstOption) setLeaveType(firstOption[0]);
     }
   };
 
   const handleSave = (e) => {
     e.preventDefault();
     if (dayType === 'paid_leave') {
+      if (!leaveType) {
+        toast.error('יש לבחור סוג חופשה.', { duration: 15000 });
+        return;
+      }
       const conflicts = segments.filter(s => {
         if (s._status === 'deleted') return false;
         if (s._status === 'existing') return true;

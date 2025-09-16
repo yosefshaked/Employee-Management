@@ -13,14 +13,47 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { hasDuplicateSession } from '@/lib/workSessionsUtils.js';
+import {
+  DEFAULT_LEAVE_POLICY,
+  normalizeLeavePolicy,
+  getEntryTypeForLeaveKind,
+  isLeaveEntryType,
+  getLeaveLedgerDelta,
+  isPayableLeaveKind,
+} from '@/lib/leave.js';
+import { selectLeaveRemaining } from '@/selectors.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+const TIME_ENTRY_LEAVE_PREFIX = 'time_entry_leave';
+
+const getLedgerTimestamp = (entry = {}) => {
+  const raw = entry.date || entry.entry_date || entry.effective_date || entry.change_date || entry.created_at;
+  if (!raw) return 0;
+  const parsed = new Date(raw);
+  const value = parsed.getTime();
+  return Number.isNaN(value) ? 0 : value;
+};
+
+const sortLeaveLedger = (entries = []) => {
+  return [...entries].sort((a, b) => getLedgerTimestamp(a) - getLedgerTimestamp(b));
+};
+
+const resolveLedgerDelta = (entry = {}) => {
+  if (typeof entry.days_delta === 'number') return entry.days_delta;
+  if (typeof entry.delta_days === 'number') return entry.delta_days;
+  if (typeof entry.delta === 'number') return entry.delta;
+  if (typeof entry.amount === 'number') return entry.amount;
+  if (typeof entry.days === 'number') return entry.days;
+  return 0;
+};
 
 export default function TimeEntry() {
   const [employees, setEmployees] = useState([]);
   const [services, setServices] = useState([]);
   const [rateHistories, setRateHistories] = useState([]);
   const [workSessions, setWorkSessions] = useState([]);
+  const [leaveBalances, setLeaveBalances] = useState([]);
+  const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
   const [viewMode, setViewMode] = useState('form');
@@ -32,23 +65,34 @@ export default function TimeEntry() {
   const loadInitialData = async () => {
     setIsLoading(true);
     try {
-      const [employeesData, sessionsData, ratesData, servicesData] = await Promise.all([
+      const [employeesData, sessionsData, ratesData, servicesData, settingsData, leaveLedgerData] = await Promise.all([
         supabase.from('Employees').select('*').eq('is_active', true).order('name'),
         supabase.from('WorkSessions').select('*, service:service_id(name)').order('created_at', { ascending: false }),
         supabase.from('RateHistory').select('*'),
-        supabase.from('Services').select('*')
+        supabase.from('Services').select('*'),
+        supabase.from('Settings').select('settings_value').eq('key', 'leave_policy').single(),
+        supabase.from('LeaveBalances').select('*')
       ]);
 
       if (employeesData.error) throw employeesData.error;
       if (sessionsData.error) throw sessionsData.error;
       if (ratesData.error) throw ratesData.error;
       if (servicesData.error) throw servicesData.error;
-      
+      if (leaveLedgerData.error) throw leaveLedgerData.error;
+
       setEmployees(employeesData.data || []);
       setWorkSessions(sessionsData.data || []);
       setRateHistories(ratesData.data || []);
       const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
       setServices(filteredServices);
+      setLeaveBalances(sortLeaveLedger(leaveLedgerData.data || []));
+
+      if (settingsData.error) {
+        if (settingsData.error.code !== 'PGRST116') throw settingsData.error;
+        setLeavePolicy(DEFAULT_LEAVE_POLICY);
+      } else {
+        setLeavePolicy(normalizeLeavePolicy(settingsData.data?.settings_value));
+      }
     } catch (error) { 
       console.error("Error loading data:", error);
       toast.error("שגיאה בטעינת הנתונים"); 
@@ -93,7 +137,7 @@ export default function TimeEntry() {
     return workSessions.filter(ws =>
       ws.employee_id === employeeId &&
       ws.date === dateStr &&
-      ws.entry_type !== 'paid_leave' &&
+      !isLeaveEntryType(ws.entry_type) &&
       ws.entry_type !== 'adjustment'
     );
   };
@@ -171,13 +215,13 @@ export default function TimeEntry() {
         }
 
         const entryType = employee.employee_type === 'global'
-          ? (row.dayType === 'paid_leave' ? 'paid_leave' : 'hours')
+          ? (row.dayType === 'paid_leave' ? getEntryTypeForLeaveKind('system_paid') : 'hours')
           : (employee.employee_type === 'hourly' ? 'hours' : 'session');
-        if (entryType === 'paid_leave' && employee.employee_type !== 'global') {
+        if (isLeaveEntryType(entryType) && employee.employee_type !== 'global') {
           toast.error('paid_leave only allowed for global employees', { duration: 15000 });
           return null;
         }
-        if (entryType === 'paid_leave') {
+        if (isLeaveEntryType(entryType)) {
           const conflicts = findConflicts(employee.id, row.date);
           if (conflicts.length > 0) {
             const details = conflicts.map(c => {
@@ -194,13 +238,20 @@ export default function TimeEntry() {
           date: row.date,
           entry_type: entryType,
           service_id: (employee.employee_type === 'instructor') ? row.service_id : null,
-          hours: employee.employee_type === 'hourly' ? (parseFloat(row.hours) || null) : (employee.employee_type === 'global' && entryType === 'hours' ? (parseFloat(row.hours) || null) : null),
+          hours: employee.employee_type === 'hourly'
+            ? (parseFloat(row.hours) || null)
+            : (employee.employee_type === 'global' && entryType === 'hours'
+              ? (parseFloat(row.hours) || null)
+              : (isLeaveEntryType(entryType) ? 0 : null)),
           sessions_count: employee.employee_type === 'instructor' ? (parseInt(row.sessions_count) || null) : null,
           students_count: employee.employee_type === 'instructor' ? (parseInt(row.students_count) || null) : null,
           notes: row.notes || null,
           rate_used: rateUsed,
           total_payment: totalPayment,
         };
+        if (isLeaveEntryType(entryType)) {
+          session.payable = true;
+        }
         if (hasDuplicateSession(workSessions, session)) {
           toast.error('רישום זה כבר קיים', { duration: 15000 });
           return null;
@@ -225,106 +276,123 @@ export default function TimeEntry() {
     }
   };
 
-  const handleTableSubmit = async ({ employee, day, dayType, updatedRows, paidLeaveId, paidLeaveNotes, leaveType: _leaveType }) => {
-    void _leaveType;
+  const handleTableSubmit = async ({ employee, day, dayType, updatedRows, paidLeaveId, paidLeaveNotes, leaveType }) => {
     setIsLoading(true);
     try {
       const toInsert = [];
       const toUpdate = [];
-      if (paidLeaveId && dayType !== 'paid_leave' && updatedRows.length > 0 && !updatedRows[0].id) {
-        updatedRows[0].id = paidLeaveId;
-      }
-      for (const row of updatedRows) {
-        const hoursValue = parseFloat(row.hours);
-        const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
-        if (employee.employee_type === 'hourly') {
-          if (isNaN(hoursValue) || hoursValue <= 0) {
-            toast.error('יש להזין מספר שעות גדול מ-0.', { duration: 15000 });
-            return;
-          }
-        }
-        if (employee.employee_type === 'global') {
-          if (!dayType) {
-            toast.error('יש לבחור סוג יום', { duration: 15000 });
-            return;
-          }
-          if (row._status === 'new' && (isNaN(hoursValue) || hoursValue <= 0)) {
-            toast.error('יש להזין מספר שעות גדול מ-0.', { duration: 15000 });
-            return;
-          }
-        }
+      const dateStr = format(day, 'yyyy-MM-dd');
+      const existingLedgerEntries = leaveBalances.filter(entry =>
+        entry.employee_id === employee.id &&
+        entry.date === dateStr &&
+        typeof entry.source === 'string' &&
+        entry.source.startsWith(TIME_ENTRY_LEAVE_PREFIX)
+      );
+      let ledgerDeleteIds = existingLedgerEntries.map(entry => entry.id).filter(Boolean);
+      const existingLedgerDelta = existingLedgerEntries.reduce((sum, entry) => sum + resolveLedgerDelta(entry), 0);
+      let ledgerInsertPayload = null;
 
-        const { rate: rateUsed, reason } = getRateForDate(employee.id, day, isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : row.service_id);
-        if (!rateUsed) {
-          toast.error(reason || 'לא הוגדר תעריף עבור תאריך זה', { duration: 15000 });
-          return;
+      if (dayType !== 'paid_leave') {
+        if (paidLeaveId && updatedRows.length > 0 && !updatedRows[0].id) {
+          updatedRows[0].id = paidLeaveId;
         }
-        const legacyPaidLeave = row.entry_type === 'paid_leave' && employee.employee_type !== 'global';
-        if (legacyPaidLeave) {
-          row.notes = row.notes ? `${row.notes} (סומן בעבר כחופשה)` : 'סומן בעבר כחופשה';
-        }
-        let totalPayment = 0;
-        if (employee.employee_type === 'hourly') {
-          totalPayment = (hoursValue || 0) * rateUsed;
-        } else if (employee.employee_type === 'global') {
-          try {
-            const dailyRate = calculateGlobalDailyRate(employee, day, rateUsed);
-            totalPayment = dailyRate;
-          } catch (err) {
-            toast.error(err.message, { duration: 15000 });
+        for (const row of updatedRows) {
+          const hoursValue = parseFloat(row.hours);
+          const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
+          if (employee.employee_type === 'hourly') {
+            if (isNaN(hoursValue) || hoursValue <= 0) {
+              toast.error('יש להזין מספר שעות גדול מ-0.', { duration: 15000 });
+              return;
+            }
+          }
+          if (employee.employee_type === 'global') {
+            if (!dayType) {
+              toast.error('יש לבחור סוג יום', { duration: 15000 });
+              return;
+            }
+            if (row._status === 'new' && (isNaN(hoursValue) || hoursValue <= 0)) {
+              toast.error('יש להזין מספר שעות גדול מ-0.', { duration: 15000 });
+              return;
+            }
+          }
+
+          const { rate: rateUsed, reason } = getRateForDate(employee.id, day, isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : row.service_id);
+          if (!rateUsed) {
+            toast.error(reason || 'לא הוגדר תעריף עבור תאריך זה', { duration: 15000 });
             return;
           }
-        } else {
-          const service = services.find(s => s.id === row.service_id);
-          if (!service) return;
-          if (service.payment_model === 'per_student') {
-            const sessions = parseInt(row.sessions_count, 10) || 1;
-            const students = parseInt(row.students_count, 10) || 0;
-            totalPayment = sessions * students * rateUsed;
+          const legacyPaidLeave = row.entry_type === 'paid_leave' && employee.employee_type !== 'global';
+          if (legacyPaidLeave) {
+            row.notes = row.notes ? `${row.notes} (סומן בעבר כחופשה)` : 'סומן בעבר כחופשה';
+          }
+          let totalPayment = 0;
+          if (employee.employee_type === 'hourly') {
+            totalPayment = (hoursValue || 0) * rateUsed;
+          } else if (employee.employee_type === 'global') {
+            try {
+              const dailyRate = calculateGlobalDailyRate(employee, day, rateUsed);
+              totalPayment = dailyRate;
+            } catch (err) {
+              toast.error(err.message, { duration: 15000 });
+              return;
+            }
           } else {
-            const sessions = parseInt(row.sessions_count, 10) || 1;
-            totalPayment = sessions * rateUsed;
+            const service = services.find(s => s.id === row.service_id);
+            if (!service) return;
+            if (service.payment_model === 'per_student') {
+              const sessions = parseInt(row.sessions_count, 10) || 1;
+              const students = parseInt(row.students_count, 10) || 0;
+              totalPayment = sessions * students * rateUsed;
+            } else {
+              const sessions = parseInt(row.sessions_count, 10) || 1;
+              totalPayment = sessions * rateUsed;
+            }
+          }
+          const sessionData = {
+            employee_id: employee.id,
+            date: dateStr,
+            notes: row.notes || null,
+            rate_used: rateUsed,
+            total_payment: totalPayment,
+          };
+          if (row.id) sessionData.id = row.id;
+          if (employee.employee_type === 'hourly') {
+            sessionData.entry_type = 'hours';
+            sessionData.hours = hoursValue || 0;
+            sessionData.service_id = GENERIC_RATE_SERVICE_ID;
+            sessionData.sessions_count = null;
+            sessionData.students_count = null;
+          } else if (employee.employee_type === 'global') {
+            sessionData.entry_type = 'hours';
+            sessionData.hours = hoursValue || null;
+            sessionData.service_id = null;
+            sessionData.sessions_count = null;
+            sessionData.students_count = null;
+          } else {
+            sessionData.entry_type = 'session';
+            sessionData.service_id = row.service_id;
+            sessionData.sessions_count = parseInt(row.sessions_count, 10) || 1;
+            sessionData.students_count = parseInt(row.students_count, 10) || null;
+          }
+          if (hasDuplicateSession(workSessions, sessionData)) {
+            toast.error('רישום זה כבר קיים', { duration: 15000 });
+            return;
+          }
+          if (row.id) {
+            toUpdate.push(sessionData);
+          } else {
+            toInsert.push(sessionData);
           }
         }
-        const sessionData = {
-          employee_id: employee.id,
-          date: format(day, 'yyyy-MM-dd'),
-          notes: row.notes || null,
-          rate_used: rateUsed,
-          total_payment: totalPayment,
-        };
-        if (row.id) sessionData.id = row.id;
-        if (employee.employee_type === 'hourly') {
-          sessionData.entry_type = 'hours';
-          sessionData.hours = hoursValue || 0;
-          sessionData.service_id = GENERIC_RATE_SERVICE_ID;
-          sessionData.sessions_count = null;
-          sessionData.students_count = null;
-        } else if (employee.employee_type === 'global') {
-          const dtEntry = dayType === 'paid_leave' ? 'paid_leave' : 'hours';
-          sessionData.entry_type = dtEntry;
-          sessionData.hours = dtEntry === 'hours' ? (hoursValue || null) : null;
-          sessionData.service_id = null;
-          sessionData.sessions_count = null;
-          sessionData.students_count = null;
-        } else {
-          sessionData.entry_type = 'session';
-          sessionData.service_id = row.service_id;
-          sessionData.sessions_count = parseInt(row.sessions_count, 10) || 1;
-          sessionData.students_count = parseInt(row.students_count, 10) || null;
-        }
-        if (hasDuplicateSession(workSessions, sessionData)) {
-          toast.error('רישום זה כבר קיים', { duration: 15000 });
+      } else {
+        if (!leaveType) {
+          toast.error('יש לבחור סוג חופשה.', { duration: 15000 });
           return;
         }
-        if (row.id) {
-          toUpdate.push(sessionData);
-        } else {
-          toInsert.push(sessionData);
+        if (leaveType === 'half_day' && !leavePolicy.allow_half_day) {
+          toast.error('חצי יום אינו מאושר במדיניות הנוכחית', { duration: 15000 });
+          return;
         }
-      }
-      if (dayType === 'paid_leave') {
-        const dateStr = format(day, 'yyyy-MM-dd');
         const conflicts = findConflicts(employee.id, dateStr);
         if (conflicts.length > 0) {
           const details = conflicts.map(c => {
@@ -335,44 +403,96 @@ export default function TimeEntry() {
           toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 10000 });
           return;
         }
-        const { rate: rateUsed, reason } = getRateForDate(employee.id, day, GENERIC_RATE_SERVICE_ID);
-        if (!rateUsed) {
-          toast.error(reason || 'לא הוגדר תעריף עבור תאריך זה', { duration: 15000 });
+
+        const entryType = getEntryTypeForLeaveKind(leaveType) || getEntryTypeForLeaveKind('system_paid');
+        if (!entryType) {
+          toast.error('סוג חופשה לא נתמך', { duration: 15000 });
           return;
         }
-        let totalPayment = 0;
-        if (employee.employee_type === 'global') {
-          try {
-            const dailyRate = calculateGlobalDailyRate(employee, day, rateUsed);
-            totalPayment = dailyRate;
-          } catch (err) {
-            toast.error(err.message, { duration: 15000 });
+
+        const ledgerDelta = getLeaveLedgerDelta(leaveType);
+        const summary = selectLeaveRemaining(employee.id, dateStr, {
+          employees,
+          leaveBalances,
+          policy: leavePolicy,
+        });
+        const baselineRemaining = summary.remaining - existingLedgerDelta;
+        const projected = baselineRemaining + ledgerDelta;
+        if (ledgerDelta < 0) {
+          if (!leavePolicy.allow_negative_balance && projected < 0) {
+            toast.error('חריגה ממכסה ימי החופשה המותרים', { duration: 15000 });
             return;
           }
+          if (leavePolicy.allow_negative_balance) {
+            const rawFloor = Number(leavePolicy.negative_floor_days ?? 0);
+            let floorLimit = 0;
+            if (!Number.isNaN(rawFloor)) {
+              floorLimit = rawFloor <= 0 ? rawFloor : -Math.abs(rawFloor);
+            }
+            if (projected < floorLimit) {
+              toast.error('חריגה ממכסה ימי החופשה המותרים', { duration: 15000 });
+              return;
+            }
+          }
         }
-        const plRow = {
+
+        const isPayable = isPayableLeaveKind(leaveType);
+        let rateUsed = 0;
+        let totalPayment = 0;
+        if (isPayable) {
+          const { rate, reason } = getRateForDate(employee.id, day, GENERIC_RATE_SERVICE_ID);
+          rateUsed = rate || 0;
+          if (!rateUsed && employee.employee_type === 'global') {
+            toast.error(reason || 'לא הוגדר תעריף עבור תאריך זה', { duration: 15000 });
+            return;
+          }
+          if (employee.employee_type === 'global') {
+            try {
+              totalPayment = calculateGlobalDailyRate(employee, day, rateUsed);
+            } catch (err) {
+              toast.error(err.message, { duration: 15000 });
+              return;
+            }
+          }
+        }
+
+        const leaveRow = {
           employee_id: employee.id,
-          date: format(day, 'yyyy-MM-dd'),
+          date: dateStr,
           notes: paidLeaveNotes || null,
-          rate_used: rateUsed,
+          rate_used: rateUsed || null,
           total_payment: totalPayment,
-          entry_type: 'paid_leave',
-          hours: null,
+          entry_type: entryType,
+          hours: 0,
           service_id: null,
           sessions_count: null,
           students_count: null,
+          payable: isPayable,
         };
-        if (hasDuplicateSession(workSessions, plRow)) {
+
+        if (hasDuplicateSession(workSessions, leaveRow)) {
           toast.error('רישום זה כבר קיים', { duration: 15000 });
           return;
         }
+
         if (paidLeaveId) {
-          plRow.id = paidLeaveId;
-          toUpdate.push(plRow);
+          leaveRow.id = paidLeaveId;
+          toUpdate.push(leaveRow);
         } else {
-          toInsert.push(plRow);
+          toInsert.push(leaveRow);
+        }
+
+        if (ledgerDelta !== 0) {
+          ledgerInsertPayload = {
+            employee_id: employee.id,
+            date: dateStr,
+            days_delta: ledgerDelta,
+            source: `${TIME_ENTRY_LEAVE_PREFIX}_${leaveType}`,
+            notes: paidLeaveNotes ? paidLeaveNotes : null,
+          };
         }
       }
+
       if (toInsert.length > 0) {
         const { error: insErr } = await supabase.from('WorkSessions').insert(toInsert);
         if (insErr) throw insErr;
@@ -381,8 +501,18 @@ export default function TimeEntry() {
         const { error: upErr } = await supabase.from('WorkSessions').upsert(toUpdate, { onConflict: 'id' });
         if (upErr) throw upErr;
       }
+
+      if (ledgerDeleteIds.length > 0) {
+        const { error: ledgerDeleteErr } = await supabase.from('LeaveBalances').delete().in('id', ledgerDeleteIds);
+        if (ledgerDeleteErr) throw ledgerDeleteErr;
+      }
+      if (ledgerInsertPayload) {
+        const { error: ledgerInsertErr } = await supabase.from('LeaveBalances').insert([ledgerInsertPayload]);
+        if (ledgerInsertErr) throw ledgerInsertErr;
+      }
+
       toast.success('הרישומים עודכנו בהצלחה!');
-      loadInitialData();
+      await loadInitialData();
     } catch (error) {
       console.error('Error submitting from table:', error);
       toast.error(`שגיאה בעדכון הרישומים: ${error.message}`);
@@ -439,6 +569,7 @@ export default function TimeEntry() {
                     services={services}
                     onSubmit={(res) => handleSessionSubmit(res.rows)}
                     getRateForDate={getRateForDate}
+                    allowHalfDay={leavePolicy.allow_half_day}
                   />
                 )}
               </CardContent>
@@ -466,6 +597,7 @@ export default function TimeEntry() {
               onTableSubmit={handleTableSubmit}
               onImported={loadInitialData}
               onDeleted={handleSessionsDeleted}
+              leavePolicy={leavePolicy}
             />
           </TabsContent>
         </Tabs>

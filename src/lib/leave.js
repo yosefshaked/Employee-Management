@@ -17,6 +17,45 @@ export const HOLIDAY_TYPE_LABELS = {
   half_day: 'ערב חג (חצי יום)',
 };
 
+export const LEAVE_ENTRY_TYPES = {
+  system_paid: 'leave_system_paid',
+  employee_paid: 'leave_employee_paid',
+  unpaid: 'leave_unpaid',
+  half_day: 'leave_half_day',
+  mixed: 'leave_mixed',
+};
+
+const ENTRY_TYPE_TO_KIND = {
+  paid_leave: 'system_paid',
+  leave_system_paid: 'system_paid',
+  leave_employee_paid: 'employee_paid',
+  leave_unpaid: 'unpaid',
+  leave_half_day: 'half_day',
+  leave_mixed: 'mixed',
+};
+
+export function getLeaveKindFromEntryType(entryType) {
+  return ENTRY_TYPE_TO_KIND[entryType] || null;
+}
+
+export function getEntryTypeForLeaveKind(kind) {
+  return LEAVE_ENTRY_TYPES[kind] || null;
+}
+
+export function isLeaveEntryType(entryType) {
+  return Boolean(getLeaveKindFromEntryType(entryType));
+}
+
+export function isPayableLeaveKind(kind) {
+  return kind === 'system_paid' || kind === 'employee_paid' || kind === 'half_day';
+}
+
+export function getLeaveLedgerDelta(kind) {
+  if (kind === 'employee_paid') return -1;
+  if (kind === 'half_day') return -0.5;
+  return 0;
+}
+
 function toDate(value) {
   if (!value) return null;
   if (value instanceof Date) return value;
