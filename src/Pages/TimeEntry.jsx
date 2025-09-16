@@ -20,6 +20,7 @@ import {
   isLeaveEntryType,
   getLeaveLedgerDelta,
   isPayableLeaveKind,
+  getNegativeBalanceFloor,
 } from '@/lib/leave.js';
 import { selectLeaveRemaining } from '@/selectors.js';
 
@@ -419,16 +420,13 @@ export default function TimeEntry() {
         const baselineRemaining = summary.remaining - existingLedgerDelta;
         const projected = baselineRemaining + ledgerDelta;
         if (ledgerDelta < 0) {
-          if (!leavePolicy.allow_negative_balance && projected < 0) {
-            toast.error('חריגה ממכסה ימי החופשה המותרים', { duration: 15000 });
-            return;
-          }
-          if (leavePolicy.allow_negative_balance) {
-            const rawFloor = Number(leavePolicy.negative_floor_days ?? 0);
-            let floorLimit = 0;
-            if (!Number.isNaN(rawFloor)) {
-              floorLimit = rawFloor <= 0 ? rawFloor : -Math.abs(rawFloor);
+          if (!leavePolicy.allow_negative_balance) {
+            if (baselineRemaining <= 0 || projected < 0) {
+              toast.error('חריגה ממכסה ימי החופשה המותרים', { duration: 15000 });
+              return;
             }
+          } else {
+            const floorLimit = getNegativeBalanceFloor(leavePolicy);
             if (projected < floorLimit) {
               toast.error('חריגה ממכסה ימי החופשה המותרים', { duration: 15000 });
               return;

@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import { Loader2, ShieldCheck, Info } from 'lucide-react';
 import { supabase } from '@/supabaseClient';
 import { selectLeaveRemaining, selectHolidayForDate } from '@/selectors.js';
-import { DEFAULT_LEAVE_POLICY, HOLIDAY_TYPE_LABELS } from '@/lib/leave.js';
+import { DEFAULT_LEAVE_POLICY, HOLIDAY_TYPE_LABELS, getNegativeBalanceFloor } from '@/lib/leave.js';
 
 const ENTRY_KINDS = [
   { value: 'usage', label: 'סימון חופשה' },
@@ -129,18 +129,16 @@ export default function LeaveOverview({
       leaveBalances,
       policy: leavePolicy,
     });
-    const projected = summary.remaining + delta;
-    if (formState.entryKind === 'usage') {
-      if (!leavePolicy.allow_negative_balance && projected < 0) {
-        toast.error('חריגה ממכסה ימי החופשה המותרים');
-        return;
-      }
-      if (leavePolicy.allow_negative_balance) {
-        const rawFloor = Number(leavePolicy.negative_floor_days ?? 0);
-        let floorLimit = 0;
-        if (!Number.isNaN(rawFloor)) {
-          floorLimit = rawFloor <= 0 ? rawFloor : -Math.abs(rawFloor);
+    const currentRemaining = summary.remaining;
+    const projected = currentRemaining + delta;
+    if (formState.entryKind === 'usage' && delta < 0) {
+      if (!leavePolicy.allow_negative_balance) {
+        if (currentRemaining <= 0 || projected < 0) {
+          toast.error('חריגה ממכסה ימי החופשה המותרים');
+          return;
         }
+      } else {
+        const floorLimit = getNegativeBalanceFloor(leavePolicy);
         if (projected < floorLimit) {
           toast.error('חריגה ממכסה ימי החופשה המותרים');
           return;

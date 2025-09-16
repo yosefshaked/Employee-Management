@@ -56,6 +56,12 @@ export function getLeaveLedgerDelta(kind) {
   return 0;
 }
 
+export function getNegativeBalanceFloor(policy = {}) {
+  const raw = Number(policy?.negative_floor_days ?? 0);
+  if (Number.isNaN(raw)) return 0;
+  return raw <= 0 ? raw : -Math.abs(raw);
+}
+
 function toDate(value) {
   if (!value) return null;
   if (value instanceof Date) return value;
