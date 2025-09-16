@@ -105,7 +105,7 @@ export default function LeaveOverview({
     const date = formState.date || new Date().toISOString().slice(0, 10);
     const entryKind = formState.entryKind;
     let delta = 0;
-    let source = 'manual';
+    let ledgerType = 'manual';
     if (entryKind === 'allocation') {
       const allocation = Number(formState.allocationAmount);
       if (!allocation || allocation <= 0) {
@@ -113,7 +113,7 @@ export default function LeaveOverview({
         return;
       }
       delta = allocation;
-      source = 'allocation';
+      ledgerType = 'allocation';
     } else {
       const type = formState.holidayType || 'employee_paid';
       let amount = Number(formState.usageAmount);
@@ -126,7 +126,7 @@ export default function LeaveOverview({
         return;
       }
       delta = -amount;
-      source = `usage_${type}`;
+      ledgerType = `usage_${type}`;
     }
     const summary = selectLeaveRemaining(employee.id, date, {
       employees,
@@ -153,9 +153,9 @@ export default function LeaveOverview({
     try {
       const payload = {
         employee_id: employee.id,
-        date,
-        days_delta: delta,
-        source,
+        effective_date: date,
+        balance: delta,
+        leave_type: ledgerType,
         notes: formState.notes ? formState.notes.trim() : null,
       };
       const { error } = await supabase.from('LeaveBalances').insert([payload]);

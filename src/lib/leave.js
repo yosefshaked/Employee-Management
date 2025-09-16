@@ -86,17 +86,50 @@ function isLeapYear(year) {
   return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
 }
 
+function parseMaybeNumber(value) {
+  if (typeof value === 'number') {
+    return Number.isNaN(value) ? null : value;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+}
+
 function resolveDelta(entry = {}) {
-  if (typeof entry.days_delta === 'number') return entry.days_delta;
-  if (typeof entry.delta_days === 'number') return entry.delta_days;
-  if (typeof entry.delta === 'number') return entry.delta;
-  if (typeof entry.amount === 'number') return entry.amount;
-  if (typeof entry.days === 'number') return entry.days;
+  const candidates = [
+    entry.balance,
+    entry.days_delta,
+    entry.delta_days,
+    entry.delta,
+    entry.amount,
+    entry.days,
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseMaybeNumber(candidate);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
   return 0;
 }
 
 function resolveDate(entry = {}) {
   return entry.date || entry.entry_date || entry.effective_date || entry.change_date || entry.created_at;
+}
+
+function normalizeDateString(value) {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    if (value.length >= 10) {
+      return value.slice(0, 10);
+    }
+    const parsed = toDate(value);
+    return parsed ? parsed.toISOString().slice(0, 10) : null;
+  }
+  const parsed = toDate(value);
+  return parsed ? parsed.toISOString().slice(0, 10) : null;
 }
 
 export function normalizeHolidayRule(rule) {
@@ -303,4 +336,17 @@ export function projectBalanceAfterChange({
     ...summary,
     projectedRemaining: Number(updated.toFixed(3)),
   };
+}
+
+export function getLeaveLedgerEntryDelta(entry = {}) {
+  return resolveDelta(entry);
+}
+
+export function getLeaveLedgerEntryDate(entry = {}) {
+  return normalizeDateString(resolveDate(entry));
+}
+
+export function getLeaveLedgerEntryType(entry = {}) {
+  const raw = entry.leave_type || entry.source || entry.type || entry.reason || null;
+  return typeof raw === 'string' ? raw : null;
 }

@@ -1,7 +1,7 @@
 # תיק פרויקט: מערכת ניהול שכר ועובדים
 
-**גרסה: 1.4.1**
-**תאריך עדכון אחרון: 2025-09-17**
+**גרסה: 1.4.2**
+**תאריך עדכון אחרון: 2025-09-18**
 
 ## 1. חזון ומטרה
 
@@ -139,11 +139,11 @@
 
 | עמודה | סוג | תיאור | אילוצים |
 | :--- | :--- | :--- | :--- |
-| `id` | `uuid` | מזהה ייחודי אוטומטי | **Primary Key** |
+| `id` | `bigint` | מזהה רץ אוטומטי | **Primary Key** |
 | `employee_id` | `uuid` | מצביע לטבלת `Employees` | **Foreign Key** |
-| `date` | `date` | תאריך ההשפעה של התנועה | Not NULL |
-| `days_delta` | `numeric` | ערכים חיוביים מוסיפים מכסה, ערכים שליליים מנכים ניצול | Not NULL |
-| `source` | `text` | מקור הפעולה (למשל `allocation`, `usage_employee_paid`) | |
+| `leave_type` | `text` | תיאור סוג התנועה (למשל `allocation`, `usage_employee_paid`, `time_entry_leave_employee_paid`) | Not NULL |
+| `balance` | `numeric` | ערכים חיוביים מוסיפים מכסה, ערכים שליליים מנכים ניצול | Not NULL, ברירת מחדל `0` |
+| `effective_date` | `date` | תאריך ההשפעה של התנועה | Not NULL |
 | `notes` | `text` | פרטים חופשיים אופציונליים | |
 | `created_at` | `timestamptz` | חותמת יצירה | ברירת מחדל: `now()` |
 
@@ -280,7 +280,7 @@
 ### 6.3. רישום ניצולים
 
 - לשונית החופשות מציעה שתי פעולות מהירות: הקצאה חיובית וניכוי לפי סוג חג.
-- ניכוי יוצר `days_delta` שלילי ב-`LeaveBalances` עם `source` כגון `usage_employee_paid`. הקצאה מוסיפה `days_delta` חיובי עם `source='allocation'`.
+- ניכוי יוצר `balance` שלילי ב-`LeaveBalances` עם `leave_type` כגון `usage_employee_paid` או `time_entry_leave_employee_paid`. הקצאה מוסיפה `balance` חיובי עם `leave_type='allocation'`.
 - כאשר `allow_half_day` כבוי, הממשק חוסם ערכים שאינם שלמים. כאשר הוא פעיל, חגים מסוג חצי יום ממלאים אוטומטית `-0.5`.
 - חריגה מעבר לגבול `negative_floor_days` נחסמת ומציגה את הטוסט **"חריגה ממכסה ימי החופשה המותרים"**.
 - ימי `holiday_paid_system` מסומנים בטבלת השכר כמשולמים ללא יצירת רישום שלילי, כדי לשמור על התאמה עם סיכומי WorkSessions.

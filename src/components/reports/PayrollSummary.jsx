@@ -6,22 +6,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { selectLeaveRemaining } from '@/selectors.js';
-import { DEFAULT_LEAVE_POLICY } from '@/lib/leave.js';
+import {
+  DEFAULT_LEAVE_POLICY,
+  getLeaveLedgerEntryDelta,
+  getLeaveLedgerEntryType,
+} from '@/lib/leave.js';
 
 const EMPLOYEE_TYPES = {
   hourly: 'שעתי',
   instructor: 'מדריך',
   global: 'גלובלי'
 };
-
-function resolveLeaveDelta(entry = {}) {
-  if (typeof entry.days_delta === 'number') return entry.days_delta;
-  if (typeof entry.delta_days === 'number') return entry.delta_days;
-  if (typeof entry.delta === 'number') return entry.delta;
-  if (typeof entry.amount === 'number') return entry.amount;
-  if (typeof entry.days === 'number') return entry.days;
-  return 0;
-}
 
 // קומפוננטה קטנה לשורות הפירוט עם עיצוב משופר
 const InstructorDetailsRow = ({ details }) => (
@@ -127,12 +122,15 @@ export default function PayrollSummary({
     const totals = totalsMap[employee.id] || { pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
     const baseSalary = employee.employee_type === 'global' ? getRateForDate(employee.id, new Date()).rate : null;
     const leaveEntries = leaveByEmployee.get(employee.id) || [];
-    const systemPaidCount = leaveEntries.filter(entry => (entry.source || '').includes('system_paid')).length;
+    const systemPaidCount = leaveEntries.filter(entry => {
+      const type = getLeaveLedgerEntryType(entry) || '';
+      return type.includes('system_paid');
+    }).length;
     const employeePaidDays = leaveEntries.reduce((sum, entry) => {
-      const delta = resolveLeaveDelta(entry);
-      const source = entry.source || '';
-      if (source.includes('system_paid')) return sum;
-      if (source.includes('employee_paid')) return sum + Math.abs(delta);
+      const delta = getLeaveLedgerEntryDelta(entry);
+      const type = getLeaveLedgerEntryType(entry) || '';
+      if (type.includes('system_paid')) return sum;
+      if (type.includes('employee_paid')) return sum + Math.abs(delta);
       if (delta < 0) return sum + Math.abs(delta);
       return sum;
     }, 0);

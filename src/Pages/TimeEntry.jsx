@@ -21,6 +21,9 @@ import {
   getLeaveLedgerDelta,
   isPayableLeaveKind,
   getNegativeBalanceFloor,
+  getLeaveLedgerEntryDelta,
+  getLeaveLedgerEntryDate,
+  getLeaveLedgerEntryType,
 } from '@/lib/leave.js';
 import { selectLeaveRemaining } from '@/selectors.js';
 
@@ -37,15 +40,6 @@ const getLedgerTimestamp = (entry = {}) => {
 
 const sortLeaveLedger = (entries = []) => {
   return [...entries].sort((a, b) => getLedgerTimestamp(a) - getLedgerTimestamp(b));
-};
-
-const resolveLedgerDelta = (entry = {}) => {
-  if (typeof entry.days_delta === 'number') return entry.days_delta;
-  if (typeof entry.delta_days === 'number') return entry.delta_days;
-  if (typeof entry.delta === 'number') return entry.delta;
-  if (typeof entry.amount === 'number') return entry.amount;
-  if (typeof entry.days === 'number') return entry.days;
-  return 0;
 };
 
 export default function TimeEntry() {
@@ -283,14 +277,18 @@ export default function TimeEntry() {
       const toInsert = [];
       const toUpdate = [];
       const dateStr = format(day, 'yyyy-MM-dd');
-      const existingLedgerEntries = leaveBalances.filter(entry =>
-        entry.employee_id === employee.id &&
-        entry.date === dateStr &&
-        typeof entry.source === 'string' &&
-        entry.source.startsWith(TIME_ENTRY_LEAVE_PREFIX)
-      );
+      const existingLedgerEntries = leaveBalances.filter(entry => {
+        if (entry.employee_id !== employee.id) return false;
+        const entryDate = getLeaveLedgerEntryDate(entry);
+        if (entryDate !== dateStr) return false;
+        const ledgerType = getLeaveLedgerEntryType(entry) || '';
+        return ledgerType.startsWith(TIME_ENTRY_LEAVE_PREFIX);
+      });
       let ledgerDeleteIds = existingLedgerEntries.map(entry => entry.id).filter(Boolean);
-      const existingLedgerDelta = existingLedgerEntries.reduce((sum, entry) => sum + resolveLedgerDelta(entry), 0);
+      const existingLedgerDelta = existingLedgerEntries.reduce(
+        (sum, entry) => sum + getLeaveLedgerEntryDelta(entry),
+        0,
+      );
       let ledgerInsertPayload = null;
 
       if (dayType !== 'paid_leave') {
@@ -483,9 +481,9 @@ export default function TimeEntry() {
         if (ledgerDelta !== 0) {
           ledgerInsertPayload = {
             employee_id: employee.id,
-            date: dateStr,
-            days_delta: ledgerDelta,
-            source: `${TIME_ENTRY_LEAVE_PREFIX}_${leaveType}`,
+            effective_date: dateStr,
+            balance: ledgerDelta,
+            leave_type: `${TIME_ENTRY_LEAVE_PREFIX}_${leaveType}`,
             notes: paidLeaveNotes ? paidLeaveNotes : null,
           };
         }

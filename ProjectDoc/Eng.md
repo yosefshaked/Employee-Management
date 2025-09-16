@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.4.1**
-**Last Updated: 2025-09-17**
+**Version: 1.4.2**
+**Last Updated: 2025-09-18**
 
 ## 1. Vision & Purpose
 
@@ -139,11 +139,11 @@ Acts as the immutable ledger for employee leave allocations and usage.
 
 | Column | Type | Description | Constraints |
 | :--- | :--- | :--- | :--- |
-| `id` | `uuid` | Auto-generated unique identifier | **Primary Key** |
+| `id` | `bigint` | Auto-incrementing identifier | **Primary Key** |
 | `employee_id` | `uuid` | References the `Employees` table | **Foreign Key** |
-| `date` | `date` | Effective date of the leave event | Not NULL |
-| `days_delta` | `numeric` | Positive values add quota, negative values deduct usage | Not NULL |
-| `source` | `text` | Context for the entry (e.g., `allocation`, `usage_employee_paid`) | |
+| `leave_type` | `text` | Context for the entry (e.g., `allocation`, `usage_employee_paid`, `time_entry_leave_employee_paid`) | Not NULL |
+| `balance` | `numeric` | Positive values add quota, negative values deduct usage | Not NULL, Default `0` |
+| `effective_date` | `date` | Effective date of the leave event | Not NULL |
 | `notes` | `text` | Optional free-form details | |
 | `created_at` | `timestamptz` | Insert timestamp | Default: `now()` |
 
@@ -279,7 +279,7 @@ The leave module centralizes all holiday rules, quotas, and ledger actions so em
 ### 6.3. Recording usage
 
 - The Leave tab provides two quick actions: positive allocations and deductions tied to holiday types.
-- Usage inserts a negative `days_delta` into `LeaveBalances` with a `source` like `usage_employee_paid`. Allocations insert a positive `days_delta` with `source='allocation'`.
+- Usage inserts a negative `balance` into `LeaveBalances` with a `leave_type` like `usage_employee_paid` or `time_entry_leave_employee_paid`. Allocations insert a positive `balance` with `leave_type='allocation'`.
 - When `allow_half_day` is false the UI blocks non-integer deductions. When enabled, half-day holidays auto-fill `-0.5`.
 - Negative balances are blocked once the projected balance would drop below `negative_floor_days`; the blocking toast reads **"חריגה ממכסה ימי החופשה המותרים"**.
 - `holiday_paid_system` days update payroll tables without inserting a negative ledger entry so paid holidays stay aligned with WorkSessions totals.

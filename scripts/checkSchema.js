@@ -6,6 +6,7 @@ const REQUIRED_COLUMNS = [
   { table: 'WorkSessions', column: 'payable', types: ['boolean'] },
   { table: 'WorkSessions', column: 'entry_type', types: ['text', 'character varying'] },
   { table: 'LeaveBalances', column: 'balance', types: ['numeric', 'double precision', 'real', 'integer'] },
+  { table: 'LeaveBalances', column: 'leave_type', types: ['text', 'character varying'] },
   { table: 'LeaveBalances', column: 'effective_date', types: ['date', 'timestamp with time zone', 'timestamp without time zone'] },
 ];
 

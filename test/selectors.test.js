@@ -38,9 +38,9 @@ const leavePolicy = {
 };
 
 const leaveBalances = [
-  { employee_id: 'g1', date: '2024-02-10', days_delta: -1 },
-  { employee_id: 'g1', date: '2024-06-01', days_delta: 2 },
-  { employee_id: 'g1', date: '2025-01-05', days_delta: -0.5 },
+  { employee_id: 'g1', effective_date: '2024-02-10', balance: -1, leave_type: 'usage_employee_paid' },
+  { employee_id: 'g1', effective_date: '2024-06-01', balance: 2, leave_type: 'allocation' },
+  { employee_id: 'g1', effective_date: '2025-01-05', balance: -0.5, leave_type: 'usage_half_day' },
 ];
 
 describe('selectors', () => {

@@ -15,10 +15,10 @@ const baseEmployee = {
 };
 
 const leaveBalancesSample = [
-  { employee_id: 'emp-1', date: '2024-03-10', days_delta: -1, source: 'usage' },
-  { employee_id: 'emp-1', date: '2024-07-01', days_delta: 2, source: 'allocation' },
-  { employee_id: 'emp-1', date: '2025-01-05', days_delta: -0.5, source: 'usage' },
-  { employee_id: 'emp-1', date: '2025-01-20', days_delta: -1, source: 'usage' },
+  { employee_id: 'emp-1', effective_date: '2024-03-10', balance: -1, leave_type: 'usage_employee_paid' },
+  { employee_id: 'emp-1', effective_date: '2024-07-01', balance: '2', leave_type: 'allocation' },
+  { employee_id: 'emp-1', effective_date: '2025-01-05', balance: -0.5, leave_type: 'usage_half_day' },
+  { employee_id: 'emp-1', effective_date: '2025-01-20', balance: -1, leave_type: 'usage_employee_paid' },
 ];
 
 const policyWithRules = normalizeLeavePolicy({
@@ -72,7 +72,7 @@ describe('computeEmployeeLeaveSummary', () => {
       employee: baseEmployee,
       leaveBalances: leaveBalancesSample,
       policy: DEFAULT_LEAVE_POLICY,
-      date: '2024-12-15',
+      date: '2024-05-01',
     });
     assert.ok(summary.quota < baseEmployee.annual_leave_days);
     assert.ok(summary.remaining < baseEmployee.annual_leave_days);
