@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.3.11**
-**Last Updated: 2025-09-13**
+**Version: 1.4.2**
+**Last Updated: 2025-09-18**
 
 ## 1. Vision & Purpose
 
@@ -113,6 +113,42 @@ The work log. Each row represents a completed work session.
   - Unpaid absence = no row. Paid leave is explicitly recorded with an `entry_type='paid_leave'` row.
   - Each row may include optional `notes` (free text, max 300 chars).
 
+### 3.5. `Settings` Table
+Stores organization-wide configuration values, accessed via a stable `key`.
+
+| Column | Type | Description | Constraints |
+| :--- | :--- | :--- | :--- |
+| `id` | `uuid` | Auto-generated unique identifier | **Primary Key** |
+| `key` | `text` | Settings bucket identifier (e.g., `leave_policy`) | **Unique** |
+| `settings_value` | `jsonb` | Structured JSON payload for the setting | Not NULL |
+| `created_at` | `timestamptz` | Creation timestamp | Default: `now()` |
+| `updated_at` | `timestamptz` | Last update timestamp | Default: `now()` |
+
+The `leave_policy` record contains the leave-management configuration consumed across the app:
+
+- `allow_half_day` – allow employees to consume 0.5 day at a time.
+- `allow_negative_balance` – enable overdraft until reaching the configured floor.
+- `negative_floor_days` – minimum balance allowed (negative values represent how far below zero the balance may go).
+- `carryover_enabled` / `carryover_max_days` – governs how many unused days roll into the next year.
+- `holiday_rules[]` – array of `{ id, name, type, start_date, end_date, recurrence }` objects that mark holiday ranges and tag them as system-paid, employee-paid, unpaid, mixed, or half-day.
+
+All read/write operations should reuse the helpers in `src/lib/leave.js` to normalize the JSON and guarantee consistent IDs.
+
+### 3.6. `LeaveBalances` Table
+Acts as the immutable ledger for employee leave allocations and usage.
+
+| Column | Type | Description | Constraints |
+| :--- | :--- | :--- | :--- |
+| `id` | `bigint` | Auto-incrementing identifier | **Primary Key** |
+| `employee_id` | `uuid` | References the `Employees` table | **Foreign Key** |
+| `leave_type` | `text` | Context for the entry (e.g., `allocation`, `usage_employee_paid`, `time_entry_leave_employee_paid`) | Not NULL |
+| `balance` | `numeric` | Positive values add quota, negative values deduct usage | Not NULL, Default `0` |
+| `effective_date` | `date` | Effective date of the leave event | Not NULL |
+| `notes` | `text` | Optional free-form details | |
+| `created_at` | `timestamptz` | Insert timestamp | Default: `now()` |
+
+Ledger entries support fractional values (e.g., `-0.5` for half-day usage when policy allows it). Negative entries representing usage are validated against the configured floor before insert; attempts to exceed the overdraft surface the toast "חריגה ממכסה ימי החופשה המותרים" and are rejected.
+
 ### Multi-date Quick Entry UX
 
 Users can enable **"בחר תאריכים להזנה מרובה"** in the time-entry table to select multiple dates and employees. Clicking **"הזן"** opens a modal listing all selected dates as stacked mini-forms—one row per date and employee. Each field has an **"העתק מהרישום הקודם"** button to copy from the previous row.
@@ -218,8 +254,48 @@ This guide is for a new developer (or AI) joining the project who needs to set u
     *   Package the app with Electron into an executable installer.
 3.  The final installer/application will be located in the `/release` directory (which is created outside the project folder).
 
+## 6. Leave Policy & Holiday Management
+
+The leave module centralizes all holiday rules, quotas, and ledger actions so employees, reports, and payroll share one source of truth.
+
+### 6.1. Admin configuration
+
+- The **"חגים וימי חופשה"** screen under Settings edits the `leave_policy` JSON described in Section 3.5.
+- Toggles use the following Hebrew microcopy: "אישור חצי יום", "היתרה יכולה לרדת למינוס", "כמות חריגה מימי החופש המוגדרים", "העברת יתרה לשנה הבאה", and "מקסימום להעברה".
+- Holiday rows capture a name, date range, and tag selected from:
+  - `system_paid` → "חג משולם (מערכת)" (no deduction, payroll marks the day as paid by the organization).
+  - `employee_paid` → "חופשה מהמכסה" (deducts from the employee quota).
+  - `unpaid` → "לא משולם".
+  - `mixed` → "מעורב".
+  - `half_day` → "חצי יום" (available only when half-day usage is enabled).
+- All persistence must go through Supabase `upsert` on the `Settings` table to avoid duplicate keys.
+
+### 6.2. Employee quota and proration
+
+- Each employee now has an `annual_leave_days` value. The helper `computeEmployeeLeaveSummary` prorates the yearly allowance based on `start_date` and the number of days remaining in the calendar year.
+- Carry-over is applied automatically when enabled, capped by `carryover_max_days`.
+- Summary data includes `quota`, `used`, `carryIn`, `remaining`, and `adjustments` for consistent display across dashboards.
+
+### 6.3. Recording usage
+
+- The Leave tab provides two quick actions: positive allocations and deductions tied to holiday types.
+- Usage inserts a negative `balance` into `LeaveBalances` with a `leave_type` like `usage_employee_paid` or `time_entry_leave_employee_paid`. Allocations insert a positive `balance` with `leave_type='allocation'`.
+- When `allow_half_day` is false the UI blocks non-integer deductions. When enabled, half-day holidays auto-fill `-0.5`.
+- Negative balances are blocked once the projected balance would drop below `negative_floor_days`; the blocking toast reads **"חריגה ממכסה ימי החופשה המותרים"**.
+- `holiday_paid_system` days update payroll tables without inserting a negative ledger entry so paid holidays stay aligned with WorkSessions totals.
+
+### 6.4. Shared selectors
+
+- `selectHolidayForDate(policy, date)` resolves the correct holiday rule for disabling date pickers and tagging payroll rows.
+- `selectLeaveRemaining(employeeId, date, context)` calls into `computeEmployeeLeaveSummary` and must be used by Employees, Reports, and Payroll so all surfaces show identical balances.
+- The same helpers power unit tests in `test/leave.test.js` to protect proration math and negative-floor enforcement.
+
 ## Recent Updates
 
+- Centralized leave policy management via the new Settings screen, including holiday tagging and negative balance controls.
+- Employee leave balances now rely on the `LeaveBalances` ledger with annual quota proration and carry-over enforcement.
+- Payroll and reports consume the shared leave selectors so paid holidays and remaining days stay aligned across the app.
 - Date filters in reports accept manual input or calendar selection and support multiple formats.
 - Hours KPI counts time for hourly employees only; employee type filter now includes global staff.
 - Detailed entries report can group by employee type with subtotals.
+

@@ -12,7 +12,7 @@ const entries = [
   { employee_id: 'h1', date: '2024-02-05', entry_type: 'hours', hours: 5, service_id: 's1' },
   { employee_id: 'h1', date: '2024-02-06', entry_type: 'hours', hours: 3, service_id: 's2' },
   { employee_id: 'g1', date: '2024-02-05', entry_type: 'hours', service_id: 's1' },
-  { employee_id: 'g1', date: '2024-02-06', entry_type: 'paid_leave', service_id: 's1' },
+  { employee_id: 'g1', date: '2024-02-06', entry_type: 'leave_system_paid', service_id: 's1' },
   { employee_id: 'i1', date: '2024-02-07', entry_type: 'session', sessions_count: 2, service_id: 's1' },
   { employee_id: 'i1', date: '2024-02-08', entry_type: 'session', sessions_count: 1, service_id: 's2' },
 ];

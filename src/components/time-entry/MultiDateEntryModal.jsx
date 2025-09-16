@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import EntryRow, { computeRowPayment } from './EntryRow.jsx';
 import { copyFromPrevious, formatDatesCount, isRowCompleteForProgress } from './multiDateUtils.js';
 import { format } from 'date-fns';
@@ -12,6 +13,7 @@ import { ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import he from '@/i18n/he.json';
 import { calculateGlobalDailyRate, aggregateGlobalDays } from '@/lib/payroll.js';
+import { isLeaveEntryType, LEAVE_TYPE_OPTIONS } from '@/lib/leave.js';
 
 function validateRow(row, employee, services, getRateForDate, dayTypeMap) {
   const errors = {};
@@ -39,7 +41,7 @@ function validateRow(row, employee, services, getRateForDate, dayTypeMap) {
         errors.dayType = 'אין ימי עבודה בחודש';
       }
     }
-  } else if (row.entry_type === 'paid_leave') {
+  } else if (isLeaveEntryType(row.entry_type)) {
     errors.entry_type = 'סוג יום לא נתמך';
   }
   return { valid: Object.keys(errors).length === 0, errors };
@@ -70,7 +72,37 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
 
   const [rows, setRows] = useState(initialRows);
   useEffect(() => { setRows(initialRows); }, [initialRows]);
-  const { saveRows } = useTimeEntry({ employees, services, getRateForDate });
+  const { saveRows, saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate });
+
+  const [mode, setMode] = useState('regular');
+  const leaveTypeOptions = useMemo(
+    () => LEAVE_TYPE_OPTIONS.filter(option => option.value === 'mixed'),
+    []
+  );
+  const [selectedLeaveType, setSelectedLeaveType] = useState(
+    () => leaveTypeOptions[0]?.value || 'mixed'
+  );
+  useEffect(() => {
+    setSelectedLeaveType(leaveTypeOptions[0]?.value || 'mixed');
+  }, [leaveTypeOptions]);
+
+  const sortedDates = useMemo(
+    () => [...selectedDates].sort((a, b) => a - b),
+    [selectedDates]
+  );
+  const defaultMixedSelections = useMemo(() => {
+    const base = {};
+    selectedEmployees.forEach(empId => {
+      const inner = {};
+      sortedDates.forEach(d => {
+        inner[format(d, 'yyyy-MM-dd')] = true;
+      });
+      base[empId] = inner;
+    });
+    return base;
+  }, [selectedEmployees, sortedDates]);
+  const [mixedSelections, setMixedSelections] = useState(defaultMixedSelections);
+  useEffect(() => { setMixedSelections(defaultMixedSelections); }, [defaultMixedSelections]);
 
   const globalEmployeeIds = useMemo(
     () => selectedEmployees.filter(id => employeesById[id].employee_type === 'global'),
@@ -135,6 +167,37 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   const [showBanner, setShowBanner] = useState(false);
   const [flash, setFlash] = useState(null);
 
+  useEffect(() => {
+    if (mode === 'leave') {
+      setShowBanner(false);
+      setShowErrors(false);
+    }
+  }, [mode]);
+
+  const toggleMixedSelection = (empId, dateStr, paid) => {
+    setMixedSelections(prev => {
+      const next = { ...prev };
+      const current = { ...(next[empId] || {}) };
+      current[dateStr] = paid;
+      next[empId] = current;
+      return next;
+    });
+  };
+
+  const markAllMixed = (paid) => {
+    setMixedSelections(() => {
+      const next = {};
+      selectedEmployees.forEach(empId => {
+        const inner = {};
+        sortedDates.forEach(d => {
+          inner[format(d, 'yyyy-MM-dd')] = paid;
+        });
+        next[empId] = inner;
+      });
+      return next;
+    });
+  };
+
   const updateRow = (index, patch) => setRows(prev => prev.map((r, i) => i === index ? { ...r, ...patch } : r));
   const handleCopy = (index, field) => {
     const { rows: updated, success } = copyFromPrevious(rows, index, field);
@@ -163,7 +226,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   const [collapsed, setCollapsed] = useState({});
   const toggleEmp = (id) => setCollapsed(prev => ({ ...prev, [id]: !prev[id] }));
 
-  const handleSave = async () => {
+  const handleRegularSave = async () => {
     const missingId = globalEmployeeIds.find(id => !getEmployeeDayType(id));
     if (missingId) {
       setDayTypeErrors(prev => ({ ...prev, [missingId]: true }));
@@ -201,6 +264,41 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
     }
   };
 
+  const handleSaveMixed = async () => {
+    if (selectedLeaveType !== 'mixed') {
+      toast.error('סוג חופשה לא נתמך');
+      return;
+    }
+    if (!selectedEmployees.length || !sortedDates.length) {
+      toast.error('בחרו עובדים ותאריכים לחופשה');
+      return;
+    }
+    const selections = [];
+    selectedEmployees.forEach(empId => {
+      const map = mixedSelections[empId] || {};
+      sortedDates.forEach(d => {
+        const dateStr = format(d, 'yyyy-MM-dd');
+        const paid = map[dateStr] !== false;
+        selections.push({ employee_id: empId, date: dateStr, paid });
+      });
+    });
+    if (!selections.length) {
+      toast.error('לא נבחרו תאריכים לחופשה');
+      return;
+    }
+    try {
+      const inserted = await saveMixedLeave(selections, { leaveType: selectedLeaveType });
+      toast.success(`נשמרו ${inserted.length} ימי חופשה`);
+      onSaved();
+      onClose();
+    } catch (e) {
+      toast.error(e.message);
+    }
+  };
+
+  const regularSaveDisabled = mode === 'regular' && globalEmployeeIds.some(id => !getEmployeeDayType(id));
+  const leaveSaveDisabled = mode === 'leave' && (!selectedEmployees.length || !sortedDates.length);
+
   return (
       <Dialog open={open} onOpenChange={onClose}>
       <TooltipProvider>
@@ -234,21 +332,42 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
               className="flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-24 space-y-3 relative"
               data-testid="md-body"
             >
-              <div className="flex text-sm text-slate-600">
-                <span>טיפ: אפשר להעתיק ערכים מהרישום הקודם עם האייקון ליד כל שדה.</span>
-              <span className="ml-auto">מולאו {filledCount} מתוך {rows.length} שורות</span>
-            </div>
-            <div className="text-right font-medium text-slate-700">סיכום כולל לרישומים: ₪{summaryTotal.toFixed(2)}</div>
-            {showBanner && (
-                <div className="bg-amber-50 border border-amber-200 p-4 flex justify-between items-center text-sm">
-                  <span>חלק מהשורות מכילות שגיאות.</span>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setShowBanner(false)}>חזור לתיקון</Button>
-                    <Button size="sm" onClick={saveValidOnly}>שמור רק תקינים</Button>
+              <div className="flex items-center justify-between bg-slate-100 rounded-lg ring-1 ring-slate-200 p-1">
+                <Button
+                  type="button"
+                  variant={mode === 'regular' ? 'default' : 'ghost'}
+                  className="flex-1 h-9"
+                  onClick={() => setMode('regular')}
+                >
+                  רישום שעות
+                </Button>
+                <Button
+                  type="button"
+                  variant={mode === 'leave' ? 'default' : 'ghost'}
+                  className="flex-1 h-9"
+                  onClick={() => setMode('leave')}
+                >
+                  חופשה
+                </Button>
+              </div>
+
+              {mode === 'regular' ? (
+                <>
+                  <div className="flex text-sm text-slate-600">
+                    <span>טיפ: אפשר להעתיק ערכים מהרישום הקודם עם האייקון ליד כל שדה.</span>
+                    <span className="ml-auto">מולאו {filledCount} מתוך {rows.length} שורות</span>
                   </div>
-                </div>
-              )}
-              {groupedRows.map(([empId, items], idx) => {
+                  <div className="text-right font-medium text-slate-700">סיכום כולל לרישומים: ₪{summaryTotal.toFixed(2)}</div>
+                  {showBanner && (
+                    <div className="bg-amber-50 border border-amber-200 p-4 flex justify-between items-center text-sm">
+                      <span>חלק מהשורות מכילות שגיאות.</span>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setShowBanner(false)}>חזור לתיקון</Button>
+                        <Button size="sm" onClick={saveValidOnly}>שמור רק תקינים</Button>
+                      </div>
+                    </div>
+                  )}
+                  {groupedRows.map(([empId, items], idx) => {
                 const emp = employeesById[empId];
                 const isCollapsed = collapsed[empId];
                 const dt = getEmployeeDayType(empId);
@@ -325,6 +444,85 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
                   </div>
                 );
               })}
+                </>
+              ) : (
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
+                    <div className="space-y-1">
+                      <Label className="text-sm font-medium text-slate-700">סוג חופשה</Label>
+                      <Select value={selectedLeaveType} onValueChange={setSelectedLeaveType}>
+                        <SelectTrigger className="bg-white h-10 text-base leading-6">
+                          <SelectValue placeholder="בחר סוג חופשה" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {leaveTypeOptions.map(option => (
+                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button type="button" className="flex-1" onClick={() => markAllMixed(true)}>סמן הכל כבתשלום</Button>
+                      <Button type="button" variant="outline" className="flex-1" onClick={() => markAllMixed(false)}>סמן הכל כלא בתשלום</Button>
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    {selectedEmployees.length === 0 && (
+                      <div className="text-sm text-slate-600">בחרו לפחות עובד אחד להזנת חופשה.</div>
+                    )}
+                    {selectedEmployees.map(empId => {
+                      const emp = employeesById[empId];
+                      const map = mixedSelections[empId] || {};
+                      return (
+                        <div key={empId} className="space-y-3 rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[17px] font-semibold truncate max-w-[60%]">{emp?.name || 'עובד'}</span>
+                            <span className="text-sm text-slate-600">{formatDatesCount(sortedDates.length)}</span>
+                          </div>
+                          <div className="space-y-2">
+                            <div className="text-sm font-medium text-slate-700">תאריכים שנבחרו</div>
+                            <div className="space-y-2">
+                              {sortedDates.length === 0 && (
+                                <div className="text-sm text-slate-600">בחרו תאריכים להזנת חופשה.</div>
+                              )}
+                              {sortedDates.map(d => {
+                                const dateStr = format(d, 'yyyy-MM-dd');
+                                const paid = map[dateStr] !== false;
+                                return (
+                                  <div
+                                    key={`${empId}-${dateStr}`}
+                                    className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200"
+                                  >
+                                    <span className="text-sm font-medium text-slate-700">{format(d, 'dd/MM/yyyy')}</span>
+                                    <div className="flex gap-2" role="radiogroup" aria-label={`האם ${format(d, 'dd/MM/yyyy')} בתשלום?`}>
+                                      <Button
+                                        type="button"
+                                        variant={paid ? 'default' : 'ghost'}
+                                        className="h-9"
+                                        onClick={() => toggleMixedSelection(empId, dateStr, true)}
+                                      >
+                                        בתשלום
+                                      </Button>
+                                      <Button
+                                        type="button"
+                                        variant={!paid ? 'default' : 'ghost'}
+                                        className="h-9"
+                                        onClick={() => toggleMixedSelection(empId, dateStr, false)}
+                                      >
+                                        לא בתשלום
+                                      </Button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div
@@ -332,7 +530,12 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
               className="shrink-0 bg-background border-t px-4 py-3 flex justify-end gap-2"
             >
               <Button variant="outline" onClick={onClose}>בטל</Button>
-              <Button onClick={handleSave} disabled={globalEmployeeIds.some(id => !getEmployeeDayType(id))}>שמור רישומים</Button>
+              <Button
+                onClick={mode === 'leave' ? handleSaveMixed : handleRegularSave}
+                disabled={regularSaveDisabled || leaveSaveDisabled}
+              >
+                שמור רישומים
+              </Button>
             </div>
           </div>
         </DialogContent>

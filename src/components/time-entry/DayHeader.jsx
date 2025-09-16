@@ -47,15 +47,17 @@ const DayHeader = React.forwardRef(function DayHeader(
               variant={dayType === 'paid_leave' ? 'default' : 'ghost'}
               className="flex-1 h-10 rounded-none"
               onClick={() => onChange('paid_leave')}
-              aria-label="חופשה בתשלום"
+              aria-label="חופשה"
             >
-              חופשה בתשלום
+              חופשה
             </Button>
           </div>
           {dayTypeError && <p className="text-sm text-red-600">יש לבחור סוג יום</p>}
-          <p className="text-sm text-slate-600 mt-1">
-            שכר גלובלי נספר לפי יום; הוספת מקטע שעות לא מכפילה שכר.
-          </p>
+          {employee?.employee_type === 'global' && (
+            <p className="text-sm text-slate-600 mt-1">
+              שכר גלובלי נספר לפי יום; הוספת מקטע שעות לא מכפילה שכר.
+            </p>
+          )}
         </div>
       )}
     </div>

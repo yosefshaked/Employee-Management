@@ -13,7 +13,7 @@ export const typeMap = {
   'שיעור': 'session',
   'שעות': 'hours',
   'התאמה': 'adjustment',
-  'חופשה בתשלום': 'paid_leave',
+  'חופשה בתשלום': 'leave_system_paid',
 };
 
 function parseDate(value) {

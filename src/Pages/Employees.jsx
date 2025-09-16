@@ -2,14 +2,28 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Plus, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import EmployeeList from "../components/employees/EmployeeList";
 import { searchVariants } from "@/lib/layoutSwap";
 import EmployeeForm from "../components/employees/EmployeeForm";
+import LeaveOverview from "../components/employees/LeaveOverview.jsx";
 import { supabase } from "../supabaseClient";
+import { DEFAULT_LEAVE_POLICY, normalizeLeavePolicy } from "@/lib/leave.js";
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+
+const getLedgerTimestamp = (entry = {}) => {
+  const raw = entry.date || entry.entry_date || entry.effective_date || entry.change_date || entry.created_at;
+  if (!raw) return 0;
+  const parsed = new Date(raw);
+  const value = parsed.getTime();
+  return Number.isNaN(value) ? 0 : value;
+};
+
+const sortLeaveLedger = (entries = []) => {
+  return [...entries].sort((a, b) => getLedgerTimestamp(a) - getLedgerTimestamp(b));
+};
 
 export default function Employees() {
   const [employees, setEmployees] = useState([]);
@@ -21,24 +35,38 @@ export default function Employees() {
   const [activeTab, setActiveTab] = useState("active");
   const [isLoading, setIsLoading] = useState(true);
   const [services, setServices] = useState([]);
+  const [activeView, setActiveView] = useState('list');
+  const [leaveBalances, setLeaveBalances] = useState([]);
+  const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [employeesData, ratesData, servicesData] = await Promise.all([
+      const [employeesData, ratesData, servicesData, settingsData, leaveLedgerData] = await Promise.all([
         supabase.from('Employees').select('*').order('name'),
         supabase.from('RateHistory').select('*'),
-        supabase.from('Services').select('*')
+        supabase.from('Services').select('*'),
+        supabase.from('Settings').select('settings_value').eq('key', 'leave_policy').single(),
+        supabase.from('LeaveBalances').select('*')
       ]);
 
       if (employeesData.error) throw employeesData.error;
       if (ratesData.error) throw ratesData.error;
-      if (servicesData.error) throw servicesData.error; 
+      if (servicesData.error) throw servicesData.error;
+      if (leaveLedgerData.error) throw leaveLedgerData.error;
 
       setEmployees(employeesData.data);
       setRateHistories(ratesData.data);
       const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
       setServices(filteredServices);
+      setLeaveBalances(sortLeaveLedger(leaveLedgerData.data || []));
+
+      if (settingsData.error) {
+        if (settingsData.error.code !== 'PGRST116') throw settingsData.error;
+        setLeavePolicy(DEFAULT_LEAVE_POLICY);
+      } else {
+        setLeavePolicy(normalizeLeavePolicy(settingsData.data?.settings_value));
+      }
     } catch (error) {
       console.error('Error fetching data:', error);
       toast.error("שגיאה בטעינת הנתונים");
@@ -68,6 +96,8 @@ export default function Employees() {
     try {
       // Separate the rate from the main employee data to avoid saving it in the Employees table
       const { current_rate, ...employeeDetails } = employeeData;
+      const annualLeave = Number(employeeDetails.annual_leave_days);
+      employeeDetails.annual_leave_days = Number.isNaN(annualLeave) ? 0 : annualLeave;
       const isNewEmployee = !editingEmployee;
       let employeeId;
 
@@ -215,29 +245,49 @@ export default function Employees() {
             onCancel={() => { setShowForm(false); setEditingEmployee(null); }}
           />
         ) : (
-          <>
-            <div className="mb-6 flex flex-col md:flex-row gap-4">
-              <div className="relative flex-1">
-                <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
-                <Input placeholder="חפש עובד..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pr-10" />
+          <Tabs value={activeView} onValueChange={setActiveView} className="w-full space-y-6">
+            <TabsList className="grid w-full sm:w-[320px] grid-cols-2 bg-white">
+              <TabsTrigger value="list">רשימת עובדים</TabsTrigger>
+              <TabsTrigger value="leave">חופשות וחגים</TabsTrigger>
+            </TabsList>
+            <TabsContent value="list" className="space-y-6">
+              <div className="flex flex-col md:flex-row gap-4">
+                <div className="relative flex-1">
+                  <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-400 w-4 h-4" />
+                  <Input
+                    placeholder="חפש עובד..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="pr-10"
+                  />
+                </div>
+                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full md:w-auto">
+                  <TabsList className="grid w-full md:w-auto grid-cols-3 bg-white">
+                    <TabsTrigger value="all">הכל</TabsTrigger>
+                    <TabsTrigger value="active">פעילים</TabsTrigger>
+                    <TabsTrigger value="inactive">לא פעילים</TabsTrigger>
+                  </TabsList>
+                </Tabs>
               </div>
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full md:w-auto">
-                <TabsList className="grid w-full md:w-auto grid-cols-3 bg-white">
-                  <TabsTrigger value="all">הכל</TabsTrigger>
-                  <TabsTrigger value="active">פעילים</TabsTrigger>
-                  <TabsTrigger value="inactive">לא פעילים</TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-            <EmployeeList 
-              employees={filteredEmployees} 
-              rateHistories={rateHistories}
-              services={services}
-              onEdit={handleEdit} 
-              onToggleActive={handleToggleActive} 
-              isLoading={isLoading} 
-            />
-          </>
+              <EmployeeList
+                employees={filteredEmployees}
+                rateHistories={rateHistories}
+                services={services}
+                onEdit={handleEdit}
+                onToggleActive={handleToggleActive}
+                isLoading={isLoading}
+              />
+            </TabsContent>
+            <TabsContent value="leave">
+              <LeaveOverview
+                employees={employees}
+                leaveBalances={leaveBalances}
+                leavePolicy={leavePolicy}
+                onRefresh={loadData}
+                isLoading={isLoading}
+              />
+            </TabsContent>
+          </Tabs>
         )}
       </div>
     </div>

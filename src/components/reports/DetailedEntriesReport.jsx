@@ -7,6 +7,7 @@ import { he } from "date-fns/locale";
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getColorForService } from '@/lib/colorUtils';
+import { isLeaveEntryType, getLeaveKindFromEntryType, HOLIDAY_TYPE_LABELS } from '@/lib/leave.js';
 
 export default function DetailedEntriesReport({ sessions, employees, services, isLoading, initialGroupBy = 'none' }) {
   const [groupBy, setGroupBy] = useState(initialGroupBy);
@@ -20,7 +21,10 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
   
   const getServiceName = (session) => {
     const employee = getEmployee(session.employee_id);
-    if (session.entry_type === 'paid_leave') return 'חופשה בתשלום';
+    if (isLeaveEntryType(session.entry_type)) {
+      const kind = getLeaveKindFromEntryType(session.entry_type);
+      return HOLIDAY_TYPE_LABELS[kind] || 'חופשה';
+    }
     if (employee?.employee_type === 'hourly' || employee?.employee_type === 'global') return 'שעות עבודה';
     const service = services.find(s => s.id === session.service_id);
     return service ? service.name : 'שירות לא ידוע';
