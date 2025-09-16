@@ -203,7 +203,14 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                 if (paidLeave) {
                                   leaveKind = getLeaveKindFromEntryType(paidLeave.entry_type) || paidLeave.leave_type || paidLeave.leave_kind || paidLeave.metadata?.leave_type || paidLeave.metadata?.leave_kind || null;
                                   leaveLabel = leaveKind ? (HOLIDAY_TYPE_LABELS[leaveKind] || leaveKind) : null;
-                                  summaryText = leaveLabel || 'חופשה';
+                                  if (leaveKind === 'mixed') {
+                                    const isPaid = paidLeave.payable !== false;
+                                    const status = isPaid ? 'בתשלום' : 'לא בתשלום';
+                                    summaryText = `מעורב · ${status}`;
+                                    leaveLabel = `מעורב · ${status}`;
+                                  } else {
+                                    summaryText = leaveLabel || 'חופשה';
+                                  }
                                 } else if (regularSessions.length > 0) {
                                   if (emp.employee_type === 'instructor') {
                                     summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
@@ -236,6 +243,9 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                               payload.paidLeaveId = paidLeave.id;
                                               payload.paidLeaveNotes = paidLeave.notes || '';
                                               payload.leaveType = leaveKind || null;
+                                              if (leaveKind === 'mixed') {
+                                                payload.mixedPaid = paidLeave.payable !== false;
+                                              }
                                             }
                                             setEditingCell(payload);
                                           }
@@ -327,6 +337,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
               getRateForDate={getRateForDate}
               allowDayTypeSelection
               allowHalfDay={leavePolicy?.allow_half_day}
+              initialMixedPaid={editingCell.mixedPaid}
               onSubmit={async (result) => {
                 if (!result) {
                   setEditingCell(null);
@@ -341,6 +352,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                     paidLeaveId: result.paidLeaveId,
                     paidLeaveNotes: result.paidLeaveNotes,
                     leaveType: result.leaveType,
+                    mixedPaid: result.mixedPaid,
                   });
                   setEditingCell(null);
                 } catch {

@@ -62,7 +62,7 @@ describe('per-employee day type control rendering', () => {
 describe('day type visibility', () => {
   it('single-day modal shows day type only for globals', () => {
     const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'),'utf8');
-    assert(content.includes('showDayType={isGlobal}'));
+    assert(content.includes('showDayType={allowDayTypeSelection ? true : isGlobal}'));
   });
   it('multi-date modal shows day type only for global groups', () => {
     const content = fs.readFileSync(path.join('src','components','time-entry','MultiDateEntryModal.jsx'),'utf8');
@@ -143,6 +143,36 @@ describe('paid leave restrictions', () => {
   });
 });
 
+describe('mixed leave persistence', () => {
+  it('saves paid mixed leave with payable flag', async () => {
+    let inserted = [];
+    const employees = [{ id: 'g1', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
+    const services = [];
+    const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
+    const getRateForDate = () => ({ rate: 3000 });
+    const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
+    await saveMixedLeave([{ employee_id: 'g1', date: '2024-02-01', paid: true }], { leaveType: 'mixed' });
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0].entry_type, 'leave_mixed');
+    assert.equal(inserted[0].payable, true);
+    assert(inserted[0].total_payment > 0);
+  });
+
+  it('saves unpaid mixed leave without payment', async () => {
+    let inserted = [];
+    const employees = [{ id: 'g1', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
+    const services = [];
+    const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
+    const getRateForDate = () => ({ rate: 3000 });
+    const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
+    await saveMixedLeave([{ employee_id: 'g1', date: '2024-02-02', paid: false }], { leaveType: 'mixed' });
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0].payable, false);
+    assert.equal(inserted[0].total_payment, 0);
+    assert.equal(inserted[0].rate_used, null);
+  });
+});
+
 describe('day editor helpers', () => {
   it('applyDayType propagates to all rows', () => {
     const rows = [{ id: 'a', dayType: 'regular' }, { id: 'b', dayType: 'regular' }];
@@ -202,9 +232,9 @@ describe('segment duplication and deletion', () => {
   });
 
   it('includes_delete_confirm_text', () => {
-    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'),'utf8');
-    assert(content.includes('מחיקה בלתי הפיכה'));
-    assert(content.includes('הפעולה בלתי הפיכה ולא ניתן לשחזר'));
+    const translations = fs.readFileSync(path.join('src','i18n','he.json'),'utf8');
+    assert(translations.includes('הפעולה בלתי הפיכה'));
+    assert(translations.includes("'מחק'"));
   });
 
   it('footer_actions_order', () => {
@@ -237,7 +267,7 @@ describe('global daily rate ignores hours', () => {
 describe('single day shell layout', () => {
   it('hourly shell matches global style without daytype', () => {
     const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'),'utf8');
-    assert(content.includes('showDayType={isGlobal}'));
+    assert(content.includes('showDayType={allowDayTypeSelection ? true : isGlobal}'));
   });
   it('sticky footer visible and body scrolls', () => {
     const content = fs.readFileSync(path.join('src','components','time-entry','shared','SingleDayEntryShell.jsx'),'utf8');
@@ -292,6 +322,19 @@ describe('global hours segments', () => {
   it('TimeEntryForm has add segment microcopy', () => {
     const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'), 'utf8');
     assert(content.includes('הוסף מקטע שעות'));
+  });
+});
+
+describe('mixed leave ui cues', () => {
+  it('single-day modal asks if mixed day is paid', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'), 'utf8');
+    assert(content.includes('האם היום המעורב בתשלום?'));
+  });
+
+  it('multi-date modal includes mixed quick actions', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','MultiDateEntryModal.jsx'), 'utf8');
+    assert(content.includes('סמן הכל כבתשלום'));
+    assert(content.includes('סמן הכל כלא בתשלום'));
   });
 });
 

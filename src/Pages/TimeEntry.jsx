@@ -271,7 +271,7 @@ export default function TimeEntry() {
     }
   };
 
-  const handleTableSubmit = async ({ employee, day, dayType, updatedRows, paidLeaveId, paidLeaveNotes, leaveType }) => {
+  const handleTableSubmit = async ({ employee, day, dayType, updatedRows, paidLeaveId, paidLeaveNotes, leaveType, mixedPaid }) => {
     setIsLoading(true);
     try {
       const toInsert = [];
@@ -432,7 +432,9 @@ export default function TimeEntry() {
           }
         }
 
-        const isPayable = isPayableLeaveKind(leaveType);
+        const isMixed = leaveType === 'mixed';
+        const mixedIsPaid = isMixed ? (mixedPaid !== false) : false;
+        const isPayable = isMixed ? mixedIsPaid : isPayableLeaveKind(leaveType);
         let rateUsed = 0;
         let totalPayment = 0;
         if (isPayable) {
@@ -456,8 +458,8 @@ export default function TimeEntry() {
           employee_id: employee.id,
           date: dateStr,
           notes: paidLeaveNotes || null,
-          rate_used: rateUsed || null,
-          total_payment: totalPayment,
+          rate_used: isPayable ? (rateUsed || null) : null,
+          total_payment: isPayable ? totalPayment : 0,
           entry_type: entryType,
           hours: 0,
           service_id: null,

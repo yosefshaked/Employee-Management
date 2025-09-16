@@ -13,6 +13,7 @@ import he from '@/i18n/he.json';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
 import { LEAVE_TYPE_OPTIONS } from '@/lib/leave.js';
 
 export default function TimeEntryForm({
@@ -29,6 +30,7 @@ export default function TimeEntryForm({
   allowDayTypeSelection = false,
   initialLeaveType = null,
   allowHalfDay = false,
+  initialMixedPaid = true,
 }) {
   const isGlobal = employee.employee_type === 'global';
   const isHourly = employee.employee_type === 'hourly';
@@ -43,6 +45,9 @@ export default function TimeEntryForm({
   const [dayType, setDayType] = useState(initialDayType);
   const [paidLeaveNotes, setPaidLeaveNotes] = useState(initialPaidLeaveNotes);
   const [leaveType, setLeaveType] = useState(initialLeaveType || '');
+  const [mixedPaid, setMixedPaid] = useState(
+    initialLeaveType === 'mixed' ? (initialMixedPaid !== false) : true
+  );
   const [errors, setErrors] = useState({});
   const [pendingDelete, setPendingDelete] = useState(null);
 
@@ -58,6 +63,12 @@ export default function TimeEntryForm({
       setLeaveType(firstOption ? firstOption[0] : '');
     }
   }, [allowHalfDay, leaveType, leaveTypeOptions]);
+
+  useEffect(() => {
+    if (initialLeaveType === 'mixed') {
+      setMixedPaid(initialMixedPaid !== false);
+    }
+  }, [initialLeaveType, initialMixedPaid]);
 
   const dailyRate = useMemo(() => {
     if (!isGlobal) return 0;
@@ -126,6 +137,7 @@ export default function TimeEntryForm({
     setDayType(value);
     if (value !== 'paid_leave') {
       setLeaveType('');
+      setMixedPaid(true);
     } else if (!leaveType) {
       const [firstOption] = leaveTypeOptions;
       if (firstOption) setLeaveType(firstOption[0]);
@@ -158,7 +170,14 @@ export default function TimeEntryForm({
         toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 10000 });
         return;
       }
-      onSubmit({ rows: [], dayType, paidLeaveId, paidLeaveNotes, leaveType });
+      onSubmit({
+        rows: [],
+        dayType,
+        paidLeaveId,
+        paidLeaveNotes,
+        leaveType,
+        mixedPaid: leaveType === 'mixed' ? mixedPaid : null
+      });
       return;
     }
     if (!validate()) return;
@@ -257,6 +276,29 @@ export default function TimeEntryForm({
           placeholder="הערה חופשית (לא חובה)"
         />
       </div>
+      {leaveType === 'mixed' && (
+        <div className="space-y-1">
+          <Label className="text-sm font-medium text-slate-700">האם היום המעורב בתשלום?</Label>
+          <div className="flex gap-2" role="radiogroup" aria-label="האם היום המעורב בתשלום?">
+            <Button
+              type="button"
+              variant={mixedPaid ? 'default' : 'ghost'}
+              className="flex-1 h-10"
+              onClick={() => setMixedPaid(true)}
+            >
+              כן
+            </Button>
+            <Button
+              type="button"
+              variant={!mixedPaid ? 'default' : 'ghost'}
+              className="flex-1 h-10"
+              onClick={() => setMixedPaid(false)}
+            >
+              לא
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 
