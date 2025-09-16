@@ -13,7 +13,7 @@ import he from '@/i18n/he.json';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { HOLIDAY_TYPE_LABELS } from '@/lib/leave.js';
+import { LEAVE_TYPE_OPTIONS } from '@/lib/leave.js';
 
 export default function TimeEntryForm({
   employee,
@@ -47,12 +47,9 @@ export default function TimeEntryForm({
   const [pendingDelete, setPendingDelete] = useState(null);
 
   const leaveTypeOptions = useMemo(() => {
-    const base = allowHalfDay
-      ? ['system_paid', 'employee_paid', 'unpaid', 'half_day']
-      : ['system_paid', 'employee_paid', 'unpaid'];
-    return base
-      .map(value => [value, HOLIDAY_TYPE_LABELS[value]])
-      .filter(([, label]) => Boolean(label));
+    return LEAVE_TYPE_OPTIONS
+      .filter(option => allowHalfDay || option.value !== 'half_day')
+      .map(option => [option.value, option.label]);
   }, [allowHalfDay]);
 
   useEffect(() => {

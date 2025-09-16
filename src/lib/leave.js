@@ -9,13 +9,18 @@ export const DEFAULT_LEAVE_POLICY = {
   holiday_rules: [],
 };
 
-export const HOLIDAY_TYPE_LABELS = {
-  system_paid: 'חג (משולם – ע"ח המערכת)',
-  employee_paid: 'חג (משולם – יורד מהמכסה)',
-  unpaid: 'לא משולם',
-  mixed: 'מעורב',
-  half_day: 'ערב חג (חצי יום)',
-};
+export const LEAVE_TYPE_OPTIONS = [
+  { value: 'employee_paid', label: 'חופשה מהמכסה' },
+  { value: 'system_paid', label: 'חג משולם (מערכת)' },
+  { value: 'unpaid', label: 'לא משולם' },
+  { value: 'mixed', label: 'מעורב' },
+  { value: 'half_day', label: 'חצי יום' },
+];
+
+export const HOLIDAY_TYPE_LABELS = LEAVE_TYPE_OPTIONS.reduce((acc, option) => {
+  acc[option.value] = option.label;
+  return acc;
+}, {});
 
 export const LEAVE_ENTRY_TYPES = {
   system_paid: 'leave_system_paid',

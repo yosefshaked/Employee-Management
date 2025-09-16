@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 import { Loader2, ShieldCheck, Info } from 'lucide-react';
 import { supabase } from '@/supabaseClient';
 import { selectLeaveRemaining, selectHolidayForDate } from '@/selectors.js';
-import { DEFAULT_LEAVE_POLICY, HOLIDAY_TYPE_LABELS, getNegativeBalanceFloor } from '@/lib/leave.js';
+import { DEFAULT_LEAVE_POLICY, HOLIDAY_TYPE_LABELS, LEAVE_TYPE_OPTIONS, getNegativeBalanceFloor } from '@/lib/leave.js';
 
 const ENTRY_KINDS = [
   { value: 'usage', label: 'סימון חופשה' },
@@ -45,6 +45,10 @@ export default function LeaveOverview({
     allocationAmount: 1,
     notes: '',
   });
+
+  const usageOptions = useMemo(() => {
+    return LEAVE_TYPE_OPTIONS.filter(option => leavePolicy.allow_half_day || option.value !== 'half_day');
+  }, [leavePolicy.allow_half_day]);
 
   useEffect(() => {
     if (!formState.employeeId && employees.length > 0) {
@@ -239,15 +243,11 @@ export default function LeaveOverview({
                     <SelectTrigger className="bg-white">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="employee_paid">חופשה מהמכסה</SelectItem>
-                      <SelectItem value="system_paid">חג משולם (מערכת)</SelectItem>
-                      <SelectItem value="unpaid">לא משולם</SelectItem>
-                      <SelectItem value="mixed">מעורב</SelectItem>
-                      {leavePolicy.allow_half_day && (
-                        <SelectItem value="half_day">חצי יום</SelectItem>
-                      )}
-                    </SelectContent>
+                  <SelectContent>
+                    {usageOptions.map(option => (
+                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    ))}
+                  </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-1">

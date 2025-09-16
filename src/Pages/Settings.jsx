@@ -13,18 +13,11 @@ import { supabase } from '@/supabaseClient';
 import {
   DEFAULT_LEAVE_POLICY,
   HOLIDAY_TYPE_LABELS,
+  LEAVE_TYPE_OPTIONS,
   normalizeLeavePolicy,
   findHolidayForDate,
   normalizeHolidayRule,
 } from '@/lib/leave.js';
-
-const HOLIDAY_OPTIONS = [
-  { value: 'system_paid', label: 'חג (משולם – ע״ח המערכת)' },
-  { value: 'employee_paid', label: 'חג (משולם – יורד מהמכסה)' },
-  { value: 'unpaid', label: 'לא משולם' },
-  { value: 'mixed', label: 'מעורב' },
-  { value: 'half_day', label: 'ערב חג (חצי יום)' },
-];
 
 function createNewRule() {
   const today = new Date().toISOString().slice(0, 10);
@@ -38,8 +31,8 @@ function createNewRule() {
 
 function HolidayRuleRow({ rule, onChange, onRemove, onSave, allowHalfDay, isSaving }) {
   const typeOptions = useMemo(() => {
-    if (allowHalfDay) return HOLIDAY_OPTIONS;
-    return HOLIDAY_OPTIONS.filter(option => option.value !== 'half_day');
+    if (allowHalfDay) return LEAVE_TYPE_OPTIONS;
+    return LEAVE_TYPE_OPTIONS.filter(option => option.value !== 'half_day');
   }, [allowHalfDay]);
   return (
     <TableRow>

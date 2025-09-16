@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.4.0**
-**Last Updated: 2025-09-16**
+**Version: 1.4.1**
+**Last Updated: 2025-09-17**
 
 ## 1. Vision & Purpose
 
@@ -263,11 +263,11 @@ The leave module centralizes all holiday rules, quotas, and ledger actions so em
 - The **"חגים וימי חופשה"** screen under Settings edits the `leave_policy` JSON described in Section 3.5.
 - Toggles use the following Hebrew microcopy: "אישור חצי יום", "היתרה יכולה לרדת למינוס", "כמות חריגה מימי החופש המוגדרים", "העברת יתרה לשנה הבאה", and "מקסימום להעברה".
 - Holiday rows capture a name, date range, and tag selected from:
-  - `system_paid` → "חג (משולם – ע"ח המערכת)" (no deduction, payroll marks the day as paid by the organization).
-  - `employee_paid` → "חג (משולם – יורד מהמכסה)" (deducts from the employee quota).
+  - `system_paid` → "חג משולם (מערכת)" (no deduction, payroll marks the day as paid by the organization).
+  - `employee_paid` → "חופשה מהמכסה" (deducts from the employee quota).
   - `unpaid` → "לא משולם".
   - `mixed` → "מעורב".
-  - `half_day` → "ערב חג (חצי יום)" (available only when half-day usage is enabled).
+  - `half_day` → "חצי יום" (available only when half-day usage is enabled).
 - All persistence must go through Supabase `upsert` on the `Settings` table to avoid duplicate keys.
 
 ### 6.2. Employee quota and proration
