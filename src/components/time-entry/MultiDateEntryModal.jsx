@@ -74,7 +74,24 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   useEffect(() => { setRows(initialRows); }, [initialRows]);
   const { saveRows, saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, workSessions });
 
-  const [mode, setMode] = useState('regular');
+  const globalEmployeeIds = useMemo(
+    () => selectedEmployees.filter(id => employeesById[id]?.employee_type === 'global'),
+    [selectedEmployees, employeesById]
+  );
+  const shouldForceLeaveMode = globalEmployeeIds.length > 0 && globalEmployeeIds.length === selectedEmployees.length;
+
+  const [mode, setMode] = useState(shouldForceLeaveMode ? 'leave' : 'regular');
+  useEffect(() => {
+    if (shouldForceLeaveMode && mode !== 'leave') {
+      setMode('leave');
+    }
+  }, [shouldForceLeaveMode, mode]);
+
+  const showModeToggle = !shouldForceLeaveMode;
+  const handleModeChange = useCallback((nextMode) => {
+    if (shouldForceLeaveMode && nextMode !== 'leave') return;
+    setMode(nextMode);
+  }, [shouldForceLeaveMode]);
   const leaveTypeOptions = useMemo(
     () => LEAVE_TYPE_OPTIONS.filter(option => option.value === 'mixed'),
     []
@@ -104,10 +121,6 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   const [mixedSelections, setMixedSelections] = useState(defaultMixedSelections);
   useEffect(() => { setMixedSelections(defaultMixedSelections); }, [defaultMixedSelections]);
 
-  const globalEmployeeIds = useMemo(
-    () => selectedEmployees.filter(id => employeesById[id].employee_type === 'global'),
-    [selectedEmployees, employeesById]
-  );
   const [employeeDayType, setEmployeeDayType] = useState({});
   const [dayTypeErrors, setDayTypeErrors] = useState({});
   const getEmployeeDayType = useCallback((id) => employeeDayType[id] || null, [employeeDayType]);
@@ -363,24 +376,26 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
               className="flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-24 space-y-3 relative"
               data-testid="md-body"
             >
-              <div className="flex items-center justify-between bg-slate-100 rounded-lg ring-1 ring-slate-200 p-1">
-                <Button
-                  type="button"
-                  variant={mode === 'regular' ? 'default' : 'ghost'}
-                  className="flex-1 h-9"
-                  onClick={() => setMode('regular')}
-                >
-                  רישום שעות
-                </Button>
-                <Button
-                  type="button"
-                  variant={mode === 'leave' ? 'default' : 'ghost'}
-                  className="flex-1 h-9"
-                  onClick={() => setMode('leave')}
-                >
-                  חופשה
-                </Button>
-              </div>
+              {showModeToggle && (
+                <div className="flex items-center justify-between bg-slate-100 rounded-lg ring-1 ring-slate-200 p-1">
+                  <Button
+                    type="button"
+                    variant={mode === 'regular' ? 'default' : 'ghost'}
+                    className="flex-1 h-9"
+                    onClick={() => handleModeChange('regular')}
+                  >
+                    רישום שעות
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={mode === 'leave' ? 'default' : 'ghost'}
+                    className="flex-1 h-9"
+                    onClick={() => handleModeChange('leave')}
+                  >
+                    חופשה
+                  </Button>
+                </div>
+              )}
 
               {mode === 'regular' ? (
                 <>

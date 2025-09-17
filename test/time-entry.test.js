@@ -59,6 +59,15 @@ describe('per-employee day type control rendering', () => {
   });
 });
 
+describe('global leave flow gating', () => {
+  it('forces leave mode when only global employees are selected', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','MultiDateEntryModal.jsx'),'utf8');
+    assert(content.includes('shouldForceLeaveMode'));
+    assert(content.includes('!shouldForceLeaveMode'));
+    assert(content.includes("if (shouldForceLeaveMode && mode !== 'leave')"));
+  });
+});
+
 describe('day type visibility', () => {
   it('single-day modal shows day type only for globals', () => {
     const content = fs.readFileSync(path.join('src','components','time-entry','TimeEntryForm.jsx'),'utf8');
