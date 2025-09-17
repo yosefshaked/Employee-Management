@@ -9,7 +9,7 @@ import { searchVariants } from "@/lib/layoutSwap";
 import EmployeeForm from "../components/employees/EmployeeForm";
 import LeaveOverview from "../components/employees/LeaveOverview.jsx";
 import { supabase } from "../supabaseClient";
-import { DEFAULT_LEAVE_POLICY, normalizeLeavePolicy } from "@/lib/leave.js";
+import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, normalizeLeavePayPolicy } from "@/lib/leave.js";
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -38,16 +38,18 @@ export default function Employees() {
   const [activeView, setActiveView] = useState('list');
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
+  const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [employeesData, ratesData, servicesData, settingsData, leaveLedgerData] = await Promise.all([
+      const [employeesData, ratesData, servicesData, leavePolicySettings, leaveLedgerData, leavePayPolicySettings] = await Promise.all([
         supabase.from('Employees').select('*').order('name'),
         supabase.from('RateHistory').select('*'),
         supabase.from('Services').select('*'),
         supabase.from('Settings').select('settings_value').eq('key', 'leave_policy').single(),
-        supabase.from('LeaveBalances').select('*')
+        supabase.from('LeaveBalances').select('*'),
+        supabase.from('Settings').select('settings_value').eq('key', 'leave_pay_policy').single(),
       ]);
 
       if (employeesData.error) throw employeesData.error;
@@ -61,11 +63,18 @@ export default function Employees() {
       setServices(filteredServices);
       setLeaveBalances(sortLeaveLedger(leaveLedgerData.data || []));
 
-      if (settingsData.error) {
-        if (settingsData.error.code !== 'PGRST116') throw settingsData.error;
+      if (leavePolicySettings.error) {
+        if (leavePolicySettings.error.code !== 'PGRST116') throw leavePolicySettings.error;
         setLeavePolicy(DEFAULT_LEAVE_POLICY);
       } else {
-        setLeavePolicy(normalizeLeavePolicy(settingsData.data?.settings_value));
+        setLeavePolicy(normalizeLeavePolicy(leavePolicySettings.data?.settings_value));
+      }
+
+      if (leavePayPolicySettings.error) {
+        if (leavePayPolicySettings.error.code !== 'PGRST116') throw leavePayPolicySettings.error;
+        setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
+      } else {
+        setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicySettings.data?.settings_value));
       }
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -283,6 +292,7 @@ export default function Employees() {
                 employees={employees}
                 leaveBalances={leaveBalances}
                 leavePolicy={leavePolicy}
+                leavePayPolicy={leavePayPolicy}
                 onRefresh={loadData}
                 isLoading={isLoading}
               />
