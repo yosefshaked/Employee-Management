@@ -169,13 +169,29 @@ function computeDailyValue({
 }
 
 function logInsufficientData(method, employeeId, details) {
-  console.warn('selectLeaveDayValue: insufficient data', {
+  const env = typeof globalThis !== 'undefined' && globalThis.process
+    ? globalThis.process.env?.NODE_ENV
+    : undefined;
+  if (env === 'production') {
+    return;
+  }
+  const workedDaysCount = details?.workedDays instanceof Set
+    ? details.workedDays.size
+    : details?.workedDaysCount || details?.workedDays || 0;
+  const payload = {
     method,
     employeeId,
-    totalEarnings: details.totalEarnings || 0,
-    totalHours: details.totalHours || 0,
-    workedDays: details.workedDays ? details.workedDays.size || 0 : 0,
-  });
+    totalEarnings: details?.totalEarnings || 0,
+    totalHours: details?.totalHours || 0,
+    workedDays: workedDaysCount,
+  };
+  if (typeof console !== 'undefined') {
+    if (typeof console.debug === 'function') {
+      console.debug('selectLeaveDayValue: insufficient data', payload);
+    } else if (typeof console.log === 'function') {
+      console.log('selectLeaveDayValue: insufficient data', payload);
+    }
+  }
 }
 
 function entryMatchesFilters(row, emp, filters = {}) {
@@ -279,6 +295,7 @@ export function selectLeaveDayValue(
     services = [],
     leavePayPolicy = null,
     settings = null,
+    collectDiagnostics = false,
   } = {},
 ) {
   const targetDate = toDate(date) || new Date();
@@ -287,17 +304,39 @@ export function selectLeaveDayValue(
   const fallbackMethod = policy.default_method || DEFAULT_LEAVE_PAY_POLICY.default_method;
   const method = sanitizeMethod(employee?.leave_pay_method, fallbackMethod);
 
+  const normalizeDiagnostics = (raw) => ({
+    totalEarnings: raw?.totalEarnings || 0,
+    totalHours: raw?.totalHours || 0,
+    workedDaysCount: raw?.workedDays instanceof Set
+      ? raw.workedDays.size
+      : raw?.workedDaysCount || raw?.workedDays || 0,
+  });
+
+  const buildResult = (value, { diagnostics = null, insufficient = false } = {}) => {
+    if (collectDiagnostics) {
+      return {
+        value,
+        insufficientData: Boolean(insufficient),
+        method,
+        diagnostics: normalizeDiagnostics(diagnostics),
+      };
+    }
+    return value;
+  };
+
+  const emptyDiagnostics = { totalEarnings: 0, totalHours: 0, workedDays: new Set() };
+
   if (method === 'fixed_rate') {
     const employeeRate = parsePositiveNumber(employee?.leave_fixed_day_rate);
     if (employeeRate !== null) {
-      return employeeRate;
+      return buildResult(employeeRate, { diagnostics: emptyDiagnostics });
     }
     const policyRate = parsePositiveNumber(policy.fixed_rate_default);
     if (policyRate !== null) {
-      return policyRate;
+      return buildResult(policyRate, { diagnostics: emptyDiagnostics });
     }
-    logInsufficientData(method, employeeId, { totalEarnings: 0, totalHours: 0, workedDays: new Set() });
-    return 0;
+    logInsufficientData(method, employeeId, emptyDiagnostics);
+    return buildResult(0, { diagnostics: emptyDiagnostics, insufficient: true });
   }
 
   const sessions = Array.isArray(workSessions) ? workSessions : (Array.isArray(settings?.workSessions) ? settings.workSessions : []);
@@ -331,9 +370,9 @@ export function selectLeaveDayValue(
 
   if (!bestValue || bestValue <= 0) {
     logInsufficientData(method, employeeId, diagnostics);
-    return 0;
+    return buildResult(0, { diagnostics, insufficient: true });
   }
 
-  return bestValue;
+  return buildResult(bestValue, { diagnostics });
 }
 

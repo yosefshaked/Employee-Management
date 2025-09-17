@@ -135,15 +135,29 @@ export default function TimeEntryForm({
     LEAVE_PAY_METHOD_DESCRIPTIONS[DEFAULT_LEAVE_PAY_POLICY.default_method] ||
     '';
 
-  const leaveDayValue = useMemo(() => {
-    if (!isPaidLeavePreview || !employee?.id) return 0;
-    return selectLeaveDayValue(employee.id, selectedDate, {
+  const leaveDayValueInfo = useMemo(() => {
+    if (!isPaidLeavePreview || !employee?.id) {
+      return { value: 0, insufficientData: false };
+    }
+    const result = selectLeaveDayValue(employee.id, selectedDate, {
       employees: employeesForSelector,
       workSessions,
       services,
       leavePayPolicy: normalizedLeavePay,
+      collectDiagnostics: true,
     });
+    if (result && typeof result === 'object' && !Number.isNaN(result.value)) {
+      return {
+        value: result.value,
+        insufficientData: Boolean(result.insufficientData),
+      };
+    }
+    const numericValue = Number.isFinite(result) ? result : 0;
+    return { value: numericValue, insufficientData: numericValue <= 0 };
   }, [isPaidLeavePreview, employee?.id, selectedDate, employeesForSelector, workSessions, services, normalizedLeavePay]);
+
+  const leaveDayValue = leaveDayValueInfo.value;
+  const showInsufficientHistoryHint = leaveDayValueInfo.insufficientData;
 
   const isHalfDaySelection = leaveKindForPay === 'half_day';
 
@@ -297,9 +311,14 @@ export default function TimeEntryForm({
           <span>{`שיטה: ${leaveMethodLabel}`}</span>
           {leaveMethodDescription ? <InfoTooltip text={leaveMethodDescription} /> : null}
         </div>
+        {showInsufficientHistoryHint ? (
+          <div className="mt-1 text-xs text-amber-700 text-right">
+            אין מספיק נתוני עבר—הערכה עשויה להיות חלקית
+          </div>
+        ) : null}
       </>
     );
-  }, [isLeaveDay, isGlobal, dailyRate, leaveType, mixedPaid, isPaidLeavePreview, leaveDayValue, isHalfDaySelection, leaveMethodLabel, leaveMethodDescription]);
+  }, [isLeaveDay, isGlobal, dailyRate, leaveType, mixedPaid, isPaidLeavePreview, leaveDayValue, isHalfDaySelection, leaveMethodLabel, leaveMethodDescription, showInsufficientHistoryHint]);
 
   const summary = isLeaveDay ? leaveSummary : baseSummary;
 
