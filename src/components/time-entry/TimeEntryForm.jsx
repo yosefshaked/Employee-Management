@@ -14,10 +14,23 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { LEAVE_TYPE_OPTIONS } from '@/lib/leave.js';
+import { InfoTooltip } from '@/components/InfoTooltip.jsx';
+import { selectLeaveDayValue } from '@/selectors.js';
+import {
+  DEFAULT_LEAVE_PAY_POLICY,
+  LEAVE_PAY_METHOD_DESCRIPTIONS,
+  LEAVE_PAY_METHOD_LABELS,
+  LEAVE_TYPE_OPTIONS,
+  isPayableLeaveKind,
+  normalizeLeavePayPolicy,
+} from '@/lib/leave.js';
+
+const VALID_LEAVE_PAY_METHODS = new Set(Object.keys(LEAVE_PAY_METHOD_LABELS));
 
 export default function TimeEntryForm({
   employee,
+  allEmployees = [],
+  workSessions = [],
   services = [],
   onSubmit,
   getRateForDate,
@@ -31,6 +44,7 @@ export default function TimeEntryForm({
   initialLeaveType = null,
   allowHalfDay = false,
   initialMixedPaid = true,
+  leavePayPolicy = DEFAULT_LEAVE_PAY_POLICY,
 }) {
   const isGlobal = employee.employee_type === 'global';
   const isHourly = employee.employee_type === 'hourly';
@@ -75,6 +89,63 @@ export default function TimeEntryForm({
     const { rate } = getRateForDate(employee.id, selectedDate, null);
     try { return calculateGlobalDailyRate(employee, selectedDate, rate); } catch { return 0; }
   }, [employee, selectedDate, getRateForDate, isGlobal]);
+
+  const isLeaveDay = dayType === 'paid_leave';
+
+  const normalizedLeavePay = useMemo(
+    () => normalizeLeavePayPolicy(leavePayPolicy),
+    [leavePayPolicy],
+  );
+
+  const employeesForSelector = useMemo(() => {
+    if (Array.isArray(allEmployees) && allEmployees.length > 0) return allEmployees;
+    return employee ? [employee] : [];
+  }, [allEmployees, employee]);
+
+  const leaveKindForPay = useMemo(() => {
+    if (!isLeaveDay) return null;
+    if (!leaveType) return null;
+    if (leaveType === 'mixed') {
+      return mixedPaid ? 'employee_paid' : null;
+    }
+    return leaveType;
+  }, [isLeaveDay, leaveType, mixedPaid]);
+
+  const isPaidLeavePreview = useMemo(() => {
+    if (!isLeaveDay || isGlobal) return false;
+    if (!leaveKindForPay) return false;
+    return isPayableLeaveKind(leaveKindForPay);
+  }, [isLeaveDay, isGlobal, leaveKindForPay]);
+
+  const leavePayMethod = useMemo(() => {
+    const override = employee?.leave_pay_method;
+    if (override && VALID_LEAVE_PAY_METHODS.has(override)) {
+      return override;
+    }
+    const fallback = normalizedLeavePay.default_method || DEFAULT_LEAVE_PAY_POLICY.default_method;
+    if (VALID_LEAVE_PAY_METHODS.has(fallback)) {
+      return fallback;
+    }
+    return DEFAULT_LEAVE_PAY_POLICY.default_method;
+  }, [employee?.leave_pay_method, normalizedLeavePay]);
+
+  const leaveMethodLabel = LEAVE_PAY_METHOD_LABELS[leavePayMethod] || LEAVE_PAY_METHOD_LABELS[DEFAULT_LEAVE_PAY_POLICY.default_method];
+  const leaveMethodDescription =
+    LEAVE_PAY_METHOD_DESCRIPTIONS[leavePayMethod] ||
+    LEAVE_PAY_METHOD_DESCRIPTIONS[DEFAULT_LEAVE_PAY_POLICY.default_method] ||
+    '';
+
+  const leaveDayValue = useMemo(() => {
+    if (!isPaidLeavePreview || !employee?.id) return 0;
+    return selectLeaveDayValue(employee.id, selectedDate, {
+      employees: employeesForSelector,
+      workSessions,
+      services,
+      leavePayPolicy: normalizedLeavePay,
+    });
+  }, [isPaidLeavePreview, employee?.id, selectedDate, employeesForSelector, workSessions, services, normalizedLeavePay]);
+
+  const isHalfDaySelection = leaveKindForPay === 'half_day';
 
   const addSeg = () => setSegments(prev => [...prev, createSeg()]);
   const duplicateSeg = (id) => {
@@ -184,7 +255,7 @@ export default function TimeEntryForm({
     onSubmit({ rows: segments, dayType, paidLeaveId, leaveType: null });
   };
 
-  const summary = useMemo(() => {
+  const baseSummary = useMemo(() => {
     const active = segments.filter(s => s._status !== 'deleted');
     if (isGlobal) return `שכר יומי: ₪${dailyRate.toFixed(2)}`;
     if (isHourly) {
@@ -199,7 +270,35 @@ export default function TimeEntryForm({
     return `שכר יומי: ₪${total.toFixed(2)}`;
   }, [segments, isGlobal, isHourly, dailyRate, employee, selectedDate, getRateForDate]);
 
-  const isLeaveDay = dayType === 'paid_leave';
+  const leaveSummary = useMemo(() => {
+    if (!isLeaveDay) return null;
+    if (isGlobal) {
+      return `שכר יומי: ₪${dailyRate.toFixed(2)}`;
+    }
+    if (!leaveType) {
+      return 'בחרו סוג חופשה כדי לחשב שווי.';
+    }
+    if (leaveType === 'mixed' && !mixedPaid) {
+      return 'היום המעורב סומן כלא משולם.';
+    }
+    if (!isPaidLeavePreview) {
+      return 'היום סומן כחופשה ללא תשלום.';
+    }
+    const value = Number.isFinite(leaveDayValue) ? leaveDayValue : 0;
+    const amount = isHalfDaySelection ? value / 2 : value;
+    const headline = isHalfDaySelection ? 'שווי חצי יום חופשה' : 'שווי יום חופשה';
+    return (
+      <>
+        <div className="text-base font-medium text-slate-900">{`${headline}: ₪${amount.toFixed(2)}`}</div>
+        <div className="flex items-center justify-end gap-2 text-xs text-slate-600">
+          <span>{`שיטה: ${leaveMethodLabel}`}</span>
+          {leaveMethodDescription ? <InfoTooltip text={leaveMethodDescription} /> : null}
+        </div>
+      </>
+    );
+  }, [isLeaveDay, isGlobal, dailyRate, leaveType, mixedPaid, isPaidLeavePreview, leaveDayValue, isHalfDaySelection, leaveMethodLabel, leaveMethodDescription]);
+
+  const summary = isLeaveDay ? leaveSummary : baseSummary;
 
   const renderSegment = (seg, idx) => {
     if (isGlobal) {

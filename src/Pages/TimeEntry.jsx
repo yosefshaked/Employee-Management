@@ -15,7 +15,9 @@ import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { hasDuplicateSession } from '@/lib/workSessionsUtils.js';
 import {
   DEFAULT_LEAVE_POLICY,
+  DEFAULT_LEAVE_PAY_POLICY,
   normalizeLeavePolicy,
+  normalizeLeavePayPolicy,
   getEntryTypeForLeaveKind,
   isLeaveEntryType,
   getLeaveLedgerDelta,
@@ -49,6 +51,7 @@ export default function TimeEntry() {
   const [workSessions, setWorkSessions] = useState([]);
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
+  const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
   const [viewMode, setViewMode] = useState('form');
@@ -60,12 +63,21 @@ export default function TimeEntry() {
   const loadInitialData = async () => {
     setIsLoading(true);
     try {
-      const [employeesData, sessionsData, ratesData, servicesData, settingsData, leaveLedgerData] = await Promise.all([
+      const [
+        employeesData,
+        sessionsData,
+        ratesData,
+        servicesData,
+        leavePolicySettings,
+        leavePayPolicySettings,
+        leaveLedgerData,
+      ] = await Promise.all([
         supabase.from('Employees').select('*').eq('is_active', true).order('name'),
         supabase.from('WorkSessions').select('*, service:service_id(name)').order('created_at', { ascending: false }),
         supabase.from('RateHistory').select('*'),
         supabase.from('Services').select('*'),
         supabase.from('Settings').select('settings_value').eq('key', 'leave_policy').single(),
+        supabase.from('Settings').select('settings_value').eq('key', 'leave_pay_policy').single(),
         supabase.from('LeaveBalances').select('*')
       ]);
 
@@ -82,15 +94,22 @@ export default function TimeEntry() {
       setServices(filteredServices);
       setLeaveBalances(sortLeaveLedger(leaveLedgerData.data || []));
 
-      if (settingsData.error) {
-        if (settingsData.error.code !== 'PGRST116') throw settingsData.error;
+      if (leavePolicySettings.error) {
+        if (leavePolicySettings.error.code !== 'PGRST116') throw leavePolicySettings.error;
         setLeavePolicy(DEFAULT_LEAVE_POLICY);
       } else {
-        setLeavePolicy(normalizeLeavePolicy(settingsData.data?.settings_value));
+        setLeavePolicy(normalizeLeavePolicy(leavePolicySettings.data?.settings_value));
       }
-    } catch (error) { 
+
+      if (leavePayPolicySettings.error) {
+        if (leavePayPolicySettings.error.code !== 'PGRST116') throw leavePayPolicySettings.error;
+        setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
+      } else {
+        setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicySettings.data?.settings_value));
+      }
+    } catch (error) {
       console.error("Error loading data:", error);
-      toast.error("שגיאה בטעינת הנתונים"); 
+      toast.error("שגיאה בטעינת הנתונים");
     }
     setIsLoading(false);
   };
@@ -564,10 +583,13 @@ export default function TimeEntry() {
                 {selectedEmployee && (
                   <TimeEntryForm
                     employee={selectedEmployee}
+                    allEmployees={employees}
+                    workSessions={workSessions}
                     services={services}
                     onSubmit={(res) => handleSessionSubmit(res.rows)}
                     getRateForDate={getRateForDate}
                     allowHalfDay={leavePolicy.allow_half_day}
+                    leavePayPolicy={leavePayPolicy}
                   />
                 )}
               </CardContent>
@@ -596,6 +618,7 @@ export default function TimeEntry() {
               onImported={loadInitialData}
               onDeleted={handleSessionsDeleted}
               leavePolicy={leavePolicy}
+              leavePayPolicy={leavePayPolicy}
             />
           </TabsContent>
         </Tabs>

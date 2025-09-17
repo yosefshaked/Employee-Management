@@ -40,6 +40,11 @@ export const LEAVE_PAY_METHOD_LABELS = LEAVE_PAY_METHOD_OPTIONS.reduce((acc, opt
   return acc;
 }, {});
 
+export const LEAVE_PAY_METHOD_DESCRIPTIONS = LEAVE_PAY_METHOD_OPTIONS.reduce((acc, option) => {
+  acc[option.value] = option.description;
+  return acc;
+}, {});
+
 export const LEAVE_TYPE_OPTIONS = [
   { value: 'employee_paid', label: 'חופשה מהמכסה' },
   { value: 'system_paid', label: 'חג משולם (מערכת)' },

@@ -13,7 +13,7 @@ import MultiDateEntryModal from './MultiDateEntryModal.jsx';
 import { aggregateGlobalDays, aggregateGlobalDayForDate } from '@/lib/payroll.js';
 import { Badge } from '@/components/ui/badge';
 import { HOLIDAY_TYPE_LABELS, getLeaveKindFromEntryType, isLeaveEntryType } from '@/lib/leave.js';
-function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported, onDeleted, leavePolicy }) {
+function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported, onDeleted, leavePolicy, leavePayPolicy }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
   const [multiMode, setMultiMode] = useState(false);
@@ -327,6 +327,8 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
           {editingCell && (
             <TimeEntryForm
               employee={editingCell.employee}
+              allEmployees={employees}
+              workSessions={workSessions}
               services={services}
               initialRows={editingCell.existingSessions}
               initialDayType={editingCell.dayType || 'regular'}
@@ -338,6 +340,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
               allowDayTypeSelection
               allowHalfDay={leavePolicy?.allow_half_day}
               initialMixedPaid={editingCell.mixedPaid}
+              leavePayPolicy={leavePayPolicy}
               onSubmit={async (result) => {
                 if (!result) {
                   setEditingCell(null);
