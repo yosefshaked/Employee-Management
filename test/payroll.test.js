@@ -232,6 +232,50 @@ describe('computePeriodTotals aggregator', () => {
     assert.ok(empTotals);
     assert.equal(empTotals.pay, expected + 200);
   });
+
+  it('counts half-day paid leave as half the selector value', () => {
+    const hourlyEmployees = [
+      { id: 'h1', employee_type: 'hourly' },
+    ];
+    const workSessions = [
+      { employee_id: 'h1', date: '2024-02-10', entry_type: 'hours', total_payment: 400, hours: 8 },
+      { employee_id: 'h1', date: '2024-03-12', entry_type: 'hours', total_payment: 300, hours: 6 },
+      {
+        employee_id: 'h1',
+        date: '2024-04-18',
+        entry_type: 'leave_half_day',
+        payable: true,
+        total_payment: 0,
+        metadata: { leave_fraction: 0.5, leave_type: 'half_day' },
+      },
+    ];
+    const leavePayPolicy = {
+      default_method: 'avg_hourly_x_avg_day_hours',
+      lookback_months: 3,
+      legal_allow_12m_if_better: false,
+    };
+    const expectedDaily = selectLeaveDayValue('h1', '2024-04-18', {
+      employees: hourlyEmployees,
+      workSessions,
+      services: [],
+      leavePayPolicy,
+    });
+    const totals = computePeriodTotals({
+      workSessions,
+      employees: hourlyEmployees,
+      services: [],
+      startDate: '2024-04-01',
+      endDate: '2024-04-30',
+      leavePayPolicy,
+      leaveDayValueSelector: selectLeaveDayValue,
+    });
+    const empTotals = totals.totalsByEmployee.find(item => item.employee_id === 'h1');
+    assert.ok(empTotals);
+    assert.equal(empTotals.pay, expectedDaily * 0.5);
+    assert.equal(empTotals.daysPaid, 0.5);
+    assert.equal(totals.diagnostics.paidLeaveDays, 0.5);
+    assert.equal(totals.totalPay, expectedDaily * 0.5);
+  });
 });
 
 describe('clampDateString', () => {

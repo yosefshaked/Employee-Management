@@ -1,5 +1,5 @@
 import React from 'react';
-import { aggregateGlobalDays, createLeaveDayValueResolver } from '@/lib/payroll.js';
+import { aggregateGlobalDays, createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, TrendingUp } from "lucide-react";
@@ -19,11 +19,11 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
 
   const resolvePayment = (session) => {
     const employee = employees.find(emp => emp.id === session.employee_id);
-    if (!employee || employee.employee_type === 'global') return session.total_payment || 0;
-    if (!isLeaveEntryType(session.entry_type) || session.payable === false) return session.total_payment || 0;
-    const value = resolveLeaveValue(session.employee_id, session.date);
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    return session.total_payment || 0;
+    if (!employee || employee.employee_type === 'global') return Number(session.total_payment) || 0;
+    if (!isLeaveEntryType(session.entry_type) || session.payable === false) return Number(session.total_payment) || 0;
+    const { amount } = resolveLeaveSessionValue(session, resolveLeaveValue);
+    if (typeof amount === 'number' && Number.isFinite(amount)) return amount;
+    return Number(session.total_payment) || 0;
   };
 
   if (isLoading) {

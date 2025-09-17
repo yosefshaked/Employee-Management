@@ -195,6 +195,21 @@ describe('mixed leave persistence', () => {
     assert.equal(inserted.length, 1);
     assert.equal(inserted[0].date, '2024-02-02');
   });
+
+  it('saves half-day leave with fraction metadata for globals', async () => {
+    let inserted = [];
+    const employees = [{ id: 'g1', name: 'אנה', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
+    const services = [];
+    const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
+    const getRateForDate = () => ({ rate: 3000 });
+    const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
+    await saveMixedLeave([{ employee_id: 'g1', date: '2024-03-01', paid: true }], { leaveType: 'half_day' });
+    assert.equal(inserted.length, 1);
+    const expectedDaily = calculateGlobalDailyRate(employees[0], '2024-03-01', 3000);
+    assert.equal(inserted[0].metadata.leave_fraction, 0.5);
+    assert.equal(inserted[0].metadata.leave_type, 'half_day');
+    assert.equal(inserted[0].total_payment, expectedDaily / 2);
+  });
 });
 
 describe('day editor helpers', () => {

@@ -17,7 +17,7 @@ import DetailedEntriesReport from "../components/reports/DetailedEntriesReport";
 import MonthlyReport from "../components/reports/MonthlyReport";
 import PayrollSummary from "../components/reports/PayrollSummary";
 import ChartsOverview from "../components/reports/ChartsOverview";
-import { computePeriodTotals } from '@/lib/payroll.js';
+import { computePeriodTotals, createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
 import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, normalizeLeavePayPolicy, isLeaveEntryType } from '@/lib/leave.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
@@ -126,19 +126,21 @@ export default function Reports() {
       leaveDayValueSelector: selectLeaveDayValue,
     });
     const sourceSessions = Array.isArray(res.filteredSessions) ? res.filteredSessions : [];
+    const resolveLeaveValue = createLeaveDayValueResolver({
+      employees,
+      workSessions,
+      services,
+      leavePayPolicy,
+      leaveDayValueSelector: selectLeaveDayValue,
+    });
     const adjustedSessions = sourceSessions.map(session => {
       if (!session || session.payable === false) return session;
       const employee = employees.find(emp => emp.id === session.employee_id);
       if (!employee || employee.employee_type === 'global') return session;
       if (!isLeaveEntryType(session.entry_type)) return session;
-      const value = selectLeaveDayValue(session.employee_id, session.date, {
-        employees,
-        workSessions,
-        services,
-        leavePayPolicy,
-      });
-      if (typeof value !== 'number' || !Number.isFinite(value)) return session;
-      return { ...session, total_payment: value };
+      const { amount } = resolveLeaveSessionValue(session, resolveLeaveValue);
+      if (typeof amount !== 'number' || !Number.isFinite(amount)) return session;
+      return { ...session, total_payment: amount };
     });
     setFilteredSessions(adjustedSessions);
     setTotals({

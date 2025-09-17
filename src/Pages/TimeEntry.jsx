@@ -454,6 +454,7 @@ export default function TimeEntry() {
         const isMixed = leaveType === 'mixed';
         const mixedIsPaid = isMixed ? (mixedPaid !== false) : false;
         const isPayable = isMixed ? mixedIsPaid : isPayableLeaveKind(leaveType);
+        const leaveFraction = leaveType === 'half_day' ? 0.5 : 1;
         let rateUsed = 0;
         let totalPayment = 0;
         if (isPayable) {
@@ -465,7 +466,8 @@ export default function TimeEntry() {
           }
           if (employee.employee_type === 'global') {
             try {
-              totalPayment = calculateGlobalDailyRate(employee, day, rateUsed);
+              const dailyRateValue = calculateGlobalDailyRate(employee, day, rateUsed);
+              totalPayment = dailyRateValue * leaveFraction;
             } catch (err) {
               toast.error(err.message, { duration: 15000 });
               return;
@@ -485,6 +487,11 @@ export default function TimeEntry() {
           sessions_count: null,
           students_count: null,
           payable: isPayable,
+          metadata: {
+            leave_type: leaveType,
+            leave_kind: leaveType,
+            leave_fraction: leaveFraction,
+          },
         };
 
         if (hasDuplicateSession(workSessions, leaveRow)) {

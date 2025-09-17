@@ -98,6 +98,7 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
         continue;
       }
       const isPaid = item.paid !== false;
+      const leaveFraction = leaveType === 'half_day' ? 0.5 : 1;
       let rateUsed = null;
       let totalPayment = 0;
       if (isPaid) {
@@ -109,7 +110,7 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
         if (employee.employee_type === 'global') {
           const dailyRate = calculateGlobalDailyRate(employee, dateStr, resolvedRate);
           rateUsed = resolvedRate;
-          totalPayment = dailyRate;
+          totalPayment = dailyRate * leaveFraction;
         } else {
           rateUsed = resolvedRate || null;
         }
@@ -126,6 +127,11 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
         rate_used: rateUsed,
         total_payment: totalPayment,
         payable: isPaid,
+        metadata: {
+          leave_type: leaveType,
+          leave_kind: leaveType,
+          leave_fraction: leaveFraction,
+        },
       });
       occupied.add(key);
     }

@@ -8,7 +8,7 @@ import { format, parseISO } from "date-fns";
 import { he } from "date-fns/locale";
 import { Link } from "react-router-dom";
 import { getColorForService } from '@/lib/colorUtils';
-import { createLeaveDayValueResolver } from '@/lib/payroll.js';
+import { createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
 import { selectLeaveDayValue } from '@/selectors.js';
 import { isLeaveEntryType } from '@/lib/leave.js';
 
@@ -52,12 +52,14 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
               const employee = getEmployee(session.employee_id);
               const isHourlyOrGlobal = employee?.employee_type === 'hourly' || employee?.employee_type === 'global';
               const isPaidLeave = employee && employee.employee_type !== 'global' && isLeaveEntryType(session.entry_type) && session.payable !== false;
-              const computedPayment = isPaidLeave ? resolveLeaveValue(session.employee_id, session.date) : null;
+              const computedPayment = isPaidLeave
+                ? resolveLeaveSessionValue(session, resolveLeaveValue).amount
+                : null;
               const totalPayment = isPaidLeave
                 ? (typeof computedPayment === 'number' && Number.isFinite(computedPayment)
                   ? computedPayment
-                  : (session.total_payment || 0))
-                : (session.total_payment || 0);
+                  : (Number(session.total_payment) || 0))
+                : (Number(session.total_payment) || 0);
               
               return (
                 <div key={session.id} className="flex items-center gap-3 p-3 rounded-lg bg-slate-50">

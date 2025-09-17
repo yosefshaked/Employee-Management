@@ -273,7 +273,10 @@ export default function TimeEntryForm({
   const leaveSummary = useMemo(() => {
     if (!isLeaveDay) return null;
     if (isGlobal) {
-      return `שכר יומי: ₪${dailyRate.toFixed(2)}`;
+      const fraction = leaveType === 'half_day' ? 0.5 : 1;
+      const headline = leaveType === 'half_day' ? 'שווי חצי יום חופשה' : 'שכר יומי';
+      const amount = dailyRate * fraction;
+      return `${headline}: ₪${amount.toFixed(2)}`;
     }
     if (!leaveType) {
       return 'בחרו סוג חופשה כדי לחשב שווי.';

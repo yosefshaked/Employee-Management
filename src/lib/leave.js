@@ -97,6 +97,52 @@ export function getLeaveLedgerDelta(kind) {
   return 0;
 }
 
+function parseLeaveMetadata(value) {
+  if (!value) return null;
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch (error) {
+      console.warn('Failed to parse leave metadata JSON', error);
+    }
+  }
+  return null;
+}
+
+function coerceFiniteNumber(value) {
+  const num = typeof value === 'string' ? Number(value) : value;
+  return typeof num === 'number' && Number.isFinite(num) ? num : null;
+}
+
+export function getLeaveValueMultiplier(details = {}) {
+  const metadata = parseLeaveMetadata(details.metadata);
+  const candidates = [
+    details.leave_fraction,
+    details.leaveFraction,
+    details.fraction,
+    metadata?.leave_fraction,
+    metadata?.leaveFraction,
+    metadata?.fraction,
+  ];
+  for (const candidate of candidates) {
+    const num = coerceFiniteNumber(candidate);
+    if (num !== null && num > 0) {
+      return num;
+    }
+  }
+  const kind = details.leave_kind ||
+    details.leaveKind ||
+    details.leave_type ||
+    details.leaveType ||
+    getLeaveKindFromEntryType(details.entry_type || details.entryType);
+  if (kind === 'half_day') return 0.5;
+  return 1;
+}
+
 export function getNegativeBalanceFloor(policy = {}) {
   const raw = Number(policy?.negative_floor_days ?? 0);
   if (Number.isNaN(raw)) return 0;

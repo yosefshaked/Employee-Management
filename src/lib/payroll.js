@@ -1,5 +1,5 @@
 import { startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
-import { isLeaveEntryType } from './leave.js';
+import { isLeaveEntryType, getLeaveValueMultiplier } from './leave.js';
 
 const DAY_NAMES = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
 
@@ -33,12 +33,21 @@ export function aggregateGlobalDays(rows, employeesById) {
       const amount = row.total_payment != null
         ? row.total_payment
         : (row.rate_used != null ? calculateGlobalDailyRate(emp, row.date, row.rate_used) : 0);
+      const multiplier = isLeaveEntryType(row.entry_type)
+        ? getLeaveValueMultiplier({
+          entry_type: row.entry_type,
+          metadata: row.metadata,
+          leave_type: row.leave_type,
+          leave_kind: row.leave_kind,
+        })
+        : 1;
       map.set(key, {
         dayType: row.entry_type,
         indices: [index],
         rateUsed: row.rate_used,
         dailyAmount: amount,
         payable: row.payable !== false,
+        multiplier: Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1,
       });
     } else {
       existing.indices.push(index);
@@ -106,6 +115,34 @@ export function createLeaveDayValueResolver({
   };
 }
 
+export function resolveLeaveSessionValue(session, resolver) {
+  if (!session || session.payable === false) {
+    return { amount: 0, multiplier: 0 };
+  }
+  if (!isLeaveEntryType(session.entry_type)) {
+    return { amount: 0, multiplier: 0 };
+  }
+  const rawMultiplier = getLeaveValueMultiplier({
+    entry_type: session.entry_type,
+    metadata: session.metadata,
+    leave_type: session.leave_type,
+    leave_kind: session.leave_kind,
+  });
+  const multiplier = Number.isFinite(rawMultiplier) && rawMultiplier > 0 ? rawMultiplier : 1;
+  const fn = typeof resolver === 'function' ? resolver : null;
+  if (fn) {
+    const base = fn(session.employee_id, session.date);
+    if (typeof base === 'number' && Number.isFinite(base) && base > 0) {
+      return { amount: base * multiplier, multiplier };
+    }
+  }
+  const fallback = Number(session.total_payment);
+  if (Number.isFinite(fallback)) {
+    return { amount: fallback, multiplier };
+  }
+  return { amount: 0, multiplier };
+}
+
 export function computePeriodTotals({
   workSessions = [],
   employees = [],
@@ -144,7 +181,7 @@ export function computePeriodTotals({
   };
 
   const perEmp = {};
-  const processedLeave = new Set();
+  const processedLeave = new Map();
   const resolveLeaveValue = createLeaveDayValueResolver({
     employees,
     workSessions,
@@ -159,10 +196,13 @@ export function computePeriodTotals({
     const [empId] = key.split('|');
     result.totalPay += val.dailyAmount;
     result.diagnostics.uniquePaidDays++;
-    if (isLeaveEntryType(val.dayType) && val.payable) result.diagnostics.paidLeaveDays++;
+    const leaveCredit = isLeaveEntryType(val.dayType) && val.payable
+      ? (Number.isFinite(val.multiplier) && val.multiplier > 0 ? val.multiplier : 1)
+      : 0;
+    if (leaveCredit) result.diagnostics.paidLeaveDays += leaveCredit;
     if (!perEmp[empId]) perEmp[empId] = { employee_id: empId, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
     perEmp[empId].pay += val.dailyAmount;
-    perEmp[empId].daysPaid++;
+    perEmp[empId].daysPaid += leaveCredit || 1;
   });
 
   filtered.forEach(row => {
@@ -183,19 +223,24 @@ export function computePeriodTotals({
     if (isLeaveEntryType(row.entry_type)) {
       if (row.payable === false) return;
       const key = `${row.employee_id}|${row.date}`;
-      if (processedLeave.has(key)) return;
-      processedLeave.add(key);
-      let pay = resolveLeaveValue(row.employee_id, row.date);
-      if (!pay && row.total_payment != null && typeof leaveDayValueSelector !== 'function') {
-        const fallback = Number(row.total_payment);
-        pay = Number.isFinite(fallback) ? fallback : 0;
+      const already = processedLeave.get(key) || 0;
+      if (already >= 1) return;
+      const sessionValue = resolveLeaveSessionValue(row, resolveLeaveValue);
+      const multiplier = Number.isFinite(sessionValue.multiplier) && sessionValue.multiplier > 0
+        ? sessionValue.multiplier
+        : 1;
+      const remaining = Math.max(0, 1 - already);
+      if (remaining <= 0) return;
+      const credit = Math.min(multiplier, remaining);
+      const scale = multiplier ? credit / multiplier : 0;
+      const amount = sessionValue.amount * scale;
+      if (amount) {
+        result.totalPay += amount;
+        bucket.pay += amount;
       }
-      if (pay) {
-        result.totalPay += pay;
-        bucket.pay += pay;
-      }
-      bucket.daysPaid += 1;
-      result.diagnostics.paidLeaveDays += 1;
+      processedLeave.set(key, already + credit);
+      bucket.daysPaid += credit;
+      result.diagnostics.paidLeaveDays += credit;
       return;
     }
     if (row.entry_type === 'adjustment') {
