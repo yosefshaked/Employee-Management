@@ -411,6 +411,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
           employees={employees}
           services={services}
           getRateForDate={getRateForDate}
+          workSessions={workSessions}
           onImported={onImported}
         />
         <MultiDateEntryModal

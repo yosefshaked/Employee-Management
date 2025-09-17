@@ -10,12 +10,16 @@ const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
 export function useTimeEntry({ employees, services, getRateForDate, supabaseClient, workSessions = [] }) {
   const baseRegularSessions = new Set();
+  const baseLeaveSessions = new Set();
   if (Array.isArray(workSessions)) {
     workSessions.forEach(session => {
       if (!session) return;
       if (!session.employee_id || !session.date) return;
       if (session.entry_type === 'adjustment') return;
-      if (isLeaveEntryType(session.entry_type)) return;
+      if (isLeaveEntryType(session.entry_type)) {
+        baseLeaveSessions.add(`${session.employee_id}-${session.date}`);
+        return;
+      }
       baseRegularSessions.add(`${session.employee_id}-${session.date}`);
     });
   }
@@ -24,6 +28,8 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
     const client = supabaseClient || (await import('../../supabaseClient.js')).supabase;
     const canWriteMetadata = await canUseWorkSessionMetadata(client);
     const inserts = [];
+    const leaveConflicts = [];
+    const leaveOccupied = new Set(baseLeaveSessions);
     for (const row of rows) {
       const employee = employees.find(e => e.id === row.employee_id);
       if (!employee) continue;
@@ -45,6 +51,16 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
         if (originalType && isLeaveEntryType(originalType)) {
           row.notes = row.notes ? `${row.notes} (סומן בעבר כחופשה)` : 'סומן בעבר כחופשה';
         }
+      }
+
+      const key = `${employee.id}-${row.date}`;
+      if (!isLeaveEntryType(entryType) && leaveOccupied.has(key)) {
+        leaveConflicts.push({
+          employeeId: employee.id,
+          employeeName: employee.name || '',
+          date: row.date,
+        });
+        continue;
       }
 
       if (entryType === 'session') {
@@ -76,6 +92,7 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
       if (entryType && entryType.startsWith('leave_')) {
         payload.payable = true;
         payload.hours = 0;
+        leaveOccupied.add(key);
         if (canWriteMetadata) {
           const leaveKind = getLeaveKindFromEntryType(entryType) || 'system_paid';
           const metadata = buildLeaveMetadata({
@@ -100,10 +117,18 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
       }
       inserts.push(payload);
     }
-    if (!inserts.length) throw new Error('no valid rows');
+    if (!inserts.length) {
+      if (leaveConflicts.length > 0) {
+        const error = new Error('regular_conflicts');
+        error.code = 'TIME_ENTRY_REGULAR_CONFLICT';
+        error.conflicts = leaveConflicts;
+        throw error;
+      }
+      throw new Error('no valid rows');
+    }
     const { error } = await client.from('WorkSessions').insert(inserts);
     if (error) throw error;
-    return inserts;
+    return { inserted: inserts, conflicts: leaveConflicts };
   };
 
   const saveMixedLeave = async (entries = [], options = {}) => {

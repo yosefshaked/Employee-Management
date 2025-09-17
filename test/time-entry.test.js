@@ -25,8 +25,9 @@ describe('multi-date save', () => {
     })));
     const fakeSupabase = { from: () => ({ insert: async () => ({}) }) };
     const { saveRows } = useTimeEntry({ employees, services, getRateForDate: () => ({ rate: 100 }), supabaseClient: fakeSupabase });
-    const inserted = await saveRows(rows);
-    assert.equal(inserted.length, employees.length * dates.length);
+    const result = await saveRows(rows);
+    assert.equal(result.inserted.length, employees.length * dates.length);
+    assert.equal(result.conflicts.length, 0);
   });
 });
 
@@ -46,7 +47,8 @@ describe('per-employee day type mapping', () => {
     const getRateForDate = () => ({ rate: 100 });
     const { saveRows } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
     const map = { g1: 'regular', g2: 'paid_leave' };
-    await saveRows(rows, map);
+    const result = await saveRows(rows, map);
+    assert.equal(result.conflicts.length, 0);
     assert.equal(inserted[0].entry_type, 'hours');
     assert.equal(inserted[1].entry_type, 'leave_system_paid');
   });
@@ -126,7 +128,8 @@ describe('paid leave restrictions', () => {
     const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
     const getRateForDate = () => ({ rate: 100 });
     const { saveRows } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
-    await saveRows(rows);
+    const result = await saveRows(rows);
+    assert.equal(result.conflicts.length, 0);
     assert.equal(inserted[0].entry_type, 'hours');
     assert(inserted[0].notes.includes('סומן בעבר כחופשה'));
     assert.equal(inserted[1].entry_type, 'session');
@@ -141,10 +144,33 @@ describe('paid leave restrictions', () => {
     const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
     const getRateForDate = () => ({ rate: 3000 });
     const { saveRows } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
-    await saveRows(rows, { g1: 'paid_leave' });
+    const result = await saveRows(rows, { g1: 'paid_leave' });
+    assert.equal(result.conflicts.length, 0);
     assert.equal(inserted[0].entry_type, 'leave_system_paid');
     const expected = calculateGlobalDailyRate(employees[0], '2024-02-01', 3000);
     assert.equal(inserted[0].total_payment, expected);
+  });
+
+  it('skips regular rows when leave already exists for the date', async () => {
+    let inserted = [];
+    const employees = [{ id: 'h1', name: 'רן', employee_type: 'hourly' }];
+    const services = [];
+    const rows = [
+      { employee_id: 'h1', date: '2024-03-01', hours: '1' },
+      { employee_id: 'h1', date: '2024-03-02', hours: '2' },
+    ];
+    const workSessions = [
+      { employee_id: 'h1', date: '2024-03-01', entry_type: 'leave_system_paid' },
+    ];
+    const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
+    const getRateForDate = () => ({ rate: 120 });
+    const { saveRows } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase, workSessions });
+    const result = await saveRows(rows);
+    assert.equal(result.inserted.length, 1);
+    assert.equal(result.conflicts.length, 1);
+    assert.equal(result.conflicts[0].date, '2024-03-01');
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0].date, '2024-03-02');
   });
 
   it('legacy paid_leave banner text exists', () => {

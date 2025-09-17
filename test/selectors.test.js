@@ -151,9 +151,9 @@ describe('selectLeaveDayValue', () => {
   });
 
   it('returns 0 and logs a warning when data is missing', () => {
-    const originalWarn = console.warn;
+    const originalDebug = console.debug;
     let warned = false;
-    console.warn = () => {
+    console.debug = () => {
       warned = true;
     };
     let value = 0;
@@ -164,7 +164,7 @@ describe('selectLeaveDayValue', () => {
         settings: leavePaySettings,
       });
     } finally {
-      console.warn = originalWarn;
+      console.debug = originalDebug;
     }
     assert.equal(value, 0);
     assert.equal(warned, true);

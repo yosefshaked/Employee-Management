@@ -163,12 +163,21 @@ export default function TimeEntry() {
     );
   };
 
+  const findLeaveSessions = (employeeId, dateStr) => {
+    return workSessions.filter(ws =>
+      ws.employee_id === employeeId &&
+      ws.date === dateStr &&
+      isLeaveEntryType(ws.entry_type)
+    );
+  };
+
   const handleSessionSubmit = async (rows) => {
     try {
       const employee = employees.find(e => e.id === selectedEmployeeId);
       if (!employee) throw new Error("Employee not found");
       const canWriteMetadata = await canUseWorkSessionMetadata(supabase);
 
+      let blockedByLeave = false;
       const sessionsToInsert = rows.map(row => {
         const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
         const serviceIdForRate = isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : row.service_id;
@@ -255,6 +264,18 @@ export default function TimeEntry() {
             return null;
           }
         }
+        if (!isLeaveEntryType(entryType)) {
+          const leaveSessions = findLeaveSessions(employee.id, row.date);
+          if (leaveSessions.length > 0 && !blockedByLeave) {
+            const formattedDate = format(new Date(row.date + 'T00:00:00'), 'dd/MM/yyyy');
+            const suffix = employee.name ? ` (${employee.name})` : '';
+            toast.error(`לא ניתן להוסיף שעות בתאריך שכבר הוזנה בו חופשה: ${formattedDate}${suffix}`, { duration: 15000 });
+            blockedByLeave = true;
+          }
+          if (leaveSessions.length > 0) {
+            return null;
+          }
+        }
         const session = {
           employee_id: employee.id,
           date: row.date,
@@ -304,6 +325,10 @@ export default function TimeEntry() {
         return session;
       }).filter(Boolean);
 
+      if (blockedByLeave) {
+        return;
+      }
+
       if (sessionsToInsert.length === 0) {
         toast.error("לא נמצאו רישומים תקינים לשמירה.");
         return;
@@ -345,6 +370,13 @@ export default function TimeEntry() {
       if (dayType !== 'paid_leave') {
         if (paidLeaveId && updatedRows.length > 0 && !updatedRows[0].id) {
           updatedRows[0].id = paidLeaveId;
+        }
+        const leaveSessions = findLeaveSessions(employee.id, dateStr);
+        if (leaveSessions.length > 0) {
+          const formattedDate = format(new Date(dateStr + 'T00:00:00'), 'dd/MM/yyyy');
+          const suffix = employee.name ? ` (${employee.name})` : '';
+          toast.error(`לא ניתן להוסיף שעות בתאריך שכבר הוזנה בו חופשה: ${formattedDate}${suffix}`, { duration: 15000 });
+          return;
         }
         for (const row of updatedRows) {
           const hoursValue = parseFloat(row.hours);

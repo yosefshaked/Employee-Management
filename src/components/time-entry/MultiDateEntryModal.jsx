@@ -165,6 +165,23 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
     return `לא ניתן לשמור חופשה עבור התאריכים הבאים:\n${lines.join('\n')}`;
   }, [employeesById]);
 
+  const formatRegularConflictMessage = useCallback((items = []) => {
+    if (!Array.isArray(items) || items.length === 0) return null;
+    const lines = items.map(item => {
+      const employee = employeesById[item.employeeId] || {};
+      const name = item.employeeName || employee.name || '';
+      const dateValue = item.date ? new Date(`${item.date}T00:00:00`) : null;
+      const formatted = dateValue && !Number.isNaN(dateValue.getTime())
+        ? format(dateValue, 'dd/MM/yyyy')
+        : (item.date || '');
+      const suffix = name ? ` (${name})` : '';
+      const line = `${formatted}${suffix}`.trim();
+      return line;
+    }).filter(Boolean);
+    if (!lines.length) return null;
+    return `לא ניתן להוסיף שעות בתאריך שכבר הוזנה בו חופשה:\n${lines.join('\n')}`;
+  }, [employeesById]);
+
   const formatInvalidStartMessage = useCallback((items = []) => {
     if (!Array.isArray(items) || items.length === 0) return null;
     const lines = items.map(item => {
@@ -257,11 +274,25 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
       return;
     }
     try {
-      await saveRows(rows);
-      toast.success(`נשמרו ${rows.length}`);
+      const result = await saveRows(rows);
+      if (result?.conflicts?.length) {
+        const message = formatRegularConflictMessage(result.conflicts);
+        if (message) {
+          toast.error(message, { duration: 15000 });
+        }
+      }
+      const insertedCount = Array.isArray(result?.inserted) ? result.inserted.length : rows.length;
+      toast.success(`נשמרו ${insertedCount}`);
       onSaved();
       onClose();
     } catch (e) {
+      if (e?.code === 'TIME_ENTRY_REGULAR_CONFLICT') {
+        const message = formatRegularConflictMessage(e.conflicts);
+        if (message) {
+          toast.error(message, { duration: 15000 });
+        }
+        return;
+      }
       toast.error(e.message);
     }
   };
@@ -269,10 +300,24 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   const saveValidOnly = async () => {
     const validRows = rows.filter((_, i) => validation[i].valid);
     try {
-      await saveRows(validRows);
-      toast.success(`נשמרו ${validRows.length} / נדחו ${rows.length - validRows.length}`);
+      const result = await saveRows(validRows);
+      if (result?.conflicts?.length) {
+        const message = formatRegularConflictMessage(result.conflicts);
+        if (message) {
+          toast.error(message, { duration: 15000 });
+        }
+      }
+      const insertedCount = Array.isArray(result?.inserted) ? result.inserted.length : validRows.length;
+      toast.success(`נשמרו ${insertedCount} / נדחו ${validRows.length - insertedCount}`);
       setShowBanner(false);
     } catch (e) {
+      if (e?.code === 'TIME_ENTRY_REGULAR_CONFLICT') {
+        const message = formatRegularConflictMessage(e.conflicts);
+        if (message) {
+          toast.error(message, { duration: 15000 });
+        }
+        return;
+      }
       toast.error(e.message);
     }
   };

@@ -11,10 +11,11 @@ import { validateRows } from '@/lib/validators.js';
 import { isLeaveEntryType } from '@/lib/leave.js';
 import { downloadCsvTemplate, downloadExcelTemplate } from '@/lib/excelTemplate.js';
 import { supabase } from '@/supabaseClient';
+import { format } from 'date-fns';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
-export default function ImportModal({ open, onOpenChange, employees, services, getRateForDate, onImported }) {
+export default function ImportModal({ open, onOpenChange, employees, services, getRateForDate, onImported, workSessions = [] }) {
   const [employeeId, setEmployeeId] = useState('');
   const [tab, setTab] = useState('paste');
   const [text, setText] = useState('');
@@ -55,6 +56,11 @@ export default function ImportModal({ open, onOpenChange, employees, services, g
       toast.error('אין שורות תקינות לייבוא');
       return;
     }
+    const leaveSet = new Set(
+      (workSessions || [])
+        .filter(ws => ws.employee_id === employee.id && isLeaveEntryType(ws.entry_type))
+        .map(ws => `${ws.employee_id}-${ws.date}`)
+    );
     const payload = valid.map(r => ({
       employee_id: employee.id,
       date: r.date,
@@ -67,12 +73,51 @@ export default function ImportModal({ open, onOpenChange, employees, services, g
       rate_used: r.rate_used,
       total_payment: r.total_payment,
     }));
-    const { error } = await supabase.from('WorkSessions').insert(payload);
+    const conflicts = [];
+    const filteredPayload = payload.filter(item => {
+      if (isLeaveEntryType(item.entry_type)) return true;
+      const key = `${item.employee_id}-${item.date}`;
+      if (leaveSet.has(key)) {
+        conflicts.push({ date: item.date });
+        return false;
+      }
+      return true;
+    });
+    if (!filteredPayload.length) {
+      if (conflicts.length > 0) {
+        const lines = conflicts.map(c => {
+          const dateValue = c.date ? new Date(`${c.date}T00:00:00`) : null;
+          const formatted = dateValue && !Number.isNaN(dateValue.getTime())
+            ? format(dateValue, 'dd/MM/yyyy')
+            : (c.date || '');
+          const suffix = employee.name ? ` (${employee.name})` : '';
+          return `${formatted}${suffix}`.trim();
+        }).filter(Boolean);
+        if (lines.length) {
+          toast.error(`לא ניתן להוסיף שעות בתאריך שכבר הוזנה בו חופשה:\n${lines.join('\n')}`, { duration: 15000 });
+        }
+      }
+      return;
+    }
+    const { error } = await supabase.from('WorkSessions').insert(filteredPayload);
     if (error) {
       toast.error(error.message);
       return;
     }
-    toast.success(`${payload.length} שורות יובאו בהצלחה`);
+    toast.success(`${filteredPayload.length} שורות יובאו בהצלחה`);
+    if (conflicts.length > 0) {
+      const lines = conflicts.map(c => {
+        const dateValue = c.date ? new Date(`${c.date}T00:00:00`) : null;
+        const formatted = dateValue && !Number.isNaN(dateValue.getTime())
+          ? format(dateValue, 'dd/MM/yyyy')
+          : (c.date || '');
+        const suffix = employee.name ? ` (${employee.name})` : '';
+        return `${formatted}${suffix}`.trim();
+      }).filter(Boolean);
+      if (lines.length) {
+        toast.error(`לא ניתן להוסיף שעות בתאריך שכבר הוזנה בו חופשה:\n${lines.join('\n')}`, { duration: 15000 });
+      }
+    }
     onImported();
     setRows([]);
     setText('');
