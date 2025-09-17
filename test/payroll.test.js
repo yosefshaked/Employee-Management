@@ -1,7 +1,14 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { effectiveWorkingDays, calculateGlobalDailyRate, aggregateGlobalDays, aggregateGlobalDayForDate } from '../src/lib/payroll.js';
-import { computePeriodTotals, clampDateString } from '../src/lib/payroll.js';
+import {
+  effectiveWorkingDays,
+  calculateGlobalDailyRate,
+  aggregateGlobalDays,
+  aggregateGlobalDayForDate,
+  computePeriodTotals,
+  clampDateString,
+  resolveLeaveSessionValue,
+} from '../src/lib/payroll.js';
 import { selectLeaveDayValue } from '../src/selectors.js';
 import { eachMonthOfInterval } from 'date-fns';
 
@@ -93,6 +100,19 @@ describe('global day aggregation', () => {
     let sum = 0; agg.forEach(v => { sum += v.dailyAmount; });
     assert.equal(sum, daily * 2);
   });
+  it('ignores unpaid leave rows for salary aggregation', () => {
+    const monthlyRate = 3000;
+    const daily = calculateGlobalDailyRate(emp, '2024-02-05', monthlyRate);
+    const rows = [
+      { employee_id: 'e1', date: '2024-02-05', entry_type: 'leave_mixed', total_payment: daily, payable: false },
+      { employee_id: 'e1', date: '2024-02-05', entry_type: 'hours', total_payment: daily },
+    ];
+    const agg = aggregateGlobalDays(rows, { e1: emp });
+    assert.equal(agg.size, 1);
+    const only = agg.get('e1|2024-02-05');
+    assert(only);
+    assert.equal(only.dailyAmount, daily);
+  });
   it('session_hourly_unchanged', () => {
     const rows = [
       { employee_id: 'e2', entry_type: 'hours', total_payment: 100 },
@@ -126,6 +146,22 @@ describe('aggregateGlobalDayForDate', () => {
     ];
     const agg = aggregateGlobalDayForDate(rows, { e1: emp });
     assert.equal(agg.total, daily * 2);
+  });
+});
+
+describe('resolveLeaveSessionValue', () => {
+  it('skips resolver when session is unpaid', () => {
+    let called = 0;
+    const result = resolveLeaveSessionValue(
+      { entry_type: 'leave_unpaid', payable: false, employee_id: 'e1', date: '2024-02-05' },
+      () => {
+        called += 1;
+        return 999;
+      }
+    );
+    assert.equal(result.amount, 0);
+    assert.equal(result.multiplier, 0);
+    assert.equal(called, 0);
   });
 });
 

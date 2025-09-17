@@ -287,10 +287,26 @@ export default function TimeEntryForm({
   const leaveSummary = useMemo(() => {
     if (!isLeaveDay) return null;
     if (isGlobal) {
+      if (!leaveType) {
+        return 'בחרו סוג חופשה כדי לחשב שווי.';
+      }
       const fraction = leaveType === 'half_day' ? 0.5 : 1;
+      const isPaidKind = isPayableLeaveKind(leaveKindForPay);
+      const amount = isPaidKind ? (dailyRate * fraction) : 0;
       const headline = leaveType === 'half_day' ? 'שווי חצי יום חופשה' : 'שכר יומי';
-      const amount = dailyRate * fraction;
-      return `${headline}: ₪${amount.toFixed(2)}`;
+      const unpaidNote = !isPaidKind
+        ? (leaveType === 'mixed' ? 'היום המעורב סומן כלא משולם.' : 'היום סומן כחופשה ללא תשלום.')
+        : null;
+      return (
+        <>
+          <div className="text-base font-medium text-slate-900">{`${headline}: ₪${amount.toFixed(2)}`}</div>
+          {unpaidNote ? (
+            <div className="mt-1 text-xs text-slate-600 text-right">
+              {unpaidNote}
+            </div>
+          ) : null}
+        </>
+      );
     }
     if (!leaveType) {
       return 'בחרו סוג חופשה כדי לחשב שווי.';
@@ -318,7 +334,20 @@ export default function TimeEntryForm({
         ) : null}
       </>
     );
-  }, [isLeaveDay, isGlobal, dailyRate, leaveType, mixedPaid, isPaidLeavePreview, leaveDayValue, isHalfDaySelection, leaveMethodLabel, leaveMethodDescription, showInsufficientHistoryHint]);
+  }, [
+    isLeaveDay,
+    isGlobal,
+    dailyRate,
+    leaveType,
+    leaveKindForPay,
+    mixedPaid,
+    isPaidLeavePreview,
+    leaveDayValue,
+    isHalfDaySelection,
+    leaveMethodLabel,
+    leaveMethodDescription,
+    showInsufficientHistoryHint,
+  ]);
 
   const summary = isLeaveDay ? leaveSummary : baseSummary;
 
