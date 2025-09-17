@@ -1,5 +1,10 @@
 import { calculateGlobalDailyRate } from '../../lib/payroll.js';
-import { getEntryTypeForLeaveKind, isLeaveEntryType } from '../../lib/leave.js';
+import { getEntryTypeForLeaveKind, getLeaveKindFromEntryType, isLeaveEntryType } from '../../lib/leave.js';
+import {
+  buildLeaveMetadata,
+  buildSourceMetadata,
+  canUseWorkSessionMetadata,
+} from '../../lib/workSessionsMetadata.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -17,6 +22,7 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
 
   const saveRows = async (rows, dayTypeMap = {}) => {
     const client = supabaseClient || (await import('../../supabaseClient.js')).supabase;
+    const canWriteMetadata = await canUseWorkSessionMetadata(client);
     const inserts = [];
     for (const row of rows) {
       const employee = employees.find(e => e.id === row.employee_id);
@@ -70,6 +76,27 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
       if (entryType && entryType.startsWith('leave_')) {
         payload.payable = true;
         payload.hours = 0;
+        if (canWriteMetadata) {
+          const leaveKind = getLeaveKindFromEntryType(entryType) || 'system_paid';
+          const metadata = buildLeaveMetadata({
+            source: 'multi_date',
+            leaveType: leaveKind,
+            leaveKind,
+            payable: true,
+            fraction: leaveKind === 'half_day' ? 0.5 : 1,
+            halfDay: leaveKind === 'half_day',
+            method: employee.employee_type === 'global' ? 'global_contract' : null,
+            dailyValueSnapshot: totalPayment || null,
+          });
+          if (metadata) {
+            payload.metadata = metadata;
+          }
+        }
+      } else if (canWriteMetadata) {
+        const metadata = buildSourceMetadata('multi_date');
+        if (metadata) {
+          payload.metadata = metadata;
+        }
       }
       inserts.push(payload);
     }
@@ -84,6 +111,7 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
     const { leaveType = 'mixed' } = options;
     const entryType = getEntryTypeForLeaveKind(leaveType);
     if (!entryType) throw new Error('סוג חופשה לא נתמך');
+    const canWriteMetadata = await canUseWorkSessionMetadata(client);
     const inserts = [];
     const conflicts = [];
     const invalidStartDates = [];
@@ -141,12 +169,24 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
         rate_used: rateUsed,
         total_payment: totalPayment,
         payable: isPaid,
-        metadata: {
-          leave_type: leaveType,
-          leave_kind: leaveType,
-          leave_fraction: leaveFraction,
-        },
       });
+      const payload = inserts[inserts.length - 1];
+      if (canWriteMetadata) {
+        const metadata = buildLeaveMetadata({
+          source: 'multi_date_leave',
+          leaveType,
+          leaveKind: leaveType,
+          payable: isPaid,
+          fraction: leaveFraction,
+          halfDay: leaveType === 'half_day',
+          mixedPaid: leaveType === 'mixed' ? Boolean(isPaid) : null,
+          method: employee.employee_type === 'global' ? 'global_contract' : null,
+          dailyValueSnapshot: totalPayment && leaveFraction ? totalPayment / leaveFraction : totalPayment || null,
+        });
+        if (metadata) {
+          payload.metadata = metadata;
+        }
+      }
       occupied.add(key);
     }
     if (!inserts.length) {

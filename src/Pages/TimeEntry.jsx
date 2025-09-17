@@ -19,6 +19,7 @@ import {
   normalizeLeavePolicy,
   normalizeLeavePayPolicy,
   getEntryTypeForLeaveKind,
+  getLeaveKindFromEntryType,
   isLeaveEntryType,
   getLeaveLedgerDelta,
   isPayableLeaveKind,
@@ -26,8 +27,14 @@ import {
   getLeaveLedgerEntryDelta,
   getLeaveLedgerEntryDate,
   getLeaveLedgerEntryType,
+  resolveLeavePayMethodContext,
 } from '@/lib/leave.js';
-import { selectLeaveRemaining } from '@/selectors.js';
+import { selectLeaveDayValue, selectLeaveRemaining } from '@/selectors.js';
+import {
+  buildLeaveMetadata,
+  buildSourceMetadata,
+  canUseWorkSessionMetadata,
+} from '@/lib/workSessionsMetadata.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 const TIME_ENTRY_LEAVE_PREFIX = 'time_entry_leave';
@@ -160,6 +167,7 @@ export default function TimeEntry() {
     try {
       const employee = employees.find(e => e.id === selectedEmployeeId);
       if (!employee) throw new Error("Employee not found");
+      const canWriteMetadata = await canUseWorkSessionMetadata(supabase);
 
       const sessionsToInsert = rows.map(row => {
         const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
@@ -270,6 +278,29 @@ export default function TimeEntry() {
           toast.error('רישום זה כבר קיים', { duration: 15000 });
           return null;
         }
+        if (canWriteMetadata) {
+          if (isLeaveEntryType(session.entry_type)) {
+            const leaveKind = getLeaveKindFromEntryType(session.entry_type) || 'system_paid';
+            const metadata = buildLeaveMetadata({
+              source: 'form',
+              leaveType: leaveKind,
+              leaveKind,
+              payable: true,
+              fraction: leaveKind === 'half_day' ? 0.5 : 1,
+              halfDay: leaveKind === 'half_day',
+              method: 'global_contract',
+              dailyValueSnapshot: totalPayment || null,
+            });
+            if (metadata) {
+              session.metadata = metadata;
+            }
+          } else {
+            const metadata = buildSourceMetadata('form');
+            if (metadata) {
+              session.metadata = metadata;
+            }
+          }
+        }
         return session;
       }).filter(Boolean);
 
@@ -293,6 +324,7 @@ export default function TimeEntry() {
   const handleTableSubmit = async ({ employee, day, dayType, updatedRows, paidLeaveId, paidLeaveNotes, leaveType, mixedPaid }) => {
     setIsLoading(true);
     try {
+      const canWriteMetadata = await canUseWorkSessionMetadata(supabase);
       const toInsert = [];
       const toUpdate = [];
       const dateStr = format(day, 'yyyy-MM-dd');
@@ -396,6 +428,12 @@ export default function TimeEntry() {
             toast.error('רישום זה כבר קיים', { duration: 15000 });
             return;
           }
+          if (canWriteMetadata) {
+            const metadata = buildSourceMetadata('table');
+            if (metadata) {
+              sessionData.metadata = metadata;
+            }
+          }
           if (row.id) {
             toUpdate.push(sessionData);
           } else {
@@ -493,16 +531,46 @@ export default function TimeEntry() {
           sessions_count: null,
           students_count: null,
           payable: isPayable,
-          metadata: {
-            leave_type: leaveType,
-            leave_kind: leaveType,
-            leave_fraction: leaveFraction,
-          },
         };
 
         if (hasDuplicateSession(workSessions, leaveRow)) {
           toast.error('רישום זה כבר קיים', { duration: 15000 });
           return;
+        }
+
+        if (canWriteMetadata) {
+          const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
+          const isGlobalEmployee = employee.employee_type === 'global';
+          let dailyValueSnapshot = null;
+          if (isPayable) {
+            if (isGlobalEmployee) {
+              dailyValueSnapshot = leaveFraction ? (totalPayment / leaveFraction) : (totalPayment || null);
+            } else {
+              dailyValueSnapshot = selectLeaveDayValue(employee.id, day, {
+                employees,
+                workSessions,
+                services,
+                leavePayPolicy,
+              });
+            }
+          }
+          const metadata = buildLeaveMetadata({
+            source: 'table',
+            leaveType,
+            leaveKind: leaveType,
+            payable: isPayable,
+            fraction: leaveFraction,
+            halfDay: leaveType === 'half_day',
+            mixedPaid: isMixed ? mixedIsPaid : null,
+            method: isGlobalEmployee ? 'global_contract' : payContext.method,
+            lookbackMonths: isGlobalEmployee ? null : payContext.lookback_months,
+            legalAllow12mIfBetter: isGlobalEmployee ? null : payContext.legal_allow_12m_if_better,
+            dailyValueSnapshot,
+            overrideApplied: isGlobalEmployee ? null : payContext.override_applied,
+          });
+          if (metadata) {
+            leaveRow.metadata = metadata;
+          }
         }
 
         if (paidLeaveId) {

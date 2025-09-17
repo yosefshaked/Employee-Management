@@ -7,6 +7,7 @@ import { duplicateSegment, toggleDelete } from '../src/components/time-entry/day
 import { useTimeEntry } from '../src/components/time-entry/useTimeEntry.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import { __setWorkSessionMetadataSupportForTests } from '../src/lib/workSessionsMetadata.js';
 
 describe('multi-date save', () => {
   it('creates a WorkSessions row for each employee-date combination', async () => {
@@ -212,7 +213,12 @@ describe('mixed leave persistence', () => {
     const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
     const getRateForDate = () => ({ rate: 3000 });
     const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
-    await saveMixedLeave([{ employee_id: 'g1', date: '2024-03-01', paid: true }], { leaveType: 'half_day' });
+    __setWorkSessionMetadataSupportForTests(true);
+    try {
+      await saveMixedLeave([{ employee_id: 'g1', date: '2024-03-01', paid: true }], { leaveType: 'half_day' });
+    } finally {
+      __setWorkSessionMetadataSupportForTests(null);
+    }
     assert.equal(inserted.length, 1);
     const expectedDaily = calculateGlobalDailyRate(employees[0], '2024-03-01', 3000);
     assert.equal(inserted[0].metadata.leave_fraction, 0.5);

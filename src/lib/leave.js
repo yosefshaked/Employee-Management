@@ -48,6 +48,8 @@ export const LEAVE_PAY_METHOD_DESCRIPTIONS = LEAVE_PAY_METHOD_OPTIONS.reduce((ac
   return acc;
 }, {});
 
+const LEAVE_PAY_METHOD_VALUES = new Set(LEAVE_PAY_METHOD_OPTIONS.map(option => option.value));
+
 export const LEAVE_TYPE_OPTIONS = [
   { value: 'employee_paid', label: 'חופשה מהמכסה' },
   { value: 'system_paid', label: 'חג משולם (מערכת)' },
@@ -294,6 +296,20 @@ export function normalizeLeavePayPolicy(value) {
         ? fixedRateCandidate
         : DEFAULT_LEAVE_PAY_POLICY.fixed_rate_default,
     legal_info_url: legalInfoUrl || DEFAULT_LEGAL_INFO_URL,
+  };
+}
+
+export function resolveLeavePayMethodContext(employee = null, policy = DEFAULT_LEAVE_PAY_POLICY) {
+  const normalizedPolicy = normalizeLeavePayPolicy(policy);
+  const defaultMethod = normalizedPolicy.default_method || DEFAULT_LEAVE_PAY_POLICY.default_method;
+  const candidate = typeof employee?.leave_pay_method === 'string' ? employee.leave_pay_method : null;
+  const hasOverride = Boolean(candidate && LEAVE_PAY_METHOD_VALUES.has(candidate));
+  const method = hasOverride ? candidate : defaultMethod;
+  return {
+    method,
+    lookback_months: normalizedPolicy.lookback_months,
+    legal_allow_12m_if_better: Boolean(normalizedPolicy.legal_allow_12m_if_better),
+    override_applied: Boolean(hasOverride && candidate !== defaultMethod),
   };
 }
 
