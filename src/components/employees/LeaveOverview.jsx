@@ -24,6 +24,9 @@ import {
   getNegativeBalanceFloor,
 } from '@/lib/leave.js';
 
+const EMPLOYEE_PLACEHOLDER_VALUE = '__employee_placeholder__';
+const OVERRIDE_METHOD_PLACEHOLDER_VALUE = '__no_override__';
+
 const ENTRY_KINDS = [
   { value: 'usage', label: 'סימון חופשה' },
   { value: 'allocation', label: 'הקצאת ימי חופשה' },
@@ -46,17 +49,18 @@ export default function LeaveOverview({
   const [evaluationDate, setEvaluationDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [showInactive, setShowInactive] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formState, setFormState] = useState({
-    employeeId: '',
+  const initialEmployeeId = employees[0]?.id ?? EMPLOYEE_PLACEHOLDER_VALUE;
+  const [formState, setFormState] = useState(() => ({
+    employeeId: initialEmployeeId,
     entryKind: 'usage',
     date: new Date().toISOString().slice(0, 10),
     holidayType: '',
     usageAmount: 1,
     allocationAmount: 1,
     notes: '',
-  });
-  const [overrideEmployeeId, setOverrideEmployeeId] = useState('');
-  const [overrideMethod, setOverrideMethod] = useState('');
+  }));
+  const [overrideEmployeeId, setOverrideEmployeeId] = useState(initialEmployeeId);
+  const [overrideMethod, setOverrideMethod] = useState(OVERRIDE_METHOD_PLACEHOLDER_VALUE);
   const [overrideRate, setOverrideRate] = useState('');
   const [isSavingOverride, setIsSavingOverride] = useState(false);
 
@@ -65,32 +69,55 @@ export default function LeaveOverview({
   }, [leavePolicy.allow_half_day]);
 
   useEffect(() => {
-    if (!formState.employeeId && employees.length > 0) {
-      setFormState(prev => ({ ...prev, employeeId: employees[0].id }));
+    if (employees.length === 0) {
+      if (formState.employeeId !== EMPLOYEE_PLACEHOLDER_VALUE) {
+        setFormState(prev => ({ ...prev, employeeId: EMPLOYEE_PLACEHOLDER_VALUE }));
+      }
+      return;
+    }
+    const exists = employees.some(emp => emp.id === formState.employeeId);
+    if (!exists) {
+      const nextId = employees[0].id;
+      if (formState.employeeId !== nextId) {
+        setFormState(prev => ({ ...prev, employeeId: nextId }));
+      }
     }
   }, [employees, formState.employeeId]);
 
   useEffect(() => {
-    if (!overrideEmployeeId && employees.length > 0) {
-      setOverrideEmployeeId(employees[0].id);
+    if (employees.length === 0) {
+      if (overrideEmployeeId !== EMPLOYEE_PLACEHOLDER_VALUE) {
+        setOverrideEmployeeId(EMPLOYEE_PLACEHOLDER_VALUE);
+      }
       return;
     }
-    if (overrideEmployeeId && employees.length > 0 && !employees.some(emp => emp.id === overrideEmployeeId)) {
-      setOverrideEmployeeId(employees[0].id);
+    const exists = employees.some(emp => emp.id === overrideEmployeeId);
+    if (!exists) {
+      const nextId = employees[0].id;
+      if (overrideEmployeeId !== nextId) {
+        setOverrideEmployeeId(nextId);
+      }
     }
   }, [employees, overrideEmployeeId]);
 
   useEffect(() => {
-    if (!overrideEmployeeId) {
-      setOverrideMethod('');
+    if (employees.length === 0 || overrideEmployeeId === EMPLOYEE_PLACEHOLDER_VALUE) {
+      setOverrideMethod(OVERRIDE_METHOD_PLACEHOLDER_VALUE);
       setOverrideRate('');
       return;
     }
     const employee = employees.find(emp => emp.id === overrideEmployeeId);
-    const method = employee?.leave_pay_method || '';
-    const rate = employee?.leave_fixed_day_rate;
-    setOverrideMethod(method || '');
-    setOverrideRate(rate === null || rate === undefined ? '' : String(rate));
+    if (!employee) {
+      setOverrideMethod(OVERRIDE_METHOD_PLACEHOLDER_VALUE);
+      setOverrideRate('');
+      return;
+    }
+    const nextMethod = employee.leave_pay_method && employee.leave_pay_method.length > 0
+      ? employee.leave_pay_method
+      : OVERRIDE_METHOD_PLACEHOLDER_VALUE;
+    const nextRate = employee.leave_fixed_day_rate;
+    setOverrideMethod(nextMethod);
+    setOverrideRate(nextRate === null || nextRate === undefined ? '' : String(nextRate));
   }, [employees, overrideEmployeeId]);
 
   useEffect(() => {
@@ -130,7 +157,7 @@ export default function LeaveOverview({
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!formState.employeeId) {
+    if (!employees.length || formState.employeeId === EMPLOYEE_PLACEHOLDER_VALUE) {
       toast.error('בחר עובד להזנת חופשה');
       return;
     }
@@ -216,9 +243,12 @@ export default function LeaveOverview({
   const lockedUsageTypes = new Set(['half_day', 'system_paid', 'unpaid']);
   const isUsageLocked = lockedUsageTypes.has(formState.holidayType);
 
+  const hasOverrideEmployeeSelection = overrideEmployeeId && overrideEmployeeId !== EMPLOYEE_PLACEHOLDER_VALUE;
+
   const selectedEmployee = useMemo(() => {
+    if (!hasOverrideEmployeeSelection) return null;
     return employees.find(emp => emp.id === overrideEmployeeId) || null;
-  }, [employees, overrideEmployeeId]);
+  }, [employees, hasOverrideEmployeeSelection, overrideEmployeeId]);
 
   const parseRateValue = (value) => {
     if (value === '' || value === null || value === undefined) return null;
@@ -229,12 +259,15 @@ export default function LeaveOverview({
   const initialMethod = selectedEmployee?.leave_pay_method || '';
   const initialRateNumber = parseRateValue(selectedEmployee?.leave_fixed_day_rate);
   const currentRateNumber = parseRateValue(overrideRate);
-  const hasOverrideChanges = Boolean(overrideEmployeeId)
-    && ((overrideMethod || '') !== (initialMethod || '')
-      || (overrideMethod === 'fixed_rate' && currentRateNumber !== initialRateNumber));
-  const isFixedSelected = overrideMethod === 'fixed_rate';
+  const normalizedOverrideMethod = overrideMethod === OVERRIDE_METHOD_PLACEHOLDER_VALUE ? '' : overrideMethod;
+  const hasOverrideChanges = Boolean(hasOverrideEmployeeSelection)
+    && (normalizedOverrideMethod !== (initialMethod || '')
+      || (normalizedOverrideMethod === 'fixed_rate' && currentRateNumber !== initialRateNumber));
+  const isFixedSelected = normalizedOverrideMethod === 'fixed_rate';
   const defaultMethodLabel = LEAVE_PAY_METHOD_LABELS[leavePayPolicy?.default_method] || 'חישוב חוקי (מומלץ)';
-  const selectedMethodDescription = overrideMethod ? LEAVE_PAY_METHOD_DESCRIPTIONS[overrideMethod] : '';
+  const selectedMethodDescription = normalizedOverrideMethod
+    ? LEAVE_PAY_METHOD_DESCRIPTIONS[normalizedOverrideMethod] || ''
+    : '';
 
   const handleOverrideMethodChange = (value) => {
     setOverrideMethod(value);
@@ -245,7 +278,7 @@ export default function LeaveOverview({
 
   const handleOverrideSubmit = async (event) => {
     event.preventDefault();
-    if (!overrideEmployeeId) {
+    if (!hasOverrideEmployeeSelection) {
       toast.error('בחר עובד לעדכון השיטה');
       return;
     }
@@ -254,7 +287,7 @@ export default function LeaveOverview({
       return;
     }
     let rateToSave = null;
-    if (overrideMethod === 'fixed_rate') {
+    if (normalizedOverrideMethod === 'fixed_rate') {
       const parsed = parseRateValue(overrideRate);
       if (parsed === null || parsed <= 0) {
         toast.error('הזן תעריף יומי גדול מאפס');
@@ -264,9 +297,10 @@ export default function LeaveOverview({
     }
     setIsSavingOverride(true);
     try {
+      const methodToSave = normalizedOverrideMethod || null;
       const payload = {
-        leave_pay_method: overrideMethod || null,
-        leave_fixed_day_rate: overrideMethod === 'fixed_rate' ? rateToSave : null,
+        leave_pay_method: methodToSave,
+        leave_fixed_day_rate: methodToSave === 'fixed_rate' ? rateToSave : null,
       };
       const { error } = await supabase
         .from('Employees')
@@ -305,12 +339,17 @@ export default function LeaveOverview({
                 <Select
                   value={overrideEmployeeId}
                   onValueChange={setOverrideEmployeeId}
-                  disabled={isLoading || isSavingOverride}
+                  disabled={isLoading || isSavingOverride || employees.length === 0}
                 >
                   <SelectTrigger className="bg-white">
                     <SelectValue placeholder="בחר עובד" />
                   </SelectTrigger>
                   <SelectContent>
+                    {overrideEmployeeId === EMPLOYEE_PLACEHOLDER_VALUE && (
+                      <SelectItem value={EMPLOYEE_PLACEHOLDER_VALUE} disabled>
+                        בחר עובד
+                      </SelectItem>
+                    )}
                     {employees.map(emp => (
                       <SelectItem key={emp.id} value={emp.id}>{emp.name}</SelectItem>
                     ))}
@@ -320,12 +359,12 @@ export default function LeaveOverview({
               <div className="space-y-1">
                 <div className="flex items-center justify-between gap-2">
                   <Label className="text-sm font-semibold text-slate-700">עקיפת שיטת חישוב</Label>
-                  {overrideMethod && (
+                  {normalizedOverrideMethod && (
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
-                      onClick={() => handleOverrideMethodChange('')}
+                      onClick={() => handleOverrideMethodChange(OVERRIDE_METHOD_PLACEHOLDER_VALUE)}
                       disabled={isLoading || isSavingOverride}
                     >
                       אפס
@@ -333,15 +372,15 @@ export default function LeaveOverview({
                   )}
                 </div>
                 <Select
-                  value={overrideMethod || ''}
+                  value={overrideMethod}
                   onValueChange={handleOverrideMethodChange}
-                  disabled={isLoading || isSavingOverride || !overrideEmployeeId}
+                  disabled={isLoading || isSavingOverride || !hasOverrideEmployeeSelection}
                 >
                   <SelectTrigger className="bg-white">
                     <SelectValue placeholder="ללא עקיפה (ברירת מחדל)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">ללא עקיפה (ברירת מחדל)</SelectItem>
+                    <SelectItem value={OVERRIDE_METHOD_PLACEHOLDER_VALUE}>ללא עקיפה (ברירת מחדל)</SelectItem>
                     {LEAVE_PAY_METHOD_OPTIONS.map(option => (
                       <SelectItem key={option.value} value={option.value}>{option.title}</SelectItem>
                     ))}
@@ -368,7 +407,7 @@ export default function LeaveOverview({
                 <Button
                   type="submit"
                   className="gap-2"
-                  disabled={isSavingOverride || isLoading || !overrideEmployeeId || !hasOverrideChanges}
+                  disabled={isSavingOverride || isLoading || !hasOverrideEmployeeSelection || !hasOverrideChanges}
                 >
                   {isSavingOverride ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
                   {isSavingOverride ? 'שומר...' : 'שמור עקיפה'}
@@ -392,6 +431,11 @@ export default function LeaveOverview({
                   <SelectValue placeholder="בחר עובד" />
                 </SelectTrigger>
                 <SelectContent>
+                  {formState.employeeId === EMPLOYEE_PLACEHOLDER_VALUE && (
+                    <SelectItem value={EMPLOYEE_PLACEHOLDER_VALUE} disabled>
+                      בחר עובד
+                    </SelectItem>
+                  )}
                   {employees.map(emp => (
                     <SelectItem key={emp.id} value={emp.id}>{emp.name}</SelectItem>
                   ))}
