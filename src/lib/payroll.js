@@ -78,14 +78,46 @@ export function clampDateString(dateStr) {
   return `${y}-${String(m).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
 }
 
+export function createLeaveDayValueResolver({
+  employees = [],
+  workSessions = [],
+  services = [],
+  leavePayPolicy = null,
+  settings = null,
+  leaveDayValueSelector = null,
+} = {}) {
+  const selector = typeof leaveDayValueSelector === 'function' ? leaveDayValueSelector : null;
+  const cache = new Map();
+  return (employeeId, date) => {
+    if (!employeeId || !date) return 0;
+    if (!selector) return 0;
+    const key = `${employeeId}|${date}`;
+    if (cache.has(key)) return cache.get(key);
+    const value = selector(employeeId, date, {
+      employees,
+      workSessions,
+      services,
+      leavePayPolicy,
+      settings,
+    });
+    const safe = typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+    cache.set(key, safe);
+    return safe;
+  };
+}
+
 export function computePeriodTotals({
   workSessions = [],
   employees = [],
+  services = [],
   startDate,
   endDate,
   serviceFilter = 'all',
   employeeFilter = '',
-  employeeTypeFilter = 'all'
+  employeeTypeFilter = 'all',
+  leavePayPolicy = null,
+  settings = null,
+  leaveDayValueSelector = null,
 }) {
   const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
   const start = new Date(startDate);
@@ -112,6 +144,15 @@ export function computePeriodTotals({
   };
 
   const perEmp = {};
+  const processedLeave = new Set();
+  const resolveLeaveValue = createLeaveDayValueResolver({
+    employees,
+    workSessions,
+    services,
+    leavePayPolicy,
+    settings,
+    leaveDayValueSelector,
+  });
 
   const globalAgg = aggregateGlobalDays(filtered, employeesById);
   globalAgg.forEach((val, key) => {
@@ -137,6 +178,24 @@ export function computePeriodTotals({
         result.totalHours += hours;
         bucket.hours += hours;
       }
+      return;
+    }
+    if (isLeaveEntryType(row.entry_type)) {
+      if (row.payable === false) return;
+      const key = `${row.employee_id}|${row.date}`;
+      if (processedLeave.has(key)) return;
+      processedLeave.add(key);
+      let pay = resolveLeaveValue(row.employee_id, row.date);
+      if (!pay && row.total_payment != null && typeof leaveDayValueSelector !== 'function') {
+        const fallback = Number(row.total_payment);
+        pay = Number.isFinite(fallback) ? fallback : 0;
+      }
+      if (pay) {
+        result.totalPay += pay;
+        bucket.pay += pay;
+      }
+      bucket.daysPaid += 1;
+      result.diagnostics.paidLeaveDays += 1;
       return;
     }
     if (row.entry_type === 'adjustment') {

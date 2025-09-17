@@ -1,13 +1,31 @@
 import React from 'react';
-import { aggregateGlobalDays } from '@/lib/payroll.js';
+import { aggregateGlobalDays, createLeaveDayValueResolver } from '@/lib/payroll.js';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, TrendingUp } from "lucide-react";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { he } from "date-fns/locale";
 import { isLeaveEntryType } from '@/lib/leave.js';
+import { selectLeaveDayValue } from '@/selectors.js';
 
-export default function MonthlyReport({ sessions, employees, services, workSessions = [], isLoading }) {
+export default function MonthlyReport({ sessions, employees, services, workSessions = [], leavePayPolicy, isLoading }) {
+  const resolveLeaveValue = React.useMemo(() => createLeaveDayValueResolver({
+    employees,
+    workSessions,
+    services,
+    leavePayPolicy,
+    leaveDayValueSelector: selectLeaveDayValue,
+  }), [employees, workSessions, services, leavePayPolicy]);
+
+  const resolvePayment = (session) => {
+    const employee = employees.find(emp => emp.id === session.employee_id);
+    if (!employee || employee.employee_type === 'global') return session.total_payment || 0;
+    if (!isLeaveEntryType(session.entry_type) || session.payable === false) return session.total_payment || 0;
+    const value = resolveLeaveValue(session.employee_id, session.date);
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    return session.total_payment || 0;
+  };
+
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -50,7 +68,7 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
       if (!emp || (emp.start_date && session.date < emp.start_date)) return;
       const isLeave = isLeaveEntryType(session.entry_type);
       const isGlobalDay = emp.employee_type === 'global' && (session.entry_type === 'hours' || isLeave);
-      if (!isGlobalDay) totalPayment += session.total_payment || 0;
+      if (!isGlobalDay) totalPayment += resolvePayment(session);
       if (session.entry_type === 'session') {
         totalSessions += session.sessions_count || 0;
         totalStudents += (session.students_count || 0) * (session.sessions_count || 0);
@@ -61,7 +79,7 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
       } else if (session.entry_type === 'hours') {
         totalHours += session.hours || 0;
       }
-      const val = isGlobalDay ? 0 : (session.total_payment || 0);
+      const val = isGlobalDay ? 0 : resolvePayment(session);
       employeePayments[session.employee_id] = (employeePayments[session.employee_id] || 0) + val;
     });
     agg.forEach((v, key) => {

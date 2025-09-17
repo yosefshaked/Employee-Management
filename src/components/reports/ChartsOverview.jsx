@@ -1,16 +1,34 @@
 import React from 'react';
-import { aggregateGlobalDays } from '@/lib/payroll.js';
+import { aggregateGlobalDays, createLeaveDayValueResolver } from '@/lib/payroll.js';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { he } from "date-fns/locale";
 import { isLeaveEntryType } from '@/lib/leave.js';
+import { selectLeaveDayValue } from '@/selectors.js';
 
 const COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#06B6D4'];
 
-export default function ChartsOverview({ sessions, employees, isLoading, services, workSessions = [] }) {
+export default function ChartsOverview({ sessions, employees, isLoading, services, workSessions = [], leavePayPolicy }) {
   const [pieType, setPieType] = React.useState('count');
   const [trendType, setTrendType] = React.useState('payment');
+
+  const resolveLeaveValue = React.useMemo(() => createLeaveDayValueResolver({
+    employees,
+    workSessions,
+    services,
+    leavePayPolicy,
+    leaveDayValueSelector: selectLeaveDayValue,
+  }), [employees, workSessions, services, leavePayPolicy]);
+
+  const resolvePayment = React.useCallback((session) => {
+    const employee = employees.find(emp => emp.id === session.employee_id);
+    if (!employee || employee.employee_type === 'global') return session.total_payment || 0;
+    if (!isLeaveEntryType(session.entry_type) || session.payable === false) return session.total_payment || 0;
+    const value = resolveLeaveValue(session.employee_id, session.date);
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    return session.total_payment || 0;
+  }, [employees, resolveLeaveValue]);
   
   // Aggregate sessions by type for the pie chart (count vs time)
   // Must be declared before any early returns to preserve hook order
@@ -79,7 +97,7 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     const totals = employeeSessions.reduce((acc, session) => {
       const isLeave = isLeaveEntryType(session.entry_type);
       const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || isLeave);
-      if (!isGlobalDay) acc.payment += session.total_payment || 0;
+      if (!isGlobalDay) acc.payment += resolvePayment(session);
       if (session.entry_type === 'session') {
         acc.totalSessions += session.sessions_count || 0;
       }
@@ -121,7 +139,7 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       if (employee.start_date && session.date < employee.start_date) return;
       const isLeave = isLeaveEntryType(session.entry_type);
       const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || isLeave);
-      if (!isGlobalDay) payment += session.total_payment || 0;
+      if (!isGlobalDay) payment += resolvePayment(session);
       if (session.entry_type === 'hours') {
         hours += session.hours || 0;
         sessionsCount += session.hours || 0;

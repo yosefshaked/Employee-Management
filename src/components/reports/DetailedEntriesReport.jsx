@@ -8,10 +8,20 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getColorForService } from '@/lib/colorUtils';
 import { isLeaveEntryType, getLeaveKindFromEntryType, HOLIDAY_TYPE_LABELS } from '@/lib/leave.js';
+import { createLeaveDayValueResolver } from '@/lib/payroll.js';
+import { selectLeaveDayValue } from '@/selectors.js';
 
-export default function DetailedEntriesReport({ sessions, employees, services, isLoading, initialGroupBy = 'none' }) {
+export default function DetailedEntriesReport({ sessions, employees, services, leavePayPolicy, workSessions = [], isLoading, initialGroupBy = 'none' }) {
   const [groupBy, setGroupBy] = useState(initialGroupBy);
   const EMPLOYEE_TYPE_LABELS = { global: 'גלובלי', hourly: 'שעתי', instructor: 'מדריך' };
+
+  const resolveLeaveValue = React.useMemo(() => createLeaveDayValueResolver({
+    employees,
+    workSessions,
+    services,
+    leavePayPolicy,
+    leaveDayValueSelector: selectLeaveDayValue,
+  }), [employees, workSessions, services, leavePayPolicy]);
 
   if (isLoading) {
     return <Skeleton className="h-60 w-full" />;
@@ -60,32 +70,44 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
   }, {});
   const sortedGroupEntries = Object.entries(groupedSessions);
 
-  const renderSessionRow = (session) => (
-    <TableRow key={session.id} className="hover:bg-slate-50">
-      <TableCell className="font-medium">{getEmployee(session.employee_id)?.name || 'לא ידוע'}</TableCell>
-      <TableCell>{format(parseISO(session.date), 'dd/MM/yyyy', { locale: he })}</TableCell>
-      <TableCell>
-        <Badge
-          variant="outline"
-          className="font-medium"
-          style={{
-            backgroundColor: `${getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id)}20`,
-            color: getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id),
-            borderColor: getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id),
-          }}
-        >
-          {getServiceName(session)}
-        </Badge>
-      </TableCell>
+  const resolvePayment = (session) => {
+    const employee = getEmployee(session.employee_id);
+    if (!employee || employee.employee_type === 'global') return session.total_payment || 0;
+    if (!isLeaveEntryType(session.entry_type) || session.payable === false) return session.total_payment || 0;
+    const value = resolveLeaveValue(session.employee_id, session.date);
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    return session.total_payment || 0;
+  };
+
+  const renderSessionRow = (session) => {
+    const payment = resolvePayment(session);
+    return (
+      <TableRow key={session.id} className="hover:bg-slate-50">
+        <TableCell className="font-medium">{getEmployee(session.employee_id)?.name || 'לא ידוע'}</TableCell>
+        <TableCell>{format(parseISO(session.date), 'dd/MM/yyyy', { locale: he })}</TableCell>
         <TableCell>
-          {(getEmployee(session.employee_id)?.employee_type === 'hourly' || getEmployee(session.employee_id)?.employee_type === 'global') ? `${session.hours || 0} שעות` : `${session.sessions_count || 0} מפגשים`}
+          <Badge
+            variant="outline"
+            className="font-medium"
+            style={{
+              backgroundColor: `${getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id)}20`,
+              color: getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id),
+              borderColor: getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id),
+            }}
+          >
+            {getServiceName(session)}
+          </Badge>
         </TableCell>
-      <TableCell>{session.students_count || '-'}</TableCell>
-      <TableCell>₪{session.rate_used?.toFixed(2) || '0.00'}</TableCell>
-      <TableCell className="font-semibold">₪{session.total_payment?.toFixed(2) || '0.00'}</TableCell>
-      <TableCell className="text-sm text-slate-600">{session.notes || '-'}</TableCell>
-    </TableRow>
-  );
+          <TableCell>
+            {(getEmployee(session.employee_id)?.employee_type === 'hourly' || getEmployee(session.employee_id)?.employee_type === 'global') ? `${session.hours || 0} שעות` : `${session.sessions_count || 0} מפגשים`}
+          </TableCell>
+        <TableCell>{session.students_count || '-'}</TableCell>
+        <TableCell>₪{session.rate_used?.toFixed(2) || '0.00'}</TableCell>
+        <TableCell className="font-semibold">₪{payment.toFixed(2)}</TableCell>
+        <TableCell className="text-sm text-slate-600">{session.notes || '-'}</TableCell>
+      </TableRow>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -119,7 +141,7 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
             sortedGroupEntries.map(([group, groupSessions]) => (
               <div key={group} className="mb-2">
                 <h4 className="sticky top-0 z-10 font-bold text-base p-2 bg-slate-100 border-b border-t">
-                  {group} – ₪{groupSessions.reduce((s, r) => s + (r.total_payment || 0), 0).toFixed(2)} • {groupSessions.reduce((s, r) => s + sessionHours(r), 0).toFixed(1)} שעות
+                  {group} – ₪{groupSessions.reduce((s, r) => s + resolvePayment(r), 0).toFixed(2)} • {groupSessions.reduce((s, r) => s + sessionHours(r), 0).toFixed(1)} שעות
                 </h4>
                 <Table>
                   <TableBody>{groupSessions.map(session => renderSessionRow(session))}</TableBody>

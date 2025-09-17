@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { effectiveWorkingDays, calculateGlobalDailyRate, aggregateGlobalDays, aggregateGlobalDayForDate } from '../src/lib/payroll.js';
 import { computePeriodTotals, clampDateString } from '../src/lib/payroll.js';
+import { selectLeaveDayValue } from '../src/selectors.js';
 import { eachMonthOfInterval } from 'date-fns';
 
 const empSunThu = { working_days: ['SUN','MON','TUE','WED','THU'] };
@@ -193,6 +194,43 @@ describe('computePeriodTotals aggregator', () => {
       endDate: '2024-02-28'
     });
     assert.equal(dash.totalPay, res.totalPay);
+  });
+
+  it('uses leave day selector for hourly paid leave', () => {
+    const hourlyEmployees = [
+      { id: 'h1', employee_type: 'hourly' },
+    ];
+    const history = [
+      { employee_id: 'h1', date: '2024-02-12', entry_type: 'hours', total_payment: 400, hours: 8 },
+      { employee_id: 'h1', date: '2024-03-03', entry_type: 'hours', total_payment: 360, hours: 6 },
+      { employee_id: 'h1', date: '2024-04-10', entry_type: 'hours', total_payment: 200, hours: 5 },
+      { employee_id: 'h1', date: '2024-04-15', entry_type: 'leave_employee_paid', payable: true, total_payment: 0 },
+    ];
+    const leavePayPolicy = {
+      default_method: 'legal',
+      lookback_months: 3,
+      legal_allow_12m_if_better: false,
+    };
+    const expected = selectLeaveDayValue('h1', '2024-04-15', {
+      employees: hourlyEmployees,
+      workSessions: history,
+      services: [],
+      leavePayPolicy,
+    });
+    const totals = computePeriodTotals({
+      workSessions: history,
+      employees: hourlyEmployees,
+      services: [],
+      startDate: '2024-04-01',
+      endDate: '2024-04-30',
+      leavePayPolicy,
+      leaveDayValueSelector: selectLeaveDayValue,
+    });
+    assert.equal(totals.diagnostics.paidLeaveDays, 1);
+    assert.equal(totals.totalPay, expected + 200);
+    const empTotals = totals.totalsByEmployee.find(item => item.employee_id === 'h1');
+    assert.ok(empTotals);
+    assert.equal(empTotals.pay, expected + 200);
   });
 });
 
