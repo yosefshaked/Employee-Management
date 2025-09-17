@@ -20,6 +20,7 @@ import {
   DEFAULT_LEAVE_PAY_POLICY,
   LEAVE_PAY_METHOD_OPTIONS,
   normalizeLeavePayPolicy,
+  DEFAULT_LEGAL_INFO_URL,
 } from '@/lib/leave.js';
 
 function createNewRule() {
@@ -276,13 +277,13 @@ export default function Settings() {
   };
 
   const handleOpenLegalInfo = () => {
-    const url = (leavePayPolicy.legal_info_url || '').trim();
+    const url = (leavePayPolicy.legal_info_url || '').trim() || DEFAULT_LEGAL_INFO_URL;
     if (!url) return;
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   const upcomingHoliday = findHolidayForDate(policy);
-  const trimmedLegalInfoUrl = (leavePayPolicy.legal_info_url || '').trim();
+  const resolvedLegalInfoUrl = (leavePayPolicy.legal_info_url || '').trim() || DEFAULT_LEGAL_INFO_URL;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">
@@ -467,7 +468,7 @@ export default function Settings() {
                     variant="outline"
                     type="button"
                     onClick={handleOpenLegalInfo}
-                    disabled={!trimmedLegalInfoUrl}
+                    disabled={!resolvedLegalInfoUrl}
                   >
                     מידע בחוק
                   </Button>

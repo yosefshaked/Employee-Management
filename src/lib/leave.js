@@ -1,5 +1,8 @@
 import { differenceInCalendarDays, isAfter, isBefore } from 'date-fns';
 
+export const DEFAULT_LEGAL_INFO_URL =
+  'https://www.kolzchut.org.il/he/%D7%97%D7%99%D7%A9%D7%95%D7%91_%D7%9E%D7%A1%D7%A4%D7%A8_%D7%99%D7%9E%D7%99_%D7%94%D7%97%D7%95%D7%A4%D7%A9%D7%94_%D7%94%D7%A9%D7%A0%D7%AA%D7%99%D7%AA';
+
 export const DEFAULT_LEAVE_POLICY = {
   allow_half_day: false,
   allow_negative_balance: false,
@@ -14,7 +17,7 @@ export const DEFAULT_LEAVE_PAY_POLICY = {
   lookback_months: 3,
   legal_allow_12m_if_better: false,
   fixed_rate_default: null,
-  legal_info_url: '',
+  legal_info_url: DEFAULT_LEGAL_INFO_URL,
 };
 
 export const LEAVE_PAY_METHOD_OPTIONS = [
@@ -290,7 +293,7 @@ export function normalizeLeavePayPolicy(value) {
       typeof fixedRateCandidate === 'number' && fixedRateCandidate >= 0
         ? fixedRateCandidate
         : DEFAULT_LEAVE_PAY_POLICY.fixed_rate_default,
-    legal_info_url: legalInfoUrl,
+    legal_info_url: legalInfoUrl || DEFAULT_LEGAL_INFO_URL,
   };
 }
 
