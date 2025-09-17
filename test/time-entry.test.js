@@ -219,6 +219,55 @@ describe('mixed leave persistence', () => {
     assert.equal(inserted[0].metadata.leave_type, 'half_day');
     assert.equal(inserted[0].total_payment, expectedDaily / 2);
   });
+
+  it('skips leave dates before employee start date and reports them', async () => {
+    let inserted = [];
+    const employees = [{
+      id: 'g1',
+      name: 'אנה',
+      employee_type: 'global',
+      working_days: ['SUN', 'MON', 'TUE', 'WED', 'THU'],
+      start_date: '2024-02-01',
+    }];
+    const services = [];
+    const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
+    const getRateForDate = () => ({ rate: 3000 });
+    const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
+    const payload = [
+      { employee_id: 'g1', date: '2024-01-31', paid: true },
+      { employee_id: 'g1', date: '2024-02-01', paid: true },
+    ];
+    const result = await saveMixedLeave(payload, { leaveType: 'mixed' });
+    assert.equal(result.inserted.length, 1);
+    assert.equal(result.invalidStartDates.length, 1);
+    assert.equal(result.invalidStartDates[0].date, '2024-01-31');
+    assert.equal(result.conflicts.length, 0);
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0].date, '2024-02-01');
+  });
+
+  it('throws when all leave dates are before employee start date', async () => {
+    const employees = [{
+      id: 'g1',
+      name: 'אנה',
+      employee_type: 'global',
+      working_days: ['SUN', 'MON', 'TUE', 'WED', 'THU'],
+      start_date: '2024-02-01',
+    }];
+    const services = [];
+    const fakeSupabase = { from: () => ({ insert: async () => ({ error: null, data: [] }) }) };
+    const getRateForDate = () => ({ rate: 3000 });
+    const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
+    await assert.rejects(
+      async () => saveMixedLeave([{ employee_id: 'g1', date: '2024-01-30', paid: true }], { leaveType: 'mixed' }),
+      (err) => {
+        assert.equal(err.code, 'TIME_ENTRY_LEAVE_CONFLICT');
+        assert.equal(err.invalidStartDates.length, 1);
+        assert.equal(err.invalidStartDates[0].date, '2024-01-30');
+        return true;
+      }
+    );
+  });
 });
 
 describe('day editor helpers', () => {

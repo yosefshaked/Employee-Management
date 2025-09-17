@@ -407,6 +407,12 @@ export default function TimeEntry() {
           toast.error('יש לבחור סוג חופשה.', { duration: 15000 });
           return;
         }
+        if (employee.start_date && employee.start_date > dateStr) {
+          const requested = format(new Date(dateStr + 'T00:00:00'), 'dd/MM/yyyy');
+          const startFormatted = format(new Date(employee.start_date + 'T00:00:00'), 'dd/MM/yyyy');
+          toast.error(`לא ניתן לשמור חופשה לתאריך ${requested} לפני תחילת העבודה (${startFormatted}).`, { duration: 15000 });
+          return;
+        }
         if (leaveType === 'half_day' && !leavePolicy.allow_half_day) {
           toast.error('חצי יום אינו מאושר במדיניות הנוכחית', { duration: 15000 });
           return;

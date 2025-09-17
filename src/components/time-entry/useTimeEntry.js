@@ -86,6 +86,7 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
     if (!entryType) throw new Error('סוג חופשה לא נתמך');
     const inserts = [];
     const conflicts = [];
+    const invalidStartDates = [];
     const occupied = new Set(baseRegularSessions);
     for (const item of entries) {
       const employee = employees.find(e => e.id === item.employee_id);
@@ -93,6 +94,15 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
       const dateStr = item.date;
       if (!dateStr) continue;
       const key = `${employee.id}-${dateStr}`;
+      if (employee.start_date && dateStr < employee.start_date) {
+        invalidStartDates.push({
+          employeeId: employee.id,
+          employeeName: employee.name || '',
+          date: dateStr,
+          startDate: employee.start_date,
+        });
+        continue;
+      }
       if (occupied.has(key)) {
         conflicts.push({
           employeeId: employee.id,
@@ -140,17 +150,18 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
       occupied.add(key);
     }
     if (!inserts.length) {
-      if (conflicts.length > 0) {
+      if (conflicts.length > 0 || invalidStartDates.length > 0) {
         const error = new Error('leave_conflicts');
         error.code = 'TIME_ENTRY_LEAVE_CONFLICT';
         error.conflicts = conflicts;
+        error.invalidStartDates = invalidStartDates;
         throw error;
       }
       throw new Error('no valid rows');
     }
     const { error } = await client.from('WorkSessions').insert(inserts);
     if (error) throw error;
-    return { inserted: inserts, conflicts };
+    return { inserted: inserts, conflicts, invalidStartDates };
   };
 
   return { saveRows, saveMixedLeave };

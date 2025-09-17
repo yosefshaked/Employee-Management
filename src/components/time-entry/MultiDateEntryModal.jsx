@@ -165,6 +165,29 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
     return `לא ניתן לשמור חופשה עבור התאריכים הבאים:\n${lines.join('\n')}`;
   }, [employeesById]);
 
+  const formatInvalidStartMessage = useCallback((items = []) => {
+    if (!Array.isArray(items) || items.length === 0) return null;
+    const lines = items.map(item => {
+      const employee = employeesById[item.employeeId] || {};
+      const name = item.employeeName || employee.name || '';
+      const dateValue = item.date ? new Date(`${item.date}T00:00:00`) : null;
+      const formattedDate = dateValue && !Number.isNaN(dateValue.getTime())
+        ? format(dateValue, 'dd/MM/yyyy')
+        : (item.date || '');
+      const startSource = item.startDate || employee.start_date || '';
+      const startValue = startSource ? new Date(`${startSource}T00:00:00`) : null;
+      const formattedStart = startValue && !Number.isNaN(startValue.getTime())
+        ? format(startValue, 'dd/MM/yyyy')
+        : (startSource || '');
+      if (formattedStart) {
+        return `${name} – ${formattedDate} (תאריך התחלה ${formattedStart})`.trim();
+      }
+      return `${name} – ${formattedDate}`.trim();
+    });
+    if (!lines.some(Boolean)) return null;
+    return `לא ניתן לשמור חופשה לפני תאריך תחילת העבודה:\n${lines.join('\n')}`;
+  }, [employeesById]);
+
   useEffect(() => {
     if (mode === 'leave') {
       setShowBanner(false);
@@ -284,6 +307,12 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
           toast.error(message, { duration: 15000 });
         }
       }
+      if (result?.invalidStartDates?.length) {
+        const invalidMessage = formatInvalidStartMessage(result.invalidStartDates);
+        if (invalidMessage) {
+          toast.error(invalidMessage, { duration: 15000 });
+        }
+      }
       const insertedCount = Array.isArray(result?.inserted) ? result.inserted.length : 0;
       if (insertedCount > 0) {
         toast.success(`נשמרו ${insertedCount} ימי חופשה`);
@@ -291,12 +320,23 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
         onClose();
       }
     } catch (e) {
-      if (e?.code === 'TIME_ENTRY_LEAVE_CONFLICT' && Array.isArray(e.conflicts)) {
-        const message = formatConflictMessage(e.conflicts);
-        if (message) {
-          toast.error(message, { duration: 15000 });
-          return;
+      if (e?.code === 'TIME_ENTRY_LEAVE_CONFLICT') {
+        let handled = false;
+        if (Array.isArray(e.conflicts) && e.conflicts.length) {
+          const message = formatConflictMessage(e.conflicts);
+          if (message) {
+            toast.error(message, { duration: 15000 });
+            handled = true;
+          }
         }
+        if (Array.isArray(e.invalidStartDates) && e.invalidStartDates.length) {
+          const invalidMessage = formatInvalidStartMessage(e.invalidStartDates);
+          if (invalidMessage) {
+            toast.error(invalidMessage, { duration: 15000 });
+            handled = true;
+          }
+        }
+        if (handled) return;
       }
       toast.error(e.message);
     }
