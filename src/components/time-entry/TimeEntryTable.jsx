@@ -386,6 +386,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
           selectedEmployees={selectedEmployees}
           selectedDates={selectedDates}
           getRateForDate={getRateForDate}
+          workSessions={workSessions}
           onSaved={() => {
             onImported();
             setSelectedDates([]);

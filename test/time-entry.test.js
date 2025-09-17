@@ -146,13 +146,14 @@ describe('paid leave restrictions', () => {
 describe('mixed leave persistence', () => {
   it('saves paid mixed leave with payable flag', async () => {
     let inserted = [];
-    const employees = [{ id: 'g1', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
+    const employees = [{ id: 'g1', name: 'אנה', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
     const services = [];
     const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
     const getRateForDate = () => ({ rate: 3000 });
     const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
-    await saveMixedLeave([{ employee_id: 'g1', date: '2024-02-01', paid: true }], { leaveType: 'mixed' });
-    assert.equal(inserted.length, 1);
+    const result = await saveMixedLeave([{ employee_id: 'g1', date: '2024-02-01', paid: true }], { leaveType: 'mixed' });
+    assert.equal(result.inserted.length, 1);
+    assert.equal(result.conflicts.length, 0);
     assert.equal(inserted[0].entry_type, 'leave_mixed');
     assert.equal(inserted[0].payable, true);
     assert(inserted[0].total_payment > 0);
@@ -160,16 +161,39 @@ describe('mixed leave persistence', () => {
 
   it('saves unpaid mixed leave without payment', async () => {
     let inserted = [];
-    const employees = [{ id: 'g1', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
+    const employees = [{ id: 'g1', name: 'אנה', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
     const services = [];
     const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
     const getRateForDate = () => ({ rate: 3000 });
     const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
-    await saveMixedLeave([{ employee_id: 'g1', date: '2024-02-02', paid: false }], { leaveType: 'mixed' });
-    assert.equal(inserted.length, 1);
+    const result = await saveMixedLeave([{ employee_id: 'g1', date: '2024-02-02', paid: false }], { leaveType: 'mixed' });
+    assert.equal(result.inserted.length, 1);
+    assert.equal(result.conflicts.length, 0);
     assert.equal(inserted[0].payable, false);
     assert.equal(inserted[0].total_payment, 0);
     assert.equal(inserted[0].rate_used, null);
+  });
+
+  it('skips mixed leave entries that conflict with regular sessions', async () => {
+    let inserted = [];
+    const employees = [{ id: 'g1', name: 'אנה', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
+    const services = [];
+    const workSessions = [
+      { employee_id: 'g1', date: '2024-02-01', entry_type: 'hours' },
+    ];
+    const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
+    const getRateForDate = () => ({ rate: 3000 });
+    const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase, workSessions });
+    const payload = [
+      { employee_id: 'g1', date: '2024-02-01', paid: true },
+      { employee_id: 'g1', date: '2024-02-02', paid: true },
+    ];
+    const result = await saveMixedLeave(payload, { leaveType: 'mixed' });
+    assert.equal(result.inserted.length, 1);
+    assert.equal(result.conflicts.length, 1);
+    assert.equal(result.conflicts[0].date, '2024-02-01');
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0].date, '2024-02-02');
   });
 });
 

@@ -3,7 +3,18 @@ import { getEntryTypeForLeaveKind, isLeaveEntryType } from '../../lib/leave.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
-export function useTimeEntry({ employees, services, getRateForDate, supabaseClient }) {
+export function useTimeEntry({ employees, services, getRateForDate, supabaseClient, workSessions = [] }) {
+  const baseRegularSessions = new Set();
+  if (Array.isArray(workSessions)) {
+    workSessions.forEach(session => {
+      if (!session) return;
+      if (!session.employee_id || !session.date) return;
+      if (session.entry_type === 'adjustment') return;
+      if (isLeaveEntryType(session.entry_type)) return;
+      baseRegularSessions.add(`${session.employee_id}-${session.date}`);
+    });
+  }
+
   const saveRows = async (rows, dayTypeMap = {}) => {
     const client = supabaseClient || (await import('../../supabaseClient.js')).supabase;
     const inserts = [];
@@ -70,11 +81,22 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
     const entryType = getEntryTypeForLeaveKind(leaveType);
     if (!entryType) throw new Error('סוג חופשה לא נתמך');
     const inserts = [];
+    const conflicts = [];
+    const occupied = new Set(baseRegularSessions);
     for (const item of entries) {
       const employee = employees.find(e => e.id === item.employee_id);
       if (!employee) continue;
       const dateStr = item.date;
       if (!dateStr) continue;
+      const key = `${employee.id}-${dateStr}`;
+      if (occupied.has(key)) {
+        conflicts.push({
+          employeeId: employee.id,
+          employeeName: employee.name || '',
+          date: dateStr,
+        });
+        continue;
+      }
       const isPaid = item.paid !== false;
       let rateUsed = null;
       let totalPayment = 0;
@@ -105,11 +127,20 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
         total_payment: totalPayment,
         payable: isPaid,
       });
+      occupied.add(key);
     }
-    if (!inserts.length) throw new Error('no valid rows');
+    if (!inserts.length) {
+      if (conflicts.length > 0) {
+        const error = new Error('leave_conflicts');
+        error.code = 'TIME_ENTRY_LEAVE_CONFLICT';
+        error.conflicts = conflicts;
+        throw error;
+      }
+      throw new Error('no valid rows');
+    }
     const { error } = await client.from('WorkSessions').insert(inserts);
     if (error) throw error;
-    return inserts;
+    return { inserted: inserts, conflicts };
   };
 
   return { saveRows, saveMixedLeave };

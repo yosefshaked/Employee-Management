@@ -47,7 +47,7 @@ function validateRow(row, employee, services, getRateForDate, dayTypeMap) {
   return { valid: Object.keys(errors).length === 0, errors };
 }
 
-export default function MultiDateEntryModal({ open, onClose, employees, services, selectedEmployees, selectedDates, getRateForDate, onSaved }) {
+export default function MultiDateEntryModal({ open, onClose, employees, services, selectedEmployees, selectedDates, getRateForDate, onSaved, workSessions = [] }) {
   const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees]);
   const initialRows = useMemo(() => {
     const items = [];
@@ -72,7 +72,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
 
   const [rows, setRows] = useState(initialRows);
   useEffect(() => { setRows(initialRows); }, [initialRows]);
-  const { saveRows, saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate });
+  const { saveRows, saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, workSessions });
 
   const [mode, setMode] = useState('regular');
   const leaveTypeOptions = useMemo(
@@ -166,6 +166,21 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   const [showErrors, setShowErrors] = useState(false);
   const [showBanner, setShowBanner] = useState(false);
   const [flash, setFlash] = useState(null);
+
+  const formatConflictMessage = useCallback((items = []) => {
+    if (!Array.isArray(items) || items.length === 0) return null;
+    const lines = items.map(item => {
+      const employee = employeesById[item.employeeId] || {};
+      const name = item.employeeName || employee.name || '';
+      const dateValue = item.date ? new Date(`${item.date}T00:00:00`) : null;
+      const formatted = dateValue && !Number.isNaN(dateValue.getTime())
+        ? format(dateValue, 'dd/MM/yyyy')
+        : (item.date || '');
+      return `${name} – ${formatted}`.trim();
+    });
+    if (!lines.some(Boolean)) return null;
+    return `לא ניתן לשמור חופשה עבור התאריכים הבאים:\n${lines.join('\n')}`;
+  }, [employeesById]);
 
   useEffect(() => {
     if (mode === 'leave') {
@@ -287,11 +302,27 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
       return;
     }
     try {
-      const inserted = await saveMixedLeave(selections, { leaveType: selectedLeaveType });
-      toast.success(`נשמרו ${inserted.length} ימי חופשה`);
-      onSaved();
-      onClose();
+      const result = await saveMixedLeave(selections, { leaveType: selectedLeaveType });
+      if (result?.conflicts?.length) {
+        const message = formatConflictMessage(result.conflicts);
+        if (message) {
+          toast.error(message, { duration: 15000 });
+        }
+      }
+      const insertedCount = Array.isArray(result?.inserted) ? result.inserted.length : 0;
+      if (insertedCount > 0) {
+        toast.success(`נשמרו ${insertedCount} ימי חופשה`);
+        onSaved();
+        onClose();
+      }
     } catch (e) {
+      if (e?.code === 'TIME_ENTRY_LEAVE_CONFLICT' && Array.isArray(e.conflicts)) {
+        const message = formatConflictMessage(e.conflicts);
+        if (message) {
+          toast.error(message, { duration: 15000 });
+          return;
+        }
+      }
       toast.error(e.message);
     }
   };
