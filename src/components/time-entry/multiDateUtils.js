@@ -34,8 +34,11 @@ export function isRowCompleteForProgress(row, employee, dayTypeMap = {}) {
     return parseFloat(row.hours) > 0;
   }
   if (employee.employee_type === 'global') {
-    const dt = dayTypeMap[row.employee_id];
-    return dt === 'regular' || dt === 'paid_leave';
+    if (dayTypeMap && Object.prototype.hasOwnProperty.call(dayTypeMap, row.employee_id)) {
+      const dt = dayTypeMap[row.employee_id];
+      return dt === 'regular' || dt === 'paid_leave';
+    }
+    return true;
   }
   return false;
 }

@@ -25,11 +25,15 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
       const { rate: rateUsed, reason } = getRateForDate(employee.id, row.date, isHourlyOrGlobal ? null : row.service_id);
       if (!rateUsed) throw new Error(reason || 'missing rate');
       let totalPayment = 0;
-      const empDayType = dayTypeMap[row.employee_id];
+      const empDayType = dayTypeMap ? dayTypeMap[row.employee_id] : undefined;
       const originalType = row.entry_type;
       let entryType;
       if (employee.employee_type === 'global') {
-        entryType = empDayType === 'paid_leave' ? getEntryTypeForLeaveKind('system_paid') : 'hours';
+        if (empDayType === 'paid_leave') {
+          entryType = getEntryTypeForLeaveKind('system_paid');
+        } else {
+          entryType = 'hours';
+        }
       } else {
         entryType = employee.employee_type === 'instructor' ? 'session' : 'hours';
         if (originalType && isLeaveEntryType(originalType)) {

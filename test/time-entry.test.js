@@ -52,19 +52,18 @@ describe('per-employee day type mapping', () => {
 });
 
 describe('per-employee day type control rendering', () => {
-  it('renders group-level day type control and no top-level control', () => {
+  it('omits the legacy group-level day type control for globals', () => {
     const content = fs.readFileSync(path.join('src','components','time-entry','MultiDateEntryModal.jsx'),'utf8');
-    assert(content.includes('סוג יום לעובד זה*'));
-    assert(!content.includes('id="md-daytype"'));
+    assert(!content.includes('סוג יום לעובד זה*'));
   });
 });
 
 describe('global leave flow gating', () => {
-  it('forces leave mode when only global employees are selected', () => {
+  it('allows mode toggle regardless of selected employee types', () => {
     const content = fs.readFileSync(path.join('src','components','time-entry','MultiDateEntryModal.jsx'),'utf8');
-    assert(content.includes('shouldForceLeaveMode'));
-    assert(content.includes('!shouldForceLeaveMode'));
-    assert(content.includes("if (shouldForceLeaveMode && mode !== 'leave')"));
+    assert(!content.includes('shouldForceLeaveMode'));
+    assert(content.includes("handleModeChange('regular')"));
+    assert(content.includes("handleModeChange('leave')"));
   });
 });
 
@@ -100,13 +99,14 @@ describe('copy and fill utilities', () => {
     assert.equal(result[2].sessions_count, '3');
   });
 
-  it('global row requires explicit day type via map', () => {
+  it('global row is complete when no map override exists', () => {
     const row = { employee_id: 'g1' };
     const emp = { employee_type: 'global' };
-    const map = {};
-    assert.equal(isRowCompleteForProgress(row, emp, map), false);
-    map.g1 = 'regular';
-    assert.equal(isRowCompleteForProgress(row, emp, map), true);
+    assert.equal(isRowCompleteForProgress(row, emp, {}), true);
+    const paid = { g1: 'paid_leave' };
+    assert.equal(isRowCompleteForProgress(row, emp, paid), true);
+    const invalid = { g1: 'other' };
+    assert.equal(isRowCompleteForProgress(row, emp, invalid), false);
   });
 });
 
@@ -339,15 +339,16 @@ describe('progress completion rules', () => {
     row.hours = '2';
     assert.equal(isRowCompleteForProgress(row, emp), true);
   });
-  it('global row requires explicit day type', () => {
+  it('global row counts as complete without explicit day type', () => {
     const emp = { employee_type: 'global' };
     const row = { employee_id: 'g1' };
-    const map = {};
-    assert.equal(isRowCompleteForProgress(row, emp, map), false);
-    map.g1 = 'regular';
-    assert.equal(isRowCompleteForProgress(row, emp, map), true);
-    map.g1 = 'paid_leave';
-    assert.equal(isRowCompleteForProgress(row, emp, map), true);
+    assert.equal(isRowCompleteForProgress(row, emp), true);
+    const regularMap = { g1: 'regular' };
+    assert.equal(isRowCompleteForProgress(row, emp, regularMap), true);
+    const paidMap = { g1: 'paid_leave' };
+    assert.equal(isRowCompleteForProgress(row, emp, paidMap), true);
+    const invalidMap = { g1: 'something_else' };
+    assert.equal(isRowCompleteForProgress(row, emp, invalidMap), false);
   });
 });
 

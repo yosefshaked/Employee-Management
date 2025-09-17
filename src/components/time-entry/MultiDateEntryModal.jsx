@@ -15,7 +15,7 @@ import he from '@/i18n/he.json';
 import { calculateGlobalDailyRate, aggregateGlobalDays } from '@/lib/payroll.js';
 import { isLeaveEntryType, LEAVE_TYPE_OPTIONS } from '@/lib/leave.js';
 
-function validateRow(row, employee, services, getRateForDate, dayTypeMap) {
+function validateRow(row, employee, services, getRateForDate) {
   const errors = {};
   if (!row.date) errors.date = 'חסר תאריך';
   const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
@@ -31,15 +31,10 @@ function validateRow(row, employee, services, getRateForDate, dayTypeMap) {
   } else if (employee.employee_type === 'hourly') {
     if (!row.hours) errors.hours = 'חסרות שעות';
   } else if (employee.employee_type === 'global') {
-    const dt = dayTypeMap[employee.id];
-    if (dt !== 'regular' && dt !== 'paid_leave') {
-      errors.dayType = 'יש לבחור סוג יום';
-    } else {
-      try {
-        calculateGlobalDailyRate(employee, row.date, rate);
-      } catch {
-        errors.dayType = 'אין ימי עבודה בחודש';
-      }
+    try {
+      calculateGlobalDailyRate(employee, row.date, rate);
+    } catch {
+      errors.hours = 'אין ימי עבודה בחודש';
     }
   } else if (isLeaveEntryType(row.entry_type)) {
     errors.entry_type = 'סוג יום לא נתמך';
@@ -58,7 +53,11 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
         items.push({
           employee_id: empId,
           date: format(d, 'yyyy-MM-dd'),
-          entry_type: emp.employee_type === 'hourly' ? 'hours' : (emp.employee_type === 'instructor' ? 'session' : undefined),
+          entry_type: emp.employee_type === 'hourly'
+            ? 'hours'
+            : (emp.employee_type === 'instructor'
+              ? 'session'
+              : (emp.employee_type === 'global' ? 'hours' : undefined)),
           service_id: null,
           hours: '',
           sessions_count: '',
@@ -74,24 +73,10 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   useEffect(() => { setRows(initialRows); }, [initialRows]);
   const { saveRows, saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, workSessions });
 
-  const globalEmployeeIds = useMemo(
-    () => selectedEmployees.filter(id => employeesById[id]?.employee_type === 'global'),
-    [selectedEmployees, employeesById]
-  );
-  const shouldForceLeaveMode = globalEmployeeIds.length > 0 && globalEmployeeIds.length === selectedEmployees.length;
-
-  const [mode, setMode] = useState(shouldForceLeaveMode ? 'leave' : 'regular');
-  useEffect(() => {
-    if (shouldForceLeaveMode && mode !== 'leave') {
-      setMode('leave');
-    }
-  }, [shouldForceLeaveMode, mode]);
-
-  const showModeToggle = !shouldForceLeaveMode;
+  const [mode, setMode] = useState('regular');
   const handleModeChange = useCallback((nextMode) => {
-    if (shouldForceLeaveMode && nextMode !== 'leave') return;
     setMode(nextMode);
-  }, [shouldForceLeaveMode]);
+  }, []);
   const leaveTypeOptions = useMemo(
     () => LEAVE_TYPE_OPTIONS.filter(option => option.value === 'mixed'),
     []
@@ -121,24 +106,9 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   const [mixedSelections, setMixedSelections] = useState(defaultMixedSelections);
   useEffect(() => { setMixedSelections(defaultMixedSelections); }, [defaultMixedSelections]);
 
-  const [employeeDayType, setEmployeeDayType] = useState({});
-  const [dayTypeErrors, setDayTypeErrors] = useState({});
-  const getEmployeeDayType = useCallback((id) => employeeDayType[id] || null, [employeeDayType]);
-  const setEmployeeDayTypeWrapper = (id, value) => {
-    setEmployeeDayType(prev => ({ ...prev, [id]: value }));
-    setDayTypeErrors(prev => ({ ...prev, [id]: false }));
-    const firstIdx = rows.findIndex(r => r.employee_id === id);
-    if (firstIdx !== -1) {
-      setTimeout(() => {
-        const el = document.querySelector(`#row-${firstIdx} input[name="hours"]`);
-        el?.focus();
-      }, 0);
-    }
-  };
-
   const validation = useMemo(
-    () => rows.map(r => validateRow(r, employeesById[r.employee_id], services, getRateForDate, employeeDayType)),
-    [rows, employeesById, services, getRateForDate, employeeDayType]
+    () => rows.map(r => validateRow(r, employeesById[r.employee_id], services, getRateForDate)),
+    [rows, employeesById, services, getRateForDate]
   );
   const payments = useMemo(
     () => rows.map(r => computeRowPayment(r, employeesById[r.employee_id], services, getRateForDate)),
@@ -148,12 +118,12 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
     const withPay = rows.map((r, i) => ({
       ...r,
       entry_type: employeesById[r.employee_id].employee_type === 'global'
-        ? (getEmployeeDayType(r.employee_id) === 'paid_leave' ? 'paid_leave' : 'hours')
+        ? 'hours'
         : r.entry_type,
       total_payment: payments[i]
     }));
     return aggregateGlobalDays(withPay, employeesById);
-  }, [rows, payments, employeesById, getEmployeeDayType]);
+  }, [rows, payments, employeesById]);
   const duplicateMap = useMemo(() => {
     const map = {};
     globalAgg.forEach(val => {
@@ -173,8 +143,8 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
     return nonGlobal + globalSum;
   }, [rows, payments, employeesById, globalAgg]);
   const filledCount = useMemo(
-    () => rows.filter(r => isRowCompleteForProgress(r, employeesById[r.employee_id], employeeDayType)).length,
-    [rows, employeesById, employeeDayType]
+    () => rows.filter(r => isRowCompleteForProgress(r, employeesById[r.employee_id])).length,
+    [rows, employeesById]
   );
   const [showErrors, setShowErrors] = useState(false);
   const [showBanner, setShowBanner] = useState(false);
@@ -255,14 +225,6 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   const toggleEmp = (id) => setCollapsed(prev => ({ ...prev, [id]: !prev[id] }));
 
   const handleRegularSave = async () => {
-    const missingId = globalEmployeeIds.find(id => !getEmployeeDayType(id));
-    if (missingId) {
-      setDayTypeErrors(prev => ({ ...prev, [missingId]: true }));
-      const el = document.getElementById(`daytype-${missingId}`);
-      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      el?.querySelector('button')?.focus();
-      return;
-    }
     const invalidIndex = validation.findIndex(v => !v.valid);
     if (invalidIndex !== -1) {
       setShowErrors(true);
@@ -272,7 +234,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
       return;
     }
     try {
-      await saveRows(rows, employeeDayType);
+      await saveRows(rows);
       toast.success(`נשמרו ${rows.length}`);
       onSaved();
       onClose();
@@ -284,7 +246,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
   const saveValidOnly = async () => {
     const validRows = rows.filter((_, i) => validation[i].valid);
     try {
-      await saveRows(validRows, employeeDayType);
+      await saveRows(validRows);
       toast.success(`נשמרו ${validRows.length} / נדחו ${rows.length - validRows.length}`);
       setShowBanner(false);
     } catch (e) {
@@ -340,7 +302,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
     }
   };
 
-  const regularSaveDisabled = mode === 'regular' && globalEmployeeIds.some(id => !getEmployeeDayType(id));
+  const regularSaveDisabled = mode === 'regular' && rows.length === 0;
   const leaveSaveDisabled = mode === 'leave' && (!selectedEmployees.length || !sortedDates.length);
 
   return (
@@ -376,26 +338,24 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
               className="flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-24 space-y-3 relative"
               data-testid="md-body"
             >
-              {showModeToggle && (
-                <div className="flex items-center justify-between bg-slate-100 rounded-lg ring-1 ring-slate-200 p-1">
-                  <Button
-                    type="button"
-                    variant={mode === 'regular' ? 'default' : 'ghost'}
-                    className="flex-1 h-9"
-                    onClick={() => handleModeChange('regular')}
-                  >
-                    רישום שעות
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={mode === 'leave' ? 'default' : 'ghost'}
-                    className="flex-1 h-9"
-                    onClick={() => handleModeChange('leave')}
-                  >
-                    חופשה
-                  </Button>
-                </div>
-              )}
+              <div className="flex items-center justify-between bg-slate-100 rounded-lg ring-1 ring-slate-200 p-1">
+                <Button
+                  type="button"
+                  variant={mode === 'regular' ? 'default' : 'ghost'}
+                  className="flex-1 h-9"
+                  onClick={() => handleModeChange('regular')}
+                >
+                  רישום שעות
+                </Button>
+                <Button
+                  type="button"
+                  variant={mode === 'leave' ? 'default' : 'ghost'}
+                  className="flex-1 h-9"
+                  onClick={() => handleModeChange('leave')}
+                >
+                  חופשה
+                </Button>
+              </div>
 
               {mode === 'regular' ? (
                 <>
@@ -416,8 +376,6 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
                   {groupedRows.map(([empId, items], idx) => {
                 const emp = employeesById[empId];
                 const isCollapsed = collapsed[empId];
-                const dt = getEmployeeDayType(empId);
-                const disabled = emp.employee_type === 'global' && !dt;
                 return (
                   <div key={empId} className="space-y-3">
                     <div
@@ -430,59 +388,27 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
                     </div>
                     {!isCollapsed && (
                       <div className="space-y-3 mt-2 relative">
-                        {emp.employee_type === 'global' && (
-                          <div id={`daytype-${empId}`}>
-                            <Label className="text-sm font-medium text-slate-700">סוג יום לעובד זה*</Label>
-                            <div className="mt-1 flex rounded-lg overflow-hidden ring-1 ring-slate-200" role="radiogroup">
-                              <Button
-                                type="button"
-                                variant={dt === 'regular' ? 'default' : 'ghost'}
-                                className="flex-1 h-10 rounded-none"
-                                onClick={() => setEmployeeDayTypeWrapper(empId, 'regular')}
-                                aria-label="יום רגיל"
-                              >
-                                יום רגיל
-                              </Button>
-                              <Button
-                                type="button"
-                                variant={dt === 'paid_leave' ? 'default' : 'ghost'}
-                                className="flex-1 h-10 rounded-none"
-                                onClick={() => setEmployeeDayTypeWrapper(empId, 'paid_leave')}
-                                aria-label="חופשה בתשלום"
-                              >
-                                חופשה בתשלום
-                              </Button>
-                            </div>
-                            {dayTypeErrors[empId] && <p className="text-sm text-red-600">יש לבחור סוג יום</p>}
-                            <p className="text-sm text-slate-600 mt-1">שכר גלובלי נספר לפי יום; הוספת מקטע שעות לא מכפילה שכר.</p>
-                          </div>
-                        )}
-                        <div className="relative">
-                          {disabled && (
-                            <div className="absolute inset-0 bg-white/70 z-10 pointer-events-none"></div>
-                          )}
-                          <div className="flex flex-col gap-3 mt-2">
-                            {items.map(({ row, index }) => (
-                              <EntryRow
-                                key={`${row.employee_id}-${row.date}-${index}`}
-                                value={row}
-                                employee={emp}
-                                services={services}
-                                getRateForDate={getRateForDate}
-                                onChange={(patch) => updateRow(index, patch)}
-                                onCopyField={(field) => handleCopy(index, field)}
-                                showSummary={true}
-                                readOnlyDate
-                                rowId={`row-${index}`}
-                                flashField={flash && flash.index === index ? flash.field : null}
-                                errors={showErrors ? validation[index].errors : {}}
-                                isDuplicate={!!duplicateMap[index]}
-                                hideDayType={emp.employee_type === 'global'}
-                                allowRemove
-                                onRemove={() => removeRow(index)}
-                              />
-                            ))}
-                          </div>
+                        <div className="flex flex-col gap-3 mt-2">
+                          {items.map(({ row, index }) => (
+                            <EntryRow
+                              key={`${row.employee_id}-${row.date}-${index}`}
+                              value={row}
+                              employee={emp}
+                              services={services}
+                              getRateForDate={getRateForDate}
+                              onChange={(patch) => updateRow(index, patch)}
+                              onCopyField={(field) => handleCopy(index, field)}
+                              showSummary={true}
+                              readOnlyDate
+                              rowId={`row-${index}`}
+                              flashField={flash && flash.index === index ? flash.field : null}
+                              errors={showErrors ? validation[index].errors : {}}
+                              isDuplicate={!!duplicateMap[index]}
+                              hideDayType={emp.employee_type === 'global'}
+                              allowRemove
+                              onRemove={() => removeRow(index)}
+                            />
+                          ))}
                         </div>
                       </div>
                     )}
