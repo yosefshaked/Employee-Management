@@ -25,6 +25,7 @@ export function aggregateGlobalDays(rows, employeesById) {
   rows.forEach((row, index) => {
     const emp = employeesById[row.employee_id];
     if (!emp || emp.employee_type !== 'global') return;
+    if (emp.start_date && row.date < emp.start_date) return;
     if (row.entry_type !== 'hours' && !isLeaveEntryType(row.entry_type)) return;
     if (isLeaveEntryType(row.entry_type) && row.payable === false) return;
     const key = `${row.employee_id}|${row.date}`;
@@ -65,6 +66,7 @@ export function aggregateGlobalDayForDate(rows, employeesById) {
   rows.forEach(row => {
     const emp = employeesById[row.employee_id];
     if (!emp || emp.employee_type !== 'global') return;
+    if (emp.start_date && row.date < emp.start_date) return;
     if (row.entry_type !== 'hours' && !isLeaveEntryType(row.entry_type)) return;
     if (isLeaveEntryType(row.entry_type) && row.payable === false) return;
     const key = `${row.employee_id}|${row.date}`;
@@ -97,11 +99,28 @@ export function createLeaveDayValueResolver({
 } = {}) {
   const selector = typeof leaveDayValueSelector === 'function' ? leaveDayValueSelector : null;
   const cache = new Map();
+  const employeesById = new Map(Array.isArray(employees) ? employees.filter(e => e && e.id).map(emp => [emp.id, emp]) : []);
+  const toKey = (value) => {
+    if (!value) return null;
+    if (typeof value === 'string' && value.length >= 10) {
+      return value.slice(0, 10);
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toISOString().slice(0, 10);
+  };
   return (employeeId, date) => {
     if (!employeeId || !date) return 0;
     if (!selector) return 0;
     const key = `${employeeId}|${date}`;
     if (cache.has(key)) return cache.get(key);
+    const employee = employeesById.get(employeeId);
+    const startDate = employee?.start_date ? toKey(employee.start_date) : null;
+    const targetDate = toKey(date);
+    if (startDate && targetDate && targetDate < startDate) {
+      cache.set(key, 0);
+      return 0;
+    }
     const value = selector(employeeId, date, {
       employees,
       workSessions,
@@ -115,7 +134,7 @@ export function createLeaveDayValueResolver({
   };
 }
 
-export function resolveLeaveSessionValue(session, resolver) {
+export function resolveLeaveSessionValue(session, resolver, options = {}) {
   if (!session || session.payable === false) {
     return { amount: 0, multiplier: 0 };
   }
@@ -129,18 +148,23 @@ export function resolveLeaveSessionValue(session, resolver) {
     leave_kind: session.leave_kind,
   });
   const multiplier = Number.isFinite(rawMultiplier) && rawMultiplier > 0 ? rawMultiplier : 1;
+  const employee = options?.employee || null;
+  const startDate = employee?.start_date;
+  if (startDate && session?.date && session.date < startDate) {
+    return { amount: 0, multiplier, preStartDate: true };
+  }
   const fn = typeof resolver === 'function' ? resolver : null;
   if (fn) {
     const base = fn(session.employee_id, session.date);
     if (typeof base === 'number' && Number.isFinite(base) && base > 0) {
-      return { amount: base * multiplier, multiplier };
+      return { amount: base * multiplier, multiplier, preStartDate: false };
     }
   }
   const fallback = Number(session.total_payment);
   if (Number.isFinite(fallback)) {
-    return { amount: fallback, multiplier };
+    return { amount: fallback, multiplier, preStartDate: false };
   }
-  return { amount: 0, multiplier };
+  return { amount: 0, multiplier, preStartDate: false };
 }
 
 export function computePeriodTotals({
@@ -225,7 +249,11 @@ export function computePeriodTotals({
       const key = `${row.employee_id}|${row.date}`;
       const already = processedLeave.get(key) || 0;
       if (already >= 1) return;
-      const sessionValue = resolveLeaveSessionValue(row, resolveLeaveValue);
+      const sessionValue = resolveLeaveSessionValue(row, resolveLeaveValue, { employee: emp });
+      if (sessionValue.preStartDate) {
+        processedLeave.set(key, 1);
+        return;
+      }
       const multiplier = Number.isFinite(sessionValue.multiplier) && sessionValue.multiplier > 0
         ? sessionValue.multiplier
         : 1;

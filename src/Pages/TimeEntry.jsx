@@ -253,6 +253,12 @@ export default function TimeEntry() {
           return null;
         }
         if (isLeaveEntryType(entryType)) {
+          if (employee.start_date && row.date < employee.start_date) {
+            const formattedStart = format(new Date(employee.start_date + 'T00:00:00'), 'dd/MM/yyyy');
+            const formattedTarget = format(new Date(row.date + 'T00:00:00'), 'dd/MM/yyyy');
+            toast.error(`לא ניתן להזין חופשה לפני תחילת העבודה (${formattedStart}): ${formattedTarget}`, { duration: 15000 });
+            return null;
+          }
           const conflicts = findConflicts(employee.id, row.date);
           if (conflicts.length > 0) {
             const details = conflicts.map(c => {

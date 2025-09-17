@@ -25,7 +25,8 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     const employee = employees.find(emp => emp.id === session.employee_id);
     if (!employee || employee.employee_type === 'global') return Number(session.total_payment) || 0;
     if (!isLeaveEntryType(session.entry_type) || session.payable === false) return Number(session.total_payment) || 0;
-    const { amount } = resolveLeaveSessionValue(session, resolveLeaveValue);
+    const { amount, preStartDate } = resolveLeaveSessionValue(session, resolveLeaveValue, { employee });
+    if (preStartDate) return 0;
     if (typeof amount === 'number' && Number.isFinite(amount)) return amount;
     return Number(session.total_payment) || 0;
   }, [employees, resolveLeaveValue]);

@@ -52,9 +52,10 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
               const employee = getEmployee(session.employee_id);
               const isHourlyOrGlobal = employee?.employee_type === 'hourly' || employee?.employee_type === 'global';
               const isPaidLeave = employee && employee.employee_type !== 'global' && isLeaveEntryType(session.entry_type) && session.payable !== false;
-              const computedPayment = isPaidLeave
-                ? resolveLeaveSessionValue(session, resolveLeaveValue).amount
+              const resolverResult = isPaidLeave
+                ? resolveLeaveSessionValue(session, resolveLeaveValue, { employee })
                 : null;
+              const computedPayment = resolverResult ? resolverResult.amount : null;
               const totalPayment = isPaidLeave
                 ? (typeof computedPayment === 'number' && Number.isFinite(computedPayment)
                   ? computedPayment

@@ -52,7 +52,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
     const end = endOfMonth(currentMonth);
     const totals = {};
     employees.forEach(emp => {
-      totals[emp.id] = { hours: 0, sessions: 0, payment: 0 };
+      totals[emp.id] = { hours: 0, sessions: 0, payment: 0, preStartLeaveDates: new Set() };
     });
     const resolveLeaveValue = createLeaveDayValueResolver({
       employees,
@@ -82,10 +82,19 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
       if (isLeaveEntryType(s.entry_type)) {
         if (s.payable === false) return;
         if (emp.employee_type === 'global') return;
+        if (emp.start_date && s.date < emp.start_date) {
+          totals[s.employee_id]?.preStartLeaveDates.add(s.date);
+          return;
+        }
         const key = `${s.employee_id}|${s.date}`;
         const already = processedLeave.get(key) || 0;
         if (already >= 1) return;
-        const sessionValue = resolveLeaveSessionValue(s, resolveLeaveValue);
+        const sessionValue = resolveLeaveSessionValue(s, resolveLeaveValue, { employee: emp });
+        if (sessionValue.preStartDate) {
+          totals[s.employee_id]?.preStartLeaveDates.add(s.date);
+          processedLeave.set(key, 1);
+          return;
+        }
         const multiplier = Number.isFinite(sessionValue.multiplier) && sessionValue.multiplier > 0
           ? sessionValue.multiplier
           : 1;
@@ -234,6 +243,13 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                 const showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
                                 let leaveKind = null;
                                 let leaveLabel = null;
+                                const startDateStr = typeof emp.start_date === 'string' ? emp.start_date : null;
+                                const isPreStartLeave = Boolean(
+                                  paidLeave &&
+                                  startDateStr &&
+                                  paidLeave.date &&
+                                  paidLeave.date < startDateStr
+                                );
 
                                 if (paidLeave) {
                                   leaveKind = getLeaveKindFromEntryType(paidLeave.entry_type) || paidLeave.leave_type || paidLeave.leave_kind || paidLeave.metadata?.leave_type || paidLeave.metadata?.leave_kind || null;
@@ -314,6 +330,12 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                             {adjustmentTotal > 0 ? '+' : '-'}₪{Math.abs(adjustmentTotal).toLocaleString()}
                                           </div>
                                         )}
+
+                                        {isPreStartLeave && (
+                                          <div className="mt-1 text-[11px] text-amber-700">
+                                            תאריך לפני תחילת עבודה—הושמט מהסכום
+                                          </div>
+                                        )}
                                     </TableCell>
                                     );
                             })}
@@ -339,9 +361,17 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                           <TableCell className="text-right sticky right-0 bg-slate-100">סה"כ צפי לתשלום</TableCell>
                           {employees.map(emp => {
                             const totals = monthlyTotals[emp.id] || { payment: 0 };
+                            const hasPreStart = totals.preStartLeaveDates instanceof Set
+                              ? totals.preStartLeaveDates.size > 0
+                              : Array.isArray(totals.preStartLeaveDates) && totals.preStartLeaveDates.length > 0;
                             return (
                               <TableCell key={emp.id} className="text-center text-green-700">
-                                ₪{totals.payment.toLocaleString()}
+                                <div>₪{totals.payment.toLocaleString()}</div>
+                                {hasPreStart && (
+                                  <div className="mt-1 text-[11px] text-amber-700">
+                                    תאריך לפני תחילת עבודה—הושמט מהסכום
+                                  </div>
+                                )}
                               </TableCell>
                             );
                           })}

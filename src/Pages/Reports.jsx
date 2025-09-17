@@ -138,7 +138,10 @@ export default function Reports() {
       const employee = employees.find(emp => emp.id === session.employee_id);
       if (!employee || employee.employee_type === 'global') return session;
       if (!isLeaveEntryType(session.entry_type)) return session;
-      const { amount } = resolveLeaveSessionValue(session, resolveLeaveValue);
+      const { amount, preStartDate } = resolveLeaveSessionValue(session, resolveLeaveValue, { employee });
+      if (preStartDate) {
+        return { ...session, total_payment: 0 };
+      }
       if (typeof amount !== 'number' || !Number.isFinite(amount)) return session;
       return { ...session, total_payment: amount };
     });

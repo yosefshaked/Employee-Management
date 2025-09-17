@@ -169,4 +169,16 @@ describe('selectLeaveDayValue', () => {
     assert.equal(value, 0);
     assert.equal(warned, true);
   });
+
+  it('marks dates before start date as excluded', () => {
+    const result = selectLeaveDayValue('h1', '2024-01-15', {
+      employees: [{ id: 'h1', employee_type: 'hourly', start_date: '2024-02-01' }],
+      workSessions: hourlySessions,
+      settings: leavePaySettings,
+      collectDiagnostics: true,
+    });
+    assert.equal(result.value, 0);
+    assert.equal(result.preStartDate, true);
+    assert.equal(result.insufficientData, false);
+  });
 });

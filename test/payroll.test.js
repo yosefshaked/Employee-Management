@@ -163,6 +163,24 @@ describe('resolveLeaveSessionValue', () => {
     assert.equal(result.multiplier, 0);
     assert.equal(called, 0);
   });
+
+  it('flags and zeroes leave before employee start date', () => {
+    const beforeStart = resolveLeaveSessionValue(
+      { entry_type: 'leave_system_paid', payable: true, employee_id: 'e1', date: '2024-01-15', total_payment: 200 },
+      () => 400,
+      { employee: { id: 'e1', start_date: '2024-02-01' } }
+    );
+    assert.equal(beforeStart.amount, 0);
+    assert.equal(beforeStart.preStartDate, true);
+
+    const afterStart = resolveLeaveSessionValue(
+      { entry_type: 'leave_system_paid', payable: true, employee_id: 'e1', date: '2024-02-10', total_payment: 200 },
+      () => 400,
+      { employee: { id: 'e1', start_date: '2024-02-01' } }
+    );
+    assert.equal(afterStart.amount, 400);
+    assert.equal(afterStart.preStartDate, false);
+  });
 });
 
 describe('computePeriodTotals aggregator', () => {

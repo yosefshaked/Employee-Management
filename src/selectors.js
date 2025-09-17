@@ -303,6 +303,7 @@ export function selectLeaveDayValue(
   const policy = resolveLeavePayPolicy({ leavePayPolicy, settings });
   const fallbackMethod = policy.default_method || DEFAULT_LEAVE_PAY_POLICY.default_method;
   const method = sanitizeMethod(employee?.leave_pay_method, fallbackMethod);
+  const emptyDiagnostics = { totalEarnings: 0, totalHours: 0, workedDays: new Set() };
 
   const normalizeDiagnostics = (raw) => ({
     totalEarnings: raw?.totalEarnings || 0,
@@ -312,19 +313,26 @@ export function selectLeaveDayValue(
       : raw?.workedDaysCount || raw?.workedDays || 0,
   });
 
-  const buildResult = (value, { diagnostics = null, insufficient = false } = {}) => {
+  const buildResult = (value, { diagnostics = null, insufficient = false, preStartDate = false } = {}) => {
     if (collectDiagnostics) {
       return {
         value,
         insufficientData: Boolean(insufficient),
         method,
         diagnostics: normalizeDiagnostics(diagnostics),
+        preStartDate: Boolean(preStartDate),
       };
     }
     return value;
   };
 
-  const emptyDiagnostics = { totalEarnings: 0, totalHours: 0, workedDays: new Set() };
+  const startDateStr = typeof employee?.start_date === 'string' && employee.start_date.length >= 10
+    ? employee.start_date.slice(0, 10)
+    : null;
+  const targetKey = resolveDateKey(targetDate);
+  if (startDateStr && targetKey < startDateStr) {
+    return buildResult(0, { diagnostics: emptyDiagnostics, preStartDate: true });
+  }
 
   if (method === 'fixed_rate') {
     const employeeRate = parsePositiveNumber(employee?.leave_fixed_day_rate);
