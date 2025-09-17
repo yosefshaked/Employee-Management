@@ -10,9 +10,15 @@ import TimeEntryForm from './TimeEntryForm';
 import ImportModal from '@/components/import/ImportModal.jsx';
 import EmployeePicker from '../employees/EmployeePicker.jsx';
 import MultiDateEntryModal from './MultiDateEntryModal.jsx';
-import { aggregateGlobalDays, aggregateGlobalDayForDate } from '@/lib/payroll.js';
+import {
+  aggregateGlobalDays,
+  aggregateGlobalDayForDate,
+  createLeaveDayValueResolver,
+  resolveLeaveSessionValue,
+} from '@/lib/payroll.js';
 import { Badge } from '@/components/ui/badge';
 import { HOLIDAY_TYPE_LABELS, getLeaveKindFromEntryType, isLeaveEntryType } from '@/lib/leave.js';
+import { selectLeaveDayValue } from '@/selectors.js';
 function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported, onDeleted, leavePolicy, leavePayPolicy }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
@@ -48,6 +54,14 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
     employees.forEach(emp => {
       totals[emp.id] = { hours: 0, sessions: 0, payment: 0 };
     });
+    const resolveLeaveValue = createLeaveDayValueResolver({
+      employees,
+      workSessions,
+      services,
+      leavePayPolicy,
+      leaveDayValueSelector: selectLeaveDayValue,
+    });
+    const processedLeave = new Map();
     const globalAgg = aggregateGlobalDays(
       workSessions.filter(s => {
         const d = parseISO(s.date);
@@ -63,6 +77,27 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
       if (!empTotals || !emp) return;
       if (s.entry_type === 'adjustment') {
         empTotals.payment += s.total_payment || 0;
+        return;
+      }
+      if (isLeaveEntryType(s.entry_type)) {
+        if (s.payable === false) return;
+        if (emp.employee_type === 'global') return;
+        const key = `${s.employee_id}|${s.date}`;
+        const already = processedLeave.get(key) || 0;
+        if (already >= 1) return;
+        const sessionValue = resolveLeaveSessionValue(s, resolveLeaveValue);
+        const multiplier = Number.isFinite(sessionValue.multiplier) && sessionValue.multiplier > 0
+          ? sessionValue.multiplier
+          : 1;
+        const remaining = Math.max(0, 1 - already);
+        if (remaining <= 0) return;
+        const credit = Math.min(multiplier, remaining);
+        const scale = multiplier ? credit / multiplier : 0;
+        const amount = sessionValue.amount * scale;
+        if (amount) {
+          empTotals.payment += amount;
+        }
+        processedLeave.set(key, already + credit);
         return;
       }
       if (emp.employee_type === 'global' && (s.entry_type === 'hours' || isLeaveEntryType(s.entry_type))) {
@@ -82,7 +117,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
       if (empTotals) empTotals.payment += v.dailyAmount;
     });
     return totals;
-  }, [workSessions, employees, employeesById, currentMonth]);
+  }, [workSessions, employees, services, leavePayPolicy, employeesById, currentMonth]);
 
   const toggleDateSelection = (day) => {
     setSelectedDates(prev => {
