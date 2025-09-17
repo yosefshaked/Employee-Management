@@ -9,6 +9,37 @@ export const DEFAULT_LEAVE_POLICY = {
   holiday_rules: [],
 };
 
+export const DEFAULT_LEAVE_PAY_POLICY = {
+  default_method: 'legal',
+  lookback_months: 3,
+  legal_allow_12m_if_better: false,
+  fixed_rate_default: null,
+  legal_info_url: '',
+};
+
+export const LEAVE_PAY_METHOD_OPTIONS = [
+  {
+    value: 'legal',
+    title: 'חישוב חוקי (מומלץ)',
+    description: 'שווי יום חופש לפי ממוצע שכר יומי בתקופת בדיקה',
+  },
+  {
+    value: 'avg_hourly_x_avg_day_hours',
+    title: 'ממוצע שכר שעתי × שעות ליום',
+    description: 'מכפיל את ממוצע השכר השעתי במספר שעות העבודה היומיות הממוצעות בתקופה',
+  },
+  {
+    value: 'fixed_rate',
+    title: 'תעריף יומי קבוע',
+    description: 'שווי יום חופשה לפי סכום קבוע במדיניות',
+  },
+];
+
+export const LEAVE_PAY_METHOD_LABELS = LEAVE_PAY_METHOD_OPTIONS.reduce((acc, option) => {
+  acc[option.value] = option.title;
+  return acc;
+}, {});
+
 export const LEAVE_TYPE_OPTIONS = [
   { value: 'employee_paid', label: 'חופשה מהמכסה' },
   { value: 'system_paid', label: 'חג משולם (מערכת)' },
@@ -171,6 +202,44 @@ export function normalizeLeavePolicy(value) {
     holiday_rules: Array.isArray(policy.holiday_rules)
       ? policy.holiday_rules.map(normalizeHolidayRule)
       : [],
+  };
+}
+
+function sanitizeLeavePayMethod(value) {
+  if (typeof value !== 'string') return DEFAULT_LEAVE_PAY_POLICY.default_method;
+  const match = LEAVE_PAY_METHOD_OPTIONS.find(option => option.value === value);
+  return match ? match.value : DEFAULT_LEAVE_PAY_POLICY.default_method;
+}
+
+export function normalizeLeavePayPolicy(value) {
+  let policy = value;
+  if (!policy) {
+    policy = {};
+  } else if (typeof policy === 'string') {
+    try {
+      policy = JSON.parse(policy);
+    } catch (error) {
+      console.warn('Failed to parse leave pay policy JSON', error);
+      policy = {};
+    }
+  }
+
+  const lookbackCandidate = parseMaybeNumber(policy.lookback_months);
+  const fixedRateCandidate = parseMaybeNumber(policy.fixed_rate_default);
+  const legalInfoUrl = typeof policy.legal_info_url === 'string' ? policy.legal_info_url.trim() : '';
+
+  return {
+    default_method: sanitizeLeavePayMethod(policy.default_method),
+    lookback_months:
+      typeof lookbackCandidate === 'number' && lookbackCandidate > 0
+        ? Math.round(lookbackCandidate)
+        : DEFAULT_LEAVE_PAY_POLICY.lookback_months,
+    legal_allow_12m_if_better: Boolean(policy.legal_allow_12m_if_better),
+    fixed_rate_default:
+      typeof fixedRateCandidate === 'number' && fixedRateCandidate >= 0
+        ? fixedRateCandidate
+        : DEFAULT_LEAVE_PAY_POLICY.fixed_rate_default,
+    legal_info_url: legalInfoUrl,
   };
 }
 

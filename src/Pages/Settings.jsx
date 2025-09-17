@@ -17,6 +17,9 @@ import {
   normalizeLeavePolicy,
   findHolidayForDate,
   normalizeHolidayRule,
+  DEFAULT_LEAVE_PAY_POLICY,
+  LEAVE_PAY_METHOD_OPTIONS,
+  normalizeLeavePayPolicy,
 } from '@/lib/leave.js';
 
 function createNewRule() {
@@ -102,27 +105,46 @@ function HolidayRuleRow({ rule, onChange, onRemove, onSave, allowHalfDay, isSavi
 
 export default function Settings() {
   const [policy, setPolicy] = useState(DEFAULT_LEAVE_POLICY);
+  const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingLeavePayPolicy, setIsSavingLeavePayPolicy] = useState(false);
 
   useEffect(() => {
     const loadPolicy = async () => {
       setIsLoading(true);
       try {
-        const { data, error } = await supabase
-          .from('Settings')
-          .select('settings_value')
-          .eq('key', 'leave_policy')
-          .single();
-        if (error) {
-          if (error.code !== 'PGRST116') throw error;
+        const [policyResponse, leavePayPolicyResponse] = await Promise.all([
+          supabase
+            .from('Settings')
+            .select('settings_value')
+            .eq('key', 'leave_policy')
+            .single(),
+          supabase
+            .from('Settings')
+            .select('settings_value')
+            .eq('key', 'leave_pay_policy')
+            .single(),
+        ]);
+
+        if (policyResponse.error) {
+          if (policyResponse.error.code !== 'PGRST116') throw policyResponse.error;
           setPolicy(DEFAULT_LEAVE_POLICY);
         } else {
-          setPolicy(normalizeLeavePolicy(data?.settings_value));
+          setPolicy(normalizeLeavePolicy(policyResponse.data?.settings_value));
+        }
+
+        if (leavePayPolicyResponse.error) {
+          if (leavePayPolicyResponse.error.code !== 'PGRST116') throw leavePayPolicyResponse.error;
+          setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
+        } else {
+          setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicyResponse.data?.settings_value));
         }
       } catch (error) {
         console.error('Error loading leave policy', error);
         toast.error('שגיאה בטעינת הגדרות החופשה');
+        setPolicy(DEFAULT_LEAVE_POLICY);
+        setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
       }
       setIsLoading(false);
     };
@@ -199,7 +221,68 @@ export default function Settings() {
     await handleSave();
   };
 
+  const handleLeavePayMethodChange = (event) => {
+    const { value } = event.target;
+    setLeavePayPolicy(prev => ({
+      ...prev,
+      default_method: value,
+    }));
+  };
+
+  const handleLeavePayToggle = (key) => (checked) => {
+    setLeavePayPolicy(prev => ({
+      ...prev,
+      [key]: checked,
+    }));
+  };
+
+  const handleLeavePayNumberChange = (key) => (event) => {
+    const { value } = event.target;
+    setLeavePayPolicy(prev => ({
+      ...prev,
+      [key]: value === '' ? '' : Number(value),
+    }));
+  };
+
+  const handleLeavePayInputChange = (key) => (event) => {
+    setLeavePayPolicy(prev => ({
+      ...prev,
+      [key]: event.target.value,
+    }));
+  };
+
+  const handleSaveLeavePayPolicy = async () => {
+    setIsSavingLeavePayPolicy(true);
+    try {
+      const normalized = normalizeLeavePayPolicy(leavePayPolicy);
+      const { error } = await supabase
+        .from('Settings')
+        .upsert({
+          key: 'leave_pay_policy',
+          settings_value: normalized,
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'key',
+          returning: 'minimal',
+        });
+      if (error) throw error;
+      setLeavePayPolicy(normalized);
+      toast.success('שיטת חישוב שווי יום חופשה נשמרה בהצלחה');
+    } catch (error) {
+      console.error('Error saving leave pay policy', error);
+      toast.error('שמירת שיטת חישוב שווי יום חופשה נכשלה');
+    }
+    setIsSavingLeavePayPolicy(false);
+  };
+
+  const handleOpenLegalInfo = () => {
+    const url = (leavePayPolicy.legal_info_url || '').trim();
+    if (!url) return;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
   const upcomingHoliday = findHolidayForDate(policy);
+  const trimmedLegalInfoUrl = (leavePayPolicy.legal_info_url || '').trim();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">
@@ -289,6 +372,112 @@ export default function Settings() {
                 {isSaving ? 'שומר...' : 'שמור הגדרות'}
               </Button>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-0 shadow-lg bg-white/80">
+          <CardHeader className="border-b">
+            <CardTitle className="text-xl font-semibold text-slate-900">שיטת חישוב שווי יום חופשה לעובדים שאינם גלובליים</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {isLoading ? (
+              <div className="space-y-4">
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-10 w-full" />
+                <Skeleton className="h-32 w-full" />
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-slate-600 text-right">
+                  ברירת המחדל היא השיטה החוקית (מומלץ) כדי להבטיח עמידה בדרישות החוק. ניתן לבחור חלופות בהתאם להסכמות בארגון.
+                </p>
+                <div className="space-y-3">
+                  {LEAVE_PAY_METHOD_OPTIONS.map(option => {
+                    const isActive = leavePayPolicy.default_method === option.value;
+                    return (
+                      <label
+                        key={option.value}
+                        className={`flex items-center gap-4 border rounded-lg p-4 cursor-pointer transition-colors flex-row-reverse ${
+                          isActive ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="leave-pay-method"
+                          value={option.value}
+                          checked={isActive}
+                          onChange={handleLeavePayMethodChange}
+                          className="w-4 h-4"
+                        />
+                        <div className="flex-1 text-right">
+                          <p className="font-semibold text-slate-800">{option.title}</p>
+                          {option.description && (
+                            <p className="text-sm text-slate-500 mt-1">{option.description}</p>
+                          )}
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-sm font-semibold text-slate-700">תקופת בדיקה (חודשים)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={leavePayPolicy.lookback_months ?? ''}
+                      onChange={handleLeavePayNumberChange('lookback_months')}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between border rounded-lg p-4 bg-slate-50">
+                    <div className="text-right">
+                      <Label className="text-sm font-semibold text-slate-700">אפשר לבדוק גם 12 חודשים ולהחיל את הגבוה לעובד</Label>
+                      <p className="text-xs text-slate-500 mt-1">נבדקת גם תקופת 12 חודשים כאשר האפשרות מסומנת</p>
+                    </div>
+                    <Switch
+                      checked={Boolean(leavePayPolicy.legal_allow_12m_if_better)}
+                      onCheckedChange={handleLeavePayToggle('legal_allow_12m_if_better')}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-sm font-semibold text-slate-700">תעריף יומי קבוע (₪)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={leavePayPolicy.fixed_rate_default ?? ''}
+                      onChange={handleLeavePayNumberChange('fixed_rate_default')}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label className="text-sm font-semibold text-slate-700">קישור למידע בחוק</Label>
+                    <Input
+                      type="url"
+                      value={leavePayPolicy.legal_info_url || ''}
+                      placeholder="https://..."
+                      onChange={handleLeavePayInputChange('legal_info_url')}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-3 justify-end">
+                  <Button
+                    variant="outline"
+                    type="button"
+                    onClick={handleOpenLegalInfo}
+                    disabled={!trimmedLegalInfoUrl}
+                  >
+                    מידע בחוק
+                  </Button>
+                  <Button onClick={handleSaveLeavePayPolicy} disabled={isSavingLeavePayPolicy || isLoading} className="gap-2">
+                    <Save className="w-4 h-4" />
+                    {isSavingLeavePayPolicy ? 'שומר...' : 'שמור שיטת חישוב'}
+                  </Button>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 
