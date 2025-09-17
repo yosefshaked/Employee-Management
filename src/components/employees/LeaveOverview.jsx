@@ -22,6 +22,7 @@ import {
   LEAVE_PAY_METHOD_DESCRIPTIONS,
   LEAVE_PAY_METHOD_LABELS,
   getNegativeBalanceFloor,
+  resolveLeavePayMethodContext,
 } from '@/lib/leave.js';
 
 const EMPLOYEE_PLACEHOLDER_VALUE = '__employee_placeholder__';
@@ -147,9 +148,10 @@ export default function LeaveOverview({
           leaveBalances,
           policy: leavePolicy,
         }),
+        payContext: resolveLeavePayMethodContext(emp, leavePayPolicy),
       }))
       .sort((a, b) => (b.summary.remaining || 0) - (a.summary.remaining || 0));
-  }, [employees, evaluationDate, leaveBalances, leavePolicy, showInactive]);
+  }, [employees, evaluationDate, leaveBalances, leavePayPolicy, leavePolicy, showInactive]);
 
   const handleFormChange = (updates) => {
     setFormState(prev => ({ ...prev, ...updates }));
@@ -550,6 +552,7 @@ export default function LeaveOverview({
             <TableHeader>
               <TableRow>
                 <TableHead className="text-right">עובד</TableHead>
+                <TableHead className="text-right">שיטת חישוב</TableHead>
                 <TableHead className="text-right">מכסה שנתית</TableHead>
                 <TableHead className="text-right">
                   <div className="flex flex-row-reverse items-center justify-end gap-1">
@@ -578,23 +581,38 @@ export default function LeaveOverview({
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8">
+                  <TableCell colSpan={7} className="text-center py-8">
                     <Loader2 className="w-5 h-5 animate-spin inline-block text-slate-400" />
                   </TableCell>
                 </TableRow>
               ) : summaryRows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-slate-500 py-10">
+                  <TableCell colSpan={7} className="text-center text-slate-500 py-10">
                     לא נמצאו נתונים להצגה
                   </TableCell>
                 </TableRow>
               ) : (
-                summaryRows.map(({ employee, summary }) => {
+                summaryRows.map(({ employee, summary, payContext }) => {
                   const remaining = Number(summary.remaining || 0);
                   const statusVariant = remaining < 0 ? 'destructive' : 'secondary';
+                  const methodValue = payContext?.method || DEFAULT_LEAVE_PAY_POLICY.default_method;
+                  const methodLabel = LEAVE_PAY_METHOD_LABELS[methodValue] || LEAVE_PAY_METHOD_LABELS.legal;
+                  const hasOverride = Boolean(payContext?.override_applied);
                   return (
                     <TableRow key={employee.id}>
                       <TableCell className="font-medium">{employee.name}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col items-end gap-1">
+                          <span className="text-sm font-medium text-slate-700">{methodLabel}</span>
+                          {hasOverride ? (
+                            <Badge variant="outline" className="text-xs text-amber-700 border-amber-200 bg-amber-50">
+                              עקיפת שיטת חישוב
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-slate-400">ברירת מחדל ארגונית</span>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>{Number(employee.annual_leave_days || 0).toFixed(1)}</TableCell>
                       <TableCell>{summary.carryIn.toFixed(1)}</TableCell>
                       <TableCell>{summary.used.toFixed(1)}</TableCell>
