@@ -1,4 +1,8 @@
-import { STORAGE_SETTINGS_KEY, DEFAULT_STORAGE_SETTINGS, normalizeStorageQuotaSettings } from '@/lib/storage.js';
+import {
+  STORAGE_SETTINGS_KEY,
+  DEFAULT_STORAGE_SETTINGS,
+  normalizeStorageQuotaSettings,
+} from '@/lib/storage.js';
 
 const toFiniteNumber = (value) => {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -72,16 +76,54 @@ export const saveStorageQuotaSettings = async (client, draftSettings) => {
   return normalized;
 };
 
+const markEdgeMissing = (error) => {
+  if (!error) return false;
+  if (typeof error.status === 'number' && error.status === 404) return true;
+  const message = error instanceof Error ? error.message : String(error?.message ?? '');
+  return /not found|failed to fetch|cors/i.test(message);
+};
+
+const extractSingleValue = (payload) => {
+  if (payload == null) return null;
+  const direct = extractUsageValue(payload, 'total_bytes');
+  if (direct != null) return direct;
+  if (typeof payload === 'number') return payload;
+  if (typeof payload === 'string') {
+    const parsed = Number(payload);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (typeof payload === 'object' && !Array.isArray(payload)) {
+    const values = Object.values(payload);
+    for (const value of values) {
+      const extracted = extractSingleValue(value);
+      if (extracted != null) return extracted;
+    }
+  }
+  if (Array.isArray(payload)) {
+    for (const entry of payload) {
+      const extracted = extractSingleValue(entry);
+      if (extracted != null) return extracted;
+    }
+  }
+  return null;
+};
+
 export const fetchStorageUsageMetrics = async (client, { includeDatabase = true } = {}) => {
   const metrics = {
     storageBytes: null,
     dbBytes: includeDatabase ? null : undefined,
     fetchedAt: new Date().toISOString(),
     errors: {},
+    hints: {
+      storageEdgeMissing: false,
+      storageRpcMissing: false,
+      storageSource: null,
+    },
   };
 
+  let storageResponse;
   try {
-    const storageResponse = await client.functions.invoke('storage-usage');
+    storageResponse = await client.functions.invoke('storage-usage');
 
     if (storageResponse.error) {
       metrics.errors.storage = {
@@ -89,15 +131,46 @@ export const fetchStorageUsageMetrics = async (client, { includeDatabase = true 
         message: storageResponse.error.message || 'Failed to fetch storage usage.',
         details: storageResponse.error?.name || storageResponse.error?.details,
       };
+      if (markEdgeMissing(storageResponse.error)) {
+        metrics.hints.storageEdgeMissing = true;
+      }
     } else if (storageResponse.data?.error) {
       metrics.errors.storage = storageResponse.data;
     } else {
       metrics.storageBytes = extractUsageValue(storageResponse.data, 'total_bytes');
+      if (metrics.storageBytes != null) {
+        metrics.hints.storageSource = 'edge';
+      }
     }
   } catch (error) {
     metrics.errors.storage = {
       message: error instanceof Error ? error.message : 'Failed to fetch storage usage.',
     };
+    if (markEdgeMissing(error)) {
+      metrics.hints.storageEdgeMissing = true;
+    }
+  }
+
+  if (metrics.storageBytes == null) {
+    try {
+      const fallbackResponse = await client.rpc('get_total_storage_usage');
+      if (fallbackResponse.error) {
+        metrics.errors.storageFallback = fallbackResponse.error;
+        if (fallbackResponse.error.code === 'PGRST202') {
+          metrics.hints.storageRpcMissing = true;
+        }
+      } else {
+        const fallbackValue = extractSingleValue(fallbackResponse.data);
+        if (fallbackValue != null) {
+          metrics.storageBytes = fallbackValue;
+          metrics.hints.storageSource = 'rpc';
+        }
+      }
+    } catch (error) {
+      metrics.errors.storageFallback = {
+        message: error instanceof Error ? error.message : 'Failed to fetch storage usage fallback.',
+      };
+    }
   }
 
   if (includeDatabase) {

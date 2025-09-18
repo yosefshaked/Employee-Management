@@ -139,3 +139,28 @@ export const calculateUsagePercent = (usedBytes, quotaGb) => {
   if (!Number.isFinite(percent)) return null;
   return Math.min(100, Math.max(0, Math.round(percent)));
 };
+
+export const STORAGE_USAGE_SQL_SNIPPET = `create or replace function public.get_total_storage_usage()
+returns bigint
+language sql
+security definer
+set search_path = public, extensions
+as $$
+  select coalesce(sum((metadata->>'size')::bigint), 0)
+  from storage.objects;
+$$;
+
+comment on function public.get_total_storage_usage() is
+  'Returns total bytes used across all Supabase Storage buckets.';
+
+create or replace function public.get_total_db_usage()
+returns bigint
+language sql
+security definer
+set search_path = public, extensions
+as $$
+  select pg_database_size(current_database());
+$$;
+
+comment on function public.get_total_db_usage() is
+  'Returns total bytes used by the current Postgres database.';`;
