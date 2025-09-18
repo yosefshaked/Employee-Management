@@ -38,16 +38,6 @@ const extractUsageValue = (payload, key) => {
   return null;
 };
 
-const isMissingRpcError = (error) => {
-  if (!error) return false;
-  const code = String(error.code || '').toUpperCase();
-  if (code === 'PGRST202' || code === 'PGRST116' || code === '404') return true;
-  return Boolean(error.message && error.message.includes('schema cache'));
-};
-
-let missingStorageUsageRpc = false;
-let missingDbUsageRpc = false;
-
 export const fetchStorageQuotaSettings = async (client) => {
   const { data, error } = await client
     .from('Settings')
@@ -90,37 +80,38 @@ export const fetchStorageUsageMetrics = async (client, { includeDatabase = true 
     errors: {},
   };
 
-  if (!missingStorageUsageRpc) {
-    const storageResponse = await client.rpc('get_total_storage_usage');
+  try {
+    const storageResponse = await client.functions.invoke('storage-usage');
+
     if (storageResponse.error) {
-      if (isMissingRpcError(storageResponse.error)) {
-        missingStorageUsageRpc = true;
-        metrics.errors.storage = storageResponse.error;
-      } else {
-        throw storageResponse.error;
-      }
+      metrics.errors.storage = {
+        code: storageResponse.error?.status ?? storageResponse.error?.code,
+        message: storageResponse.error.message || 'Failed to fetch storage usage.',
+        details: storageResponse.error?.name || storageResponse.error?.details,
+      };
+    } else if (storageResponse.data?.error) {
+      metrics.errors.storage = storageResponse.data;
     } else {
-      metrics.storageBytes = extractUsageValue(storageResponse.data, 'total_storage_bytes');
+      metrics.storageBytes = extractUsageValue(storageResponse.data, 'total_bytes');
     }
-  } else {
-    metrics.errors.storage = { code: 'PGRST202', message: 'get_total_storage_usage RPC is missing' };
+  } catch (error) {
+    metrics.errors.storage = {
+      message: error instanceof Error ? error.message : 'Failed to fetch storage usage.',
+    };
   }
 
   if (includeDatabase) {
-    if (!missingDbUsageRpc) {
+    try {
       const dbResponse = await client.rpc('get_total_db_usage');
       if (dbResponse.error) {
-        if (isMissingRpcError(dbResponse.error)) {
-          missingDbUsageRpc = true;
-          metrics.errors.database = dbResponse.error;
-        } else {
-          throw dbResponse.error;
-        }
+        metrics.errors.database = dbResponse.error;
       } else {
         metrics.dbBytes = extractUsageValue(dbResponse.data, 'total_db_bytes');
       }
-    } else {
-      metrics.errors.database = { code: 'PGRST202', message: 'get_total_db_usage RPC is missing' };
+    } catch (error) {
+      metrics.errors.database = {
+        message: error instanceof Error ? error.message : 'Failed to fetch database usage.',
+      };
     }
   }
 
