@@ -7,6 +7,7 @@ type StorageRow = {
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'OPTIONS, GET, POST',
 };
 
 const PAGE_SIZE = 1000;
