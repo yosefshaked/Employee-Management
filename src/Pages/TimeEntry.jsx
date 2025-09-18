@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { useLocation, useNavigate } from 'react-router-dom';
 import RecentActivity from "../components/dashboard/RecentActivity";
 import TimeEntryTable from '../components/time-entry/TimeEntryTable';
 import TrashTab from '../components/time-entry/TrashTab.jsx';
+import AdjustmentsTab from '../components/time-entry/AdjustmentsTab.jsx';
 import { toast } from "sonner";
 import { supabase } from "../supabaseClient";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -45,6 +47,20 @@ const TIME_ENTRY_TABS = [
   { value: 'trash', label: 'סל אשפה' },
 ];
 
+const DEFAULT_TAB = 'all';
+const VALID_TAB_VALUES = new Set(TIME_ENTRY_TABS.map(tab => tab.value));
+
+const getTabFromSearch = (search) => {
+  try {
+    const params = new URLSearchParams(search || '');
+    const requested = params.get('tab');
+    return (requested && VALID_TAB_VALUES.has(requested)) ? requested : DEFAULT_TAB;
+  } catch (error) {
+    console.warn('Failed to parse tab from search params', error);
+    return DEFAULT_TAB;
+  }
+};
+
 const getLedgerTimestamp = (entry = {}) => {
   const raw = entry.date || entry.entry_date || entry.effective_date || entry.change_date || entry.created_at;
   if (!raw) return 0;
@@ -67,7 +83,9 @@ export default function TimeEntry() {
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('all');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState(() => getTabFromSearch(location.search));
   const loadInitialData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setIsLoading(true);
     try {
@@ -139,6 +157,23 @@ export default function TimeEntry() {
   useEffect(() => {
     loadInitialData();
   }, [loadInitialData]);
+
+  useEffect(() => {
+    const normalized = getTabFromSearch(location.search);
+    setActiveTab(prev => (prev === normalized ? prev : normalized));
+  }, [location.search]);
+
+  const handleTabChange = useCallback((value) => {
+    const normalized = VALID_TAB_VALUES.has(value) ? value : DEFAULT_TAB;
+    setActiveTab(normalized);
+    const params = new URLSearchParams(location.search || '');
+    if (normalized === DEFAULT_TAB) {
+      params.delete('tab');
+    } else {
+      params.set('tab', normalized);
+    }
+    navigate({ pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : '' }, { replace: true });
+  }, [location.pathname, location.search, navigate]);
 
   const getRateForDate = (employeeId, date, serviceId = null) => {
     const employee = employees.find(e => e.id === employeeId);
@@ -610,7 +645,7 @@ export default function TimeEntry() {
 
         {/* Storage Usage widget temporarily disabled; flip features.storageUsage=true to re-enable (requires RPCs). */}
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
           <TabsList className="flex flex-wrap justify-center gap-2 rounded-lg bg-white/70 p-1 shadow-sm">
             {TIME_ENTRY_TABS.map(tab => (
               <TabsTrigger key={tab.value} value={tab.value} className="px-4 py-2">
@@ -621,18 +656,28 @@ export default function TimeEntry() {
 
           {nonTrashTabs.map(tab => (
             <TabsContent key={tab.value} value={tab.value} className="mt-6 space-y-6">
-              <TimeEntryTable
-                employees={employees}
-                workSessions={tabbedSessions[tab.value] || []}
-                allWorkSessions={workSessions}
-                services={services}
-                getRateForDate={getRateForDate}
-                onTableSubmit={handleTableSubmit}
-                onImported={() => loadInitialData()}
-                onDeleted={handleSessionsDeleted}
-                leavePolicy={leavePolicy}
-                leavePayPolicy={leavePayPolicy}
-              />
+              {tab.value === 'adjustments' ? (
+                <AdjustmentsTab
+                  sessions={tabbedSessions.adjustments || []}
+                  employees={employees}
+                  onSaved={() => loadInitialData({ silent: true })}
+                  onDeleted={handleSessionsDeleted}
+                  isLoading={isLoading}
+                />
+              ) : (
+                <TimeEntryTable
+                  employees={employees}
+                  workSessions={tabbedSessions[tab.value] || []}
+                  allWorkSessions={workSessions}
+                  services={services}
+                  getRateForDate={getRateForDate}
+                  onTableSubmit={handleTableSubmit}
+                  onImported={() => loadInitialData()}
+                  onDeleted={handleSessionsDeleted}
+                  leavePolicy={leavePolicy}
+                  leavePayPolicy={leavePayPolicy}
+                />
+              )}
               <RecentActivity
                 title="רישומים אחרונים"
                 sessions={(tabbedSessions[tab.value] || []).slice(0, 5)}
