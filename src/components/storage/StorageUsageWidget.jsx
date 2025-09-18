@@ -25,23 +25,27 @@ const formatPercentLabel = (percent) => {
 };
 
 const UsageRow = ({ label, usedBytes, quotaGb, percent, highlight }) => {
-  const usedGb = bytesToGigabytes(usedBytes);
-  const usedLabel = formatGigabytes(usedGb);
+  const hasNumericUsage = Number.isFinite(usedBytes);
+  const usedGb = hasNumericUsage ? bytesToGigabytes(usedBytes) : null;
+  const usedLabel = hasNumericUsage ? formatGigabytes(usedGb) : '—';
   const quotaLabel = formatGigabytes(quotaGb);
   const percentValue = typeof percent === 'number' ? percent : 0;
+  const showProgress = hasNumericUsage && typeof percent === 'number';
+  const progressWidth = showProgress ? `${percentValue}%` : '0%';
+  const summaryText = hasNumericUsage
+    ? `${usedLabel} מתוך ${quotaLabel} (${formatPercentLabel(percent)})`
+    : `הנתון אינו זמין (מכסה: ${quotaLabel})`;
 
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap items-center justify-between text-sm text-slate-700 gap-2">
         <span className="font-medium text-slate-900">{label}</span>
-        <span>
-          {usedLabel} מתוך {quotaLabel} ({formatPercentLabel(percent)})
-        </span>
+        <span>{summaryText}</span>
       </div>
       <div className="h-2 w-full rounded-full bg-slate-200 overflow-hidden" aria-hidden="true">
         <div
-          className={cn('h-full bg-blue-500 transition-all', highlight && 'bg-amber-500')}
-          style={{ width: `${percentValue}%` }}
+          className={cn('h-full bg-blue-500 transition-all', highlight && showProgress && 'bg-amber-500')}
+          style={{ width: progressWidth }}
         />
       </div>
     </div>
@@ -60,7 +64,7 @@ const StorageUsageWidget = ({
   const quotas = useMemo(() => resolvePlanQuotas(settings), [settings]);
   const storagePercent = useMemo(() => {
     if (!metrics) return null;
-    return calculateUsagePercent(metrics.storageBytes ?? 0, quotas.storageQuotaGb);
+    return calculateUsagePercent(metrics.storageBytes, quotas.storageQuotaGb);
   }, [metrics, quotas.storageQuotaGb]);
 
   const dbPercent = useMemo(() => {
@@ -78,8 +82,8 @@ const StorageUsageWidget = ({
 
   const summaryPercent = summaryTarget === 'database' ? dbPercent : storagePercent;
   const summaryUsedBytes = summaryTarget === 'database'
-    ? metrics?.dbBytes ?? 0
-    : metrics?.storageBytes ?? 0;
+    ? metrics?.dbBytes
+    : metrics?.storageBytes;
   const summaryQuotaGb = summaryTarget === 'database'
     ? quotas.dbQuotaGb
     : quotas.storageQuotaGb;
@@ -89,6 +93,29 @@ const StorageUsageWidget = ({
   const isBusy = isLoading || !metrics;
 
   const planLabel = PLAN_LABELS[quotas.plan] || quotas.plan;
+  const storageError = metrics?.errors?.storage;
+  const dbError = metrics?.errors?.database;
+  const hasError = Boolean(storageError || dbError);
+
+  const errorMessages = useMemo(() => {
+    if (!hasError) return [];
+    const messages = [];
+    if (storageError) {
+      if (String(storageError.code || '').toUpperCase() === 'PGRST202') {
+        messages.push('לא נמצאה פונקציית RPC בשם get_total_storage_usage. יש להפעיל את הסקריפט/המיגרציה שמייצרת אותה כדי להציג את נתוני האחסון.');
+      } else {
+        messages.push('לא ניתן לטעון את נתוני האחסון כרגע.');
+      }
+    }
+    if (dbError) {
+      if (String(dbError.code || '').toUpperCase() === 'PGRST202') {
+        messages.push('לא נמצאה פונקציית RPC בשם get_total_db_usage. יש להוסיף אותה במסד הנתונים כדי להציג את נתוני המסד.');
+      } else {
+        messages.push('לא ניתן לטעון את נתוני מסד הנתונים כרגע.');
+      }
+    }
+    return messages;
+  }, [dbError, hasError, storageError]);
 
   return (
     <Card className={cn('bg-white/80 border-0 shadow-lg', className)}>
@@ -111,6 +138,16 @@ const StorageUsageWidget = ({
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
+        {hasError && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-700 space-y-1">
+            {errorMessages.map((message, index) => (
+              <p key={index}>{message}</p>
+            ))}
+            <p className="text-[11px] text-amber-600">
+              עד להשלמת ההגדרה, מוצגות כאן רק המכסות שהוגדרו ידנית.
+            </p>
+          </div>
+        )}
         {isBusy ? (
           <div className="space-y-3">
             <Skeleton className="h-5 w-1/2" />
@@ -158,7 +195,7 @@ const StorageUsageWidget = ({
                 />
                 <UsageRow
                   label="מסד נתונים"
-                  usedBytes={metrics.dbBytes ?? 0}
+                  usedBytes={metrics.dbBytes}
                   quotaGb={quotas.dbQuotaGb}
                   percent={dbPercent}
                   highlight={typeof dbPercent === 'number' && dbPercent >= 85}

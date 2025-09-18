@@ -1,14 +1,24 @@
 import { STORAGE_SETTINGS_KEY, DEFAULT_STORAGE_SETTINGS, normalizeStorageQuotaSettings } from '@/lib/storage.js';
 
 const extractUsageValue = (payload, key) => {
-  if (payload == null) return 0;
+  if (payload == null) return null;
   if (typeof payload === 'number' && Number.isFinite(payload)) return payload;
   if (typeof payload === 'object') {
     const value = payload[key] ?? payload[key.toLowerCase()];
     if (Number.isFinite(value)) return value;
   }
-  return 0;
+  return null;
 };
+
+const isMissingRpcError = (error) => {
+  if (!error) return false;
+  const code = String(error.code || '').toUpperCase();
+  if (code === 'PGRST202' || code === 'PGRST116' || code === '404') return true;
+  return Boolean(error.message && error.message.includes('schema cache'));
+};
+
+let missingStorageUsageRpc = false;
+let missingDbUsageRpc = false;
 
 export const fetchStorageQuotaSettings = async (client) => {
   const { data, error } = await client
@@ -45,23 +55,45 @@ export const saveStorageQuotaSettings = async (client, draftSettings) => {
 };
 
 export const fetchStorageUsageMetrics = async (client, { includeDatabase = true } = {}) => {
-  const storageResponse = await client.rpc('get_total_storage_usage');
-  if (storageResponse.error) {
-    throw storageResponse.error;
-  }
-
   const metrics = {
-    storageBytes: extractUsageValue(storageResponse.data, 'total_storage_bytes'),
-    dbBytes: null,
+    storageBytes: null,
+    dbBytes: includeDatabase ? null : undefined,
     fetchedAt: new Date().toISOString(),
+    errors: {},
   };
 
-  if (includeDatabase) {
-    const dbResponse = await client.rpc('get_total_db_usage');
-    if (dbResponse.error) {
-      throw dbResponse.error;
+  if (!missingStorageUsageRpc) {
+    const storageResponse = await client.rpc('get_total_storage_usage');
+    if (storageResponse.error) {
+      if (isMissingRpcError(storageResponse.error)) {
+        missingStorageUsageRpc = true;
+        metrics.errors.storage = storageResponse.error;
+      } else {
+        throw storageResponse.error;
+      }
+    } else {
+      metrics.storageBytes = extractUsageValue(storageResponse.data, 'total_storage_bytes');
     }
-    metrics.dbBytes = extractUsageValue(dbResponse.data, 'total_db_bytes');
+  } else {
+    metrics.errors.storage = { code: 'PGRST202', message: 'get_total_storage_usage RPC is missing' };
+  }
+
+  if (includeDatabase) {
+    if (!missingDbUsageRpc) {
+      const dbResponse = await client.rpc('get_total_db_usage');
+      if (dbResponse.error) {
+        if (isMissingRpcError(dbResponse.error)) {
+          missingDbUsageRpc = true;
+          metrics.errors.database = dbResponse.error;
+        } else {
+          throw dbResponse.error;
+        }
+      } else {
+        metrics.dbBytes = extractUsageValue(dbResponse.data, 'total_db_bytes');
+      }
+    } else {
+      metrics.errors.database = { code: 'PGRST202', message: 'get_total_db_usage RPC is missing' };
+    }
   }
 
   return metrics;
