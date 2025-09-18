@@ -12,10 +12,11 @@ import CombinedHoursCard from './CombinedHoursCard.jsx';
 import {
   selectHourlyHours,
   selectMeetingHours,
-  selectGlobalHours
+  selectGlobalHours,
+  selectLeaveDayValue,
 } from '@/selectors.js';
 
-export default function QuickStats({ employees = [], workSessions = [], services = [], currentDate, filters = {}, isLoading }) {
+export default function QuickStats({ employees = [], workSessions = [], services = [], currentDate, filters = {}, leavePayPolicy, isLoading }) {
   const start = startOfMonth(currentDate);
   const end = endOfMonth(currentDate);
   const baseFilters = {
@@ -34,7 +35,9 @@ export default function QuickStats({ employees = [], workSessions = [], services
     endDate: baseFilters.dateTo,
     serviceFilter: baseFilters.serviceId,
     employeeFilter: baseFilters.selectedEmployee || '',
-    employeeTypeFilter: baseFilters.employeeType
+    employeeTypeFilter: baseFilters.employeeType,
+    leavePayPolicy,
+    leaveDayValueSelector: selectLeaveDayValue,
   });
 
   const hourlyHours = selectHourlyHours(workSessions, employees, baseFilters);

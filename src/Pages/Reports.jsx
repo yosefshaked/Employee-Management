@@ -5,7 +5,7 @@ import { InfoTooltip } from "../components/InfoTooltip";
 import { Button } from "@/components/ui/button";
 import { BarChart3, Download, TrendingUp } from "lucide-react";
 import CombinedHoursCard from "@/components/dashboard/CombinedHoursCard.jsx";
-import { selectHourlyHours, selectMeetingHours, selectGlobalHours } from "@/selectors.js";
+import { selectHourlyHours, selectMeetingHours, selectGlobalHours, selectLeaveDayValue } from "@/selectors.js";
 import { format, startOfMonth } from "date-fns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { supabase } from "../supabaseClient";
@@ -17,8 +17,8 @@ import DetailedEntriesReport from "../components/reports/DetailedEntriesReport";
 import MonthlyReport from "../components/reports/MonthlyReport";
 import PayrollSummary from "../components/reports/PayrollSummary";
 import ChartsOverview from "../components/reports/ChartsOverview";
-import { computePeriodTotals } from '@/lib/payroll.js';
-import { DEFAULT_LEAVE_POLICY, normalizeLeavePolicy } from '@/lib/leave.js';
+import { computePeriodTotals, createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
+import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, normalizeLeavePayPolicy, isLeaveEntryType } from '@/lib/leave.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -46,6 +46,7 @@ export default function Reports() {
   const [rateHistories, setRateHistories] = useState([]);
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
+  const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
 
   const getRateForDate = (employeeId, date, serviceId = null) => {
     const employee = employees.find(e => e.id === employeeId);
@@ -120,16 +121,38 @@ export default function Reports() {
       endDate: toISODateString(toRes.date),
       serviceFilter: filters.serviceId,
       employeeFilter: filters.selectedEmployee,
-      employeeTypeFilter: filters.employeeType
+      employeeTypeFilter: filters.employeeType,
+      leavePayPolicy,
+      leaveDayValueSelector: selectLeaveDayValue,
     });
-    setFilteredSessions(res.filteredSessions);
+    const sourceSessions = Array.isArray(res.filteredSessions) ? res.filteredSessions : [];
+    const resolveLeaveValue = createLeaveDayValueResolver({
+      employees,
+      workSessions,
+      services,
+      leavePayPolicy,
+      leaveDayValueSelector: selectLeaveDayValue,
+    });
+    const adjustedSessions = sourceSessions.map(session => {
+      if (!session || session.payable === false) return session;
+      const employee = employees.find(emp => emp.id === session.employee_id);
+      if (!employee || employee.employee_type === 'global') return session;
+      if (!isLeaveEntryType(session.entry_type)) return session;
+      const { amount, preStartDate } = resolveLeaveSessionValue(session, resolveLeaveValue, { employee });
+      if (preStartDate) {
+        return { ...session, total_payment: 0 };
+      }
+      if (typeof amount !== 'number' || !Number.isFinite(amount)) return session;
+      return { ...session, total_payment: amount };
+    });
+    setFilteredSessions(adjustedSessions);
     setTotals({
       totalPay: res.totalPay,
       totalHours: res.totalHours,
       totalSessions: res.totalSessions,
       totalsByEmployee: res.totalsByEmployee
     });
-  }, [workSessions, employees, services, filters]);
+  }, [workSessions, employees, services, filters, leavePayPolicy]);
 
   useEffect(() => {
     loadInitialData();
@@ -142,12 +165,21 @@ export default function Reports() {
   const loadInitialData = async () => {
     setIsLoading(true);
     try {
-      const [employeesData, sessionsData, servicesData, ratesData, settingsData, leaveData] = await Promise.all([
+      const [
+        employeesData,
+        sessionsData,
+        servicesData,
+        ratesData,
+        leavePolicySettings,
+        leavePayPolicySettings,
+        leaveData,
+      ] = await Promise.all([
         supabase.from('Employees').select('*').order('name'),
         supabase.from('WorkSessions').select('*'),
         supabase.from('Services').select('*'),
         supabase.from('RateHistory').select('*'),
         supabase.from('Settings').select('settings_value').eq('key', 'leave_policy').single(),
+        supabase.from('Settings').select('settings_value').eq('key', 'leave_pay_policy').single(),
         supabase.from('LeaveBalances').select('*')
       ]);
 
@@ -163,11 +195,18 @@ export default function Reports() {
       setServices(filteredServices);
       setRateHistories(ratesData.data || []);
       setLeaveBalances(sortLeaveLedger(leaveData.data || []));
-      if (settingsData.error) {
-        if (settingsData.error.code !== 'PGRST116') throw settingsData.error;
+      if (leavePolicySettings.error) {
+        if (leavePolicySettings.error.code !== 'PGRST116') throw leavePolicySettings.error;
         setLeavePolicy(DEFAULT_LEAVE_POLICY);
       } else {
-        setLeavePolicy(normalizeLeavePolicy(settingsData.data?.settings_value));
+        setLeavePolicy(normalizeLeavePolicy(leavePolicySettings.data?.settings_value));
+      }
+
+      if (leavePayPolicySettings.error) {
+        if (leavePayPolicySettings.error.code !== 'PGRST116') throw leavePayPolicySettings.error;
+        setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
+      } else {
+        setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicySettings.data?.settings_value));
       }
     } catch (error) {
       console.error("Error loading data:", error);
@@ -292,9 +331,9 @@ export default function Reports() {
                 <TabsTrigger value="monthly">דוח חודשי</TabsTrigger>
                 <TabsTrigger value="payroll">דוח שכר</TabsTrigger>
               </TabsList>
-              <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} dateFrom={filters.dateFrom} dateTo={filters.dateTo} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} leavePayPolicy={leavePayPolicy} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} leavePayPolicy={leavePayPolicy} workSessions={workSessions} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} leavePayPolicy={leavePayPolicy} isLoading={isLoading} /></TabsContent>
               <TabsContent value="payroll">
                 <PayrollSummary
                   sessions={filteredSessions}

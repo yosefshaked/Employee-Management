@@ -1,5 +1,8 @@
 import { differenceInCalendarDays, isAfter, isBefore } from 'date-fns';
 
+export const DEFAULT_LEGAL_INFO_URL =
+  'https://www.kolzchut.org.il/he/%D7%97%D7%99%D7%A9%D7%95%D7%91_%D7%9E%D7%A1%D7%A4%D7%A8_%D7%99%D7%9E%D7%99_%D7%94%D7%97%D7%95%D7%A4%D7%A9%D7%94_%D7%94%D7%A9%D7%A0%D7%AA%D7%99%D7%AA';
+
 export const DEFAULT_LEAVE_POLICY = {
   allow_half_day: false,
   allow_negative_balance: false,
@@ -8,6 +11,44 @@ export const DEFAULT_LEAVE_POLICY = {
   carryover_max_days: 0,
   holiday_rules: [],
 };
+
+export const DEFAULT_LEAVE_PAY_POLICY = {
+  default_method: 'legal',
+  lookback_months: 3,
+  legal_allow_12m_if_better: false,
+  fixed_rate_default: null,
+  legal_info_url: DEFAULT_LEGAL_INFO_URL,
+};
+
+export const LEAVE_PAY_METHOD_OPTIONS = [
+  {
+    value: 'legal',
+    title: 'חישוב חוקי (מומלץ)',
+    description: 'שווי יום חופש לפי ממוצע שכר יומי בתקופת בדיקה',
+  },
+  {
+    value: 'avg_hourly_x_avg_day_hours',
+    title: 'ממוצע שכר שעתי × שעות ליום',
+    description: 'מכפיל את ממוצע השכר השעתי במספר שעות העבודה היומיות הממוצעות בתקופה',
+  },
+  {
+    value: 'fixed_rate',
+    title: 'תעריף יומי קבוע',
+    description: 'שווי יום חופשה לפי סכום קבוע במדיניות',
+  },
+];
+
+export const LEAVE_PAY_METHOD_LABELS = LEAVE_PAY_METHOD_OPTIONS.reduce((acc, option) => {
+  acc[option.value] = option.title;
+  return acc;
+}, {});
+
+export const LEAVE_PAY_METHOD_DESCRIPTIONS = LEAVE_PAY_METHOD_OPTIONS.reduce((acc, option) => {
+  acc[option.value] = option.description;
+  return acc;
+}, {});
+
+const LEAVE_PAY_METHOD_VALUES = new Set(LEAVE_PAY_METHOD_OPTIONS.map(option => option.value));
 
 export const LEAVE_TYPE_OPTIONS = [
   { value: 'employee_paid', label: 'חופשה מהמכסה' },
@@ -59,6 +100,52 @@ export function getLeaveLedgerDelta(kind) {
   if (kind === 'employee_paid') return -1;
   if (kind === 'half_day') return -0.5;
   return 0;
+}
+
+function parseLeaveMetadata(value) {
+  if (!value) return null;
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch (error) {
+      console.warn('Failed to parse leave metadata JSON', error);
+    }
+  }
+  return null;
+}
+
+function coerceFiniteNumber(value) {
+  const num = typeof value === 'string' ? Number(value) : value;
+  return typeof num === 'number' && Number.isFinite(num) ? num : null;
+}
+
+export function getLeaveValueMultiplier(details = {}) {
+  const metadata = parseLeaveMetadata(details.metadata);
+  const candidates = [
+    details.leave_fraction,
+    details.leaveFraction,
+    details.fraction,
+    metadata?.leave_fraction,
+    metadata?.leaveFraction,
+    metadata?.fraction,
+  ];
+  for (const candidate of candidates) {
+    const num = coerceFiniteNumber(candidate);
+    if (num !== null && num > 0) {
+      return num;
+    }
+  }
+  const kind = details.leave_kind ||
+    details.leaveKind ||
+    details.leave_type ||
+    details.leaveType ||
+    getLeaveKindFromEntryType(details.entry_type || details.entryType);
+  if (kind === 'half_day') return 0.5;
+  return 1;
 }
 
 export function getNegativeBalanceFloor(policy = {}) {
@@ -171,6 +258,58 @@ export function normalizeLeavePolicy(value) {
     holiday_rules: Array.isArray(policy.holiday_rules)
       ? policy.holiday_rules.map(normalizeHolidayRule)
       : [],
+  };
+}
+
+function sanitizeLeavePayMethod(value) {
+  if (typeof value !== 'string') return DEFAULT_LEAVE_PAY_POLICY.default_method;
+  const match = LEAVE_PAY_METHOD_OPTIONS.find(option => option.value === value);
+  return match ? match.value : DEFAULT_LEAVE_PAY_POLICY.default_method;
+}
+
+export function normalizeLeavePayPolicy(value) {
+  let policy = value;
+  if (!policy) {
+    policy = {};
+  } else if (typeof policy === 'string') {
+    try {
+      policy = JSON.parse(policy);
+    } catch (error) {
+      console.warn('Failed to parse leave pay policy JSON', error);
+      policy = {};
+    }
+  }
+
+  const lookbackCandidate = parseMaybeNumber(policy.lookback_months);
+  const fixedRateCandidate = parseMaybeNumber(policy.fixed_rate_default);
+  const legalInfoUrl = typeof policy.legal_info_url === 'string' ? policy.legal_info_url.trim() : '';
+
+  return {
+    default_method: sanitizeLeavePayMethod(policy.default_method),
+    lookback_months:
+      typeof lookbackCandidate === 'number' && lookbackCandidate > 0
+        ? Math.round(lookbackCandidate)
+        : DEFAULT_LEAVE_PAY_POLICY.lookback_months,
+    legal_allow_12m_if_better: Boolean(policy.legal_allow_12m_if_better),
+    fixed_rate_default:
+      typeof fixedRateCandidate === 'number' && fixedRateCandidate >= 0
+        ? fixedRateCandidate
+        : DEFAULT_LEAVE_PAY_POLICY.fixed_rate_default,
+    legal_info_url: legalInfoUrl || DEFAULT_LEGAL_INFO_URL,
+  };
+}
+
+export function resolveLeavePayMethodContext(employee = null, policy = DEFAULT_LEAVE_PAY_POLICY) {
+  const normalizedPolicy = normalizeLeavePayPolicy(policy);
+  const defaultMethod = normalizedPolicy.default_method || DEFAULT_LEAVE_PAY_POLICY.default_method;
+  const candidate = typeof employee?.leave_pay_method === 'string' ? employee.leave_pay_method : null;
+  const hasOverride = Boolean(candidate && LEAVE_PAY_METHOD_VALUES.has(candidate));
+  const method = hasOverride ? candidate : defaultMethod;
+  return {
+    method,
+    lookback_months: normalizedPolicy.lookback_months,
+    legal_allow_12m_if_better: Boolean(normalizedPolicy.legal_allow_12m_if_better),
+    override_applied: Boolean(hasOverride && candidate !== defaultMethod),
   };
 }
 

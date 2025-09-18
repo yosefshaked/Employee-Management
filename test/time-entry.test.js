@@ -7,6 +7,7 @@ import { duplicateSegment, toggleDelete } from '../src/components/time-entry/day
 import { useTimeEntry } from '../src/components/time-entry/useTimeEntry.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import { __setWorkSessionMetadataSupportForTests } from '../src/lib/workSessionsMetadata.js';
 
 describe('multi-date save', () => {
   it('creates a WorkSessions row for each employee-date combination', async () => {
@@ -24,8 +25,9 @@ describe('multi-date save', () => {
     })));
     const fakeSupabase = { from: () => ({ insert: async () => ({}) }) };
     const { saveRows } = useTimeEntry({ employees, services, getRateForDate: () => ({ rate: 100 }), supabaseClient: fakeSupabase });
-    const inserted = await saveRows(rows);
-    assert.equal(inserted.length, employees.length * dates.length);
+    const result = await saveRows(rows);
+    assert.equal(result.inserted.length, employees.length * dates.length);
+    assert.equal(result.conflicts.length, 0);
   });
 });
 
@@ -45,17 +47,26 @@ describe('per-employee day type mapping', () => {
     const getRateForDate = () => ({ rate: 100 });
     const { saveRows } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
     const map = { g1: 'regular', g2: 'paid_leave' };
-    await saveRows(rows, map);
+    const result = await saveRows(rows, map);
+    assert.equal(result.conflicts.length, 0);
     assert.equal(inserted[0].entry_type, 'hours');
     assert.equal(inserted[1].entry_type, 'leave_system_paid');
   });
 });
 
 describe('per-employee day type control rendering', () => {
-  it('renders group-level day type control and no top-level control', () => {
+  it('omits the legacy group-level day type control for globals', () => {
     const content = fs.readFileSync(path.join('src','components','time-entry','MultiDateEntryModal.jsx'),'utf8');
-    assert(content.includes('סוג יום לעובד זה*'));
-    assert(!content.includes('id="md-daytype"'));
+    assert(!content.includes('סוג יום לעובד זה*'));
+  });
+});
+
+describe('global leave flow gating', () => {
+  it('allows mode toggle regardless of selected employee types', () => {
+    const content = fs.readFileSync(path.join('src','components','time-entry','MultiDateEntryModal.jsx'),'utf8');
+    assert(!content.includes('shouldForceLeaveMode'));
+    assert(content.includes("handleModeChange('regular')"));
+    assert(content.includes("handleModeChange('leave')"));
   });
 });
 
@@ -91,13 +102,14 @@ describe('copy and fill utilities', () => {
     assert.equal(result[2].sessions_count, '3');
   });
 
-  it('global row requires explicit day type via map', () => {
+  it('global row is complete when no map override exists', () => {
     const row = { employee_id: 'g1' };
     const emp = { employee_type: 'global' };
-    const map = {};
-    assert.equal(isRowCompleteForProgress(row, emp, map), false);
-    map.g1 = 'regular';
-    assert.equal(isRowCompleteForProgress(row, emp, map), true);
+    assert.equal(isRowCompleteForProgress(row, emp, {}), true);
+    const paid = { g1: 'paid_leave' };
+    assert.equal(isRowCompleteForProgress(row, emp, paid), true);
+    const invalid = { g1: 'other' };
+    assert.equal(isRowCompleteForProgress(row, emp, invalid), false);
   });
 });
 
@@ -116,7 +128,8 @@ describe('paid leave restrictions', () => {
     const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
     const getRateForDate = () => ({ rate: 100 });
     const { saveRows } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
-    await saveRows(rows);
+    const result = await saveRows(rows);
+    assert.equal(result.conflicts.length, 0);
     assert.equal(inserted[0].entry_type, 'hours');
     assert(inserted[0].notes.includes('סומן בעבר כחופשה'));
     assert.equal(inserted[1].entry_type, 'session');
@@ -131,10 +144,33 @@ describe('paid leave restrictions', () => {
     const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
     const getRateForDate = () => ({ rate: 3000 });
     const { saveRows } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
-    await saveRows(rows, { g1: 'paid_leave' });
+    const result = await saveRows(rows, { g1: 'paid_leave' });
+    assert.equal(result.conflicts.length, 0);
     assert.equal(inserted[0].entry_type, 'leave_system_paid');
     const expected = calculateGlobalDailyRate(employees[0], '2024-02-01', 3000);
     assert.equal(inserted[0].total_payment, expected);
+  });
+
+  it('skips regular rows when leave already exists for the date', async () => {
+    let inserted = [];
+    const employees = [{ id: 'h1', name: 'רן', employee_type: 'hourly' }];
+    const services = [];
+    const rows = [
+      { employee_id: 'h1', date: '2024-03-01', hours: '1' },
+      { employee_id: 'h1', date: '2024-03-02', hours: '2' },
+    ];
+    const workSessions = [
+      { employee_id: 'h1', date: '2024-03-01', entry_type: 'leave_system_paid' },
+    ];
+    const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
+    const getRateForDate = () => ({ rate: 120 });
+    const { saveRows } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase, workSessions });
+    const result = await saveRows(rows);
+    assert.equal(result.inserted.length, 1);
+    assert.equal(result.conflicts.length, 1);
+    assert.equal(result.conflicts[0].date, '2024-03-01');
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0].date, '2024-03-02');
   });
 
   it('legacy paid_leave banner text exists', () => {
@@ -146,13 +182,14 @@ describe('paid leave restrictions', () => {
 describe('mixed leave persistence', () => {
   it('saves paid mixed leave with payable flag', async () => {
     let inserted = [];
-    const employees = [{ id: 'g1', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
+    const employees = [{ id: 'g1', name: 'אנה', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
     const services = [];
     const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
     const getRateForDate = () => ({ rate: 3000 });
     const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
-    await saveMixedLeave([{ employee_id: 'g1', date: '2024-02-01', paid: true }], { leaveType: 'mixed' });
-    assert.equal(inserted.length, 1);
+    const result = await saveMixedLeave([{ employee_id: 'g1', date: '2024-02-01', paid: true }], { leaveType: 'mixed' });
+    assert.equal(result.inserted.length, 1);
+    assert.equal(result.conflicts.length, 0);
     assert.equal(inserted[0].entry_type, 'leave_mixed');
     assert.equal(inserted[0].payable, true);
     assert(inserted[0].total_payment > 0);
@@ -160,16 +197,108 @@ describe('mixed leave persistence', () => {
 
   it('saves unpaid mixed leave without payment', async () => {
     let inserted = [];
-    const employees = [{ id: 'g1', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
+    const employees = [{ id: 'g1', name: 'אנה', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
     const services = [];
     const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
     const getRateForDate = () => ({ rate: 3000 });
     const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
-    await saveMixedLeave([{ employee_id: 'g1', date: '2024-02-02', paid: false }], { leaveType: 'mixed' });
-    assert.equal(inserted.length, 1);
+    const result = await saveMixedLeave([{ employee_id: 'g1', date: '2024-02-02', paid: false }], { leaveType: 'mixed' });
+    assert.equal(result.inserted.length, 1);
+    assert.equal(result.conflicts.length, 0);
     assert.equal(inserted[0].payable, false);
     assert.equal(inserted[0].total_payment, 0);
     assert.equal(inserted[0].rate_used, null);
+  });
+
+  it('skips mixed leave entries that conflict with regular sessions', async () => {
+    let inserted = [];
+    const employees = [{ id: 'g1', name: 'אנה', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
+    const services = [];
+    const workSessions = [
+      { employee_id: 'g1', date: '2024-02-01', entry_type: 'hours' },
+    ];
+    const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
+    const getRateForDate = () => ({ rate: 3000 });
+    const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase, workSessions });
+    const payload = [
+      { employee_id: 'g1', date: '2024-02-01', paid: true },
+      { employee_id: 'g1', date: '2024-02-02', paid: true },
+    ];
+    const result = await saveMixedLeave(payload, { leaveType: 'mixed' });
+    assert.equal(result.inserted.length, 1);
+    assert.equal(result.conflicts.length, 1);
+    assert.equal(result.conflicts[0].date, '2024-02-01');
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0].date, '2024-02-02');
+  });
+
+  it('saves half-day leave with fraction metadata for globals', async () => {
+    let inserted = [];
+    const employees = [{ id: 'g1', name: 'אנה', employee_type: 'global', working_days: ['SUN','MON','TUE','WED','THU'] }];
+    const services = [];
+    const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
+    const getRateForDate = () => ({ rate: 3000 });
+    const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
+    __setWorkSessionMetadataSupportForTests(true);
+    try {
+      await saveMixedLeave([{ employee_id: 'g1', date: '2024-03-01', paid: true }], { leaveType: 'half_day' });
+    } finally {
+      __setWorkSessionMetadataSupportForTests(null);
+    }
+    assert.equal(inserted.length, 1);
+    const expectedDaily = calculateGlobalDailyRate(employees[0], '2024-03-01', 3000);
+    assert.equal(inserted[0].metadata.leave_fraction, 0.5);
+    assert.equal(inserted[0].metadata.leave_type, 'half_day');
+    assert.equal(inserted[0].total_payment, expectedDaily / 2);
+  });
+
+  it('skips leave dates before employee start date and reports them', async () => {
+    let inserted = [];
+    const employees = [{
+      id: 'g1',
+      name: 'אנה',
+      employee_type: 'global',
+      working_days: ['SUN', 'MON', 'TUE', 'WED', 'THU'],
+      start_date: '2024-02-01',
+    }];
+    const services = [];
+    const fakeSupabase = { from: () => ({ insert: async (vals) => ({ error: null, data: (inserted = vals) }) }) };
+    const getRateForDate = () => ({ rate: 3000 });
+    const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
+    const payload = [
+      { employee_id: 'g1', date: '2024-01-31', paid: true },
+      { employee_id: 'g1', date: '2024-02-01', paid: true },
+    ];
+    const result = await saveMixedLeave(payload, { leaveType: 'mixed' });
+    assert.equal(result.inserted.length, 1);
+    assert.equal(result.invalidStartDates.length, 1);
+    assert.equal(result.invalidStartDates[0].date, '2024-01-31');
+    assert.equal(result.conflicts.length, 0);
+    assert.equal(inserted.length, 1);
+    assert.equal(inserted[0].date, '2024-02-01');
+  });
+
+  it('throws when all leave dates are before employee start date', async () => {
+    const employees = [{
+      id: 'g1',
+      name: 'אנה',
+      employee_type: 'global',
+      working_days: ['SUN', 'MON', 'TUE', 'WED', 'THU'],
+      start_date: '2024-02-01',
+    }];
+    const services = [];
+    const fakeSupabase = { from: () => ({ insert: async () => ({ error: null, data: [] }) }) };
+    const getRateForDate = () => ({ rate: 3000 });
+    const { saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, supabaseClient: fakeSupabase });
+    await assert.rejects(
+      async () => saveMixedLeave([{ employee_id: 'g1', date: '2024-01-30', paid: true }], { leaveType: 'mixed' }),
+      (err) => {
+        assert.equal(err.code, 'TIME_ENTRY_LEAVE_CONFLICT');
+        assert.equal(err.invalidStartDates.length, 1);
+        assert.equal(err.invalidStartDates[0].date, '2024-01-30');
+        return true;
+      }
+    );
   });
 });
 
@@ -291,15 +420,16 @@ describe('progress completion rules', () => {
     row.hours = '2';
     assert.equal(isRowCompleteForProgress(row, emp), true);
   });
-  it('global row requires explicit day type', () => {
+  it('global row counts as complete without explicit day type', () => {
     const emp = { employee_type: 'global' };
     const row = { employee_id: 'g1' };
-    const map = {};
-    assert.equal(isRowCompleteForProgress(row, emp, map), false);
-    map.g1 = 'regular';
-    assert.equal(isRowCompleteForProgress(row, emp, map), true);
-    map.g1 = 'paid_leave';
-    assert.equal(isRowCompleteForProgress(row, emp, map), true);
+    assert.equal(isRowCompleteForProgress(row, emp), true);
+    const regularMap = { g1: 'regular' };
+    assert.equal(isRowCompleteForProgress(row, emp, regularMap), true);
+    const paidMap = { g1: 'paid_leave' };
+    assert.equal(isRowCompleteForProgress(row, emp, paidMap), true);
+    const invalidMap = { g1: 'something_else' };
+    assert.equal(isRowCompleteForProgress(row, emp, invalidMap), false);
   });
 });
 

@@ -10,10 +10,16 @@ import TimeEntryForm from './TimeEntryForm';
 import ImportModal from '@/components/import/ImportModal.jsx';
 import EmployeePicker from '../employees/EmployeePicker.jsx';
 import MultiDateEntryModal from './MultiDateEntryModal.jsx';
-import { aggregateGlobalDays, aggregateGlobalDayForDate } from '@/lib/payroll.js';
+import {
+  aggregateGlobalDays,
+  aggregateGlobalDayForDate,
+  createLeaveDayValueResolver,
+  resolveLeaveSessionValue,
+} from '@/lib/payroll.js';
 import { Badge } from '@/components/ui/badge';
 import { HOLIDAY_TYPE_LABELS, getLeaveKindFromEntryType, isLeaveEntryType } from '@/lib/leave.js';
-function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported, onDeleted, leavePolicy }) {
+import { selectLeaveDayValue } from '@/selectors.js';
+function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported, onDeleted, leavePolicy, leavePayPolicy }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
   const [multiMode, setMultiMode] = useState(false);
@@ -46,8 +52,16 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
     const end = endOfMonth(currentMonth);
     const totals = {};
     employees.forEach(emp => {
-      totals[emp.id] = { hours: 0, sessions: 0, payment: 0 };
+      totals[emp.id] = { hours: 0, sessions: 0, payment: 0, preStartLeaveDates: new Set() };
     });
+    const resolveLeaveValue = createLeaveDayValueResolver({
+      employees,
+      workSessions,
+      services,
+      leavePayPolicy,
+      leaveDayValueSelector: selectLeaveDayValue,
+    });
+    const processedLeave = new Map();
     const globalAgg = aggregateGlobalDays(
       workSessions.filter(s => {
         const d = parseISO(s.date);
@@ -63,6 +77,36 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
       if (!empTotals || !emp) return;
       if (s.entry_type === 'adjustment') {
         empTotals.payment += s.total_payment || 0;
+        return;
+      }
+      if (isLeaveEntryType(s.entry_type)) {
+        if (s.payable === false) return;
+        if (emp.employee_type === 'global') return;
+        if (emp.start_date && s.date < emp.start_date) {
+          totals[s.employee_id]?.preStartLeaveDates.add(s.date);
+          return;
+        }
+        const key = `${s.employee_id}|${s.date}`;
+        const already = processedLeave.get(key) || 0;
+        if (already >= 1) return;
+        const sessionValue = resolveLeaveSessionValue(s, resolveLeaveValue, { employee: emp });
+        if (sessionValue.preStartDate) {
+          totals[s.employee_id]?.preStartLeaveDates.add(s.date);
+          processedLeave.set(key, 1);
+          return;
+        }
+        const multiplier = Number.isFinite(sessionValue.multiplier) && sessionValue.multiplier > 0
+          ? sessionValue.multiplier
+          : 1;
+        const remaining = Math.max(0, 1 - already);
+        if (remaining <= 0) return;
+        const credit = Math.min(multiplier, remaining);
+        const scale = multiplier ? credit / multiplier : 0;
+        const amount = sessionValue.amount * scale;
+        if (amount) {
+          empTotals.payment += amount;
+        }
+        processedLeave.set(key, already + credit);
         return;
       }
       if (emp.employee_type === 'global' && (s.entry_type === 'hours' || isLeaveEntryType(s.entry_type))) {
@@ -82,7 +126,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
       if (empTotals) empTotals.payment += v.dailyAmount;
     });
     return totals;
-  }, [workSessions, employees, employeesById, currentMonth]);
+  }, [workSessions, employees, services, leavePayPolicy, employeesById, currentMonth]);
 
   const toggleDateSelection = (day) => {
     setSelectedDates(prev => {
@@ -199,6 +243,13 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                 const showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
                                 let leaveKind = null;
                                 let leaveLabel = null;
+                                const startDateStr = typeof emp.start_date === 'string' ? emp.start_date : null;
+                                const isPreStartLeave = Boolean(
+                                  paidLeave &&
+                                  startDateStr &&
+                                  paidLeave.date &&
+                                  paidLeave.date < startDateStr
+                                );
 
                                 if (paidLeave) {
                                   leaveKind = getLeaveKindFromEntryType(paidLeave.entry_type) || paidLeave.leave_type || paidLeave.leave_kind || paidLeave.metadata?.leave_type || paidLeave.metadata?.leave_kind || null;
@@ -279,6 +330,12 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                                             {adjustmentTotal > 0 ? '+' : '-'}₪{Math.abs(adjustmentTotal).toLocaleString()}
                                           </div>
                                         )}
+
+                                        {isPreStartLeave && (
+                                          <div className="mt-1 text-[11px] text-amber-700">
+                                            תאריך לפני תחילת עבודה—הושמט מהסכום
+                                          </div>
+                                        )}
                                     </TableCell>
                                     );
                             })}
@@ -304,9 +361,17 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                           <TableCell className="text-right sticky right-0 bg-slate-100">סה"כ צפי לתשלום</TableCell>
                           {employees.map(emp => {
                             const totals = monthlyTotals[emp.id] || { payment: 0 };
+                            const hasPreStart = totals.preStartLeaveDates instanceof Set
+                              ? totals.preStartLeaveDates.size > 0
+                              : Array.isArray(totals.preStartLeaveDates) && totals.preStartLeaveDates.length > 0;
                             return (
                               <TableCell key={emp.id} className="text-center text-green-700">
-                                ₪{totals.payment.toLocaleString()}
+                                <div>₪{totals.payment.toLocaleString()}</div>
+                                {hasPreStart && (
+                                  <div className="mt-1 text-[11px] text-amber-700">
+                                    תאריך לפני תחילת עבודה—הושמט מהסכום
+                                  </div>
+                                )}
                               </TableCell>
                             );
                           })}
@@ -327,6 +392,8 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
           {editingCell && (
             <TimeEntryForm
               employee={editingCell.employee}
+              allEmployees={employees}
+              workSessions={workSessions}
               services={services}
               initialRows={editingCell.existingSessions}
               initialDayType={editingCell.dayType || 'regular'}
@@ -338,6 +405,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
               allowDayTypeSelection
               allowHalfDay={leavePolicy?.allow_half_day}
               initialMixedPaid={editingCell.mixedPaid}
+              leavePayPolicy={leavePayPolicy}
               onSubmit={async (result) => {
                 if (!result) {
                   setEditingCell(null);
@@ -373,6 +441,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
           employees={employees}
           services={services}
           getRateForDate={getRateForDate}
+          workSessions={workSessions}
           onImported={onImported}
         />
         <MultiDateEntryModal
@@ -383,6 +452,8 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
           selectedEmployees={selectedEmployees}
           selectedDates={selectedDates}
           getRateForDate={getRateForDate}
+          workSessions={workSessions}
+          leavePayPolicy={leavePayPolicy}
           onSaved={() => {
             onImported();
             setSelectedDates([]);

@@ -1,5 +1,5 @@
 import { startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
-import { isLeaveEntryType } from './leave.js';
+import { isLeaveEntryType, getLeaveValueMultiplier } from './leave.js';
 
 const DAY_NAMES = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
 
@@ -25,6 +25,7 @@ export function aggregateGlobalDays(rows, employeesById) {
   rows.forEach((row, index) => {
     const emp = employeesById[row.employee_id];
     if (!emp || emp.employee_type !== 'global') return;
+    if (emp.start_date && row.date < emp.start_date) return;
     if (row.entry_type !== 'hours' && !isLeaveEntryType(row.entry_type)) return;
     if (isLeaveEntryType(row.entry_type) && row.payable === false) return;
     const key = `${row.employee_id}|${row.date}`;
@@ -33,12 +34,21 @@ export function aggregateGlobalDays(rows, employeesById) {
       const amount = row.total_payment != null
         ? row.total_payment
         : (row.rate_used != null ? calculateGlobalDailyRate(emp, row.date, row.rate_used) : 0);
+      const multiplier = isLeaveEntryType(row.entry_type)
+        ? getLeaveValueMultiplier({
+          entry_type: row.entry_type,
+          metadata: row.metadata,
+          leave_type: row.leave_type,
+          leave_kind: row.leave_kind,
+        })
+        : 1;
       map.set(key, {
         dayType: row.entry_type,
         indices: [index],
         rateUsed: row.rate_used,
         dailyAmount: amount,
         payable: row.payable !== false,
+        multiplier: Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1,
       });
     } else {
       existing.indices.push(index);
@@ -56,6 +66,7 @@ export function aggregateGlobalDayForDate(rows, employeesById) {
   rows.forEach(row => {
     const emp = employeesById[row.employee_id];
     if (!emp || emp.employee_type !== 'global') return;
+    if (emp.start_date && row.date < emp.start_date) return;
     if (row.entry_type !== 'hours' && !isLeaveEntryType(row.entry_type)) return;
     if (isLeaveEntryType(row.entry_type) && row.payable === false) return;
     const key = `${row.employee_id}|${row.date}`;
@@ -78,14 +89,96 @@ export function clampDateString(dateStr) {
   return `${y}-${String(m).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
 }
 
+export function createLeaveDayValueResolver({
+  employees = [],
+  workSessions = [],
+  services = [],
+  leavePayPolicy = null,
+  settings = null,
+  leaveDayValueSelector = null,
+} = {}) {
+  const selector = typeof leaveDayValueSelector === 'function' ? leaveDayValueSelector : null;
+  const cache = new Map();
+  const employeesById = new Map(Array.isArray(employees) ? employees.filter(e => e && e.id).map(emp => [emp.id, emp]) : []);
+  const toKey = (value) => {
+    if (!value) return null;
+    if (typeof value === 'string' && value.length >= 10) {
+      return value.slice(0, 10);
+    }
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toISOString().slice(0, 10);
+  };
+  return (employeeId, date) => {
+    if (!employeeId || !date) return 0;
+    if (!selector) return 0;
+    const key = `${employeeId}|${date}`;
+    if (cache.has(key)) return cache.get(key);
+    const employee = employeesById.get(employeeId);
+    const startDate = employee?.start_date ? toKey(employee.start_date) : null;
+    const targetDate = toKey(date);
+    if (startDate && targetDate && targetDate < startDate) {
+      cache.set(key, 0);
+      return 0;
+    }
+    const value = selector(employeeId, date, {
+      employees,
+      workSessions,
+      services,
+      leavePayPolicy,
+      settings,
+    });
+    const safe = typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+    cache.set(key, safe);
+    return safe;
+  };
+}
+
+export function resolveLeaveSessionValue(session, resolver, options = {}) {
+  if (!session || session.payable === false) {
+    return { amount: 0, multiplier: 0 };
+  }
+  if (!isLeaveEntryType(session.entry_type)) {
+    return { amount: 0, multiplier: 0 };
+  }
+  const rawMultiplier = getLeaveValueMultiplier({
+    entry_type: session.entry_type,
+    metadata: session.metadata,
+    leave_type: session.leave_type,
+    leave_kind: session.leave_kind,
+  });
+  const multiplier = Number.isFinite(rawMultiplier) && rawMultiplier > 0 ? rawMultiplier : 1;
+  const employee = options?.employee || null;
+  const startDate = employee?.start_date;
+  if (startDate && session?.date && session.date < startDate) {
+    return { amount: 0, multiplier, preStartDate: true };
+  }
+  const fn = typeof resolver === 'function' ? resolver : null;
+  if (fn) {
+    const base = fn(session.employee_id, session.date);
+    if (typeof base === 'number' && Number.isFinite(base) && base > 0) {
+      return { amount: base * multiplier, multiplier, preStartDate: false };
+    }
+  }
+  const fallback = Number(session.total_payment);
+  if (Number.isFinite(fallback)) {
+    return { amount: fallback, multiplier, preStartDate: false };
+  }
+  return { amount: 0, multiplier, preStartDate: false };
+}
+
 export function computePeriodTotals({
   workSessions = [],
   employees = [],
+  services = [],
   startDate,
   endDate,
   serviceFilter = 'all',
   employeeFilter = '',
-  employeeTypeFilter = 'all'
+  employeeTypeFilter = 'all',
+  leavePayPolicy = null,
+  settings = null,
+  leaveDayValueSelector = null,
 }) {
   const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
   const start = new Date(startDate);
@@ -112,16 +205,28 @@ export function computePeriodTotals({
   };
 
   const perEmp = {};
+  const processedLeave = new Map();
+  const resolveLeaveValue = createLeaveDayValueResolver({
+    employees,
+    workSessions,
+    services,
+    leavePayPolicy,
+    settings,
+    leaveDayValueSelector,
+  });
 
   const globalAgg = aggregateGlobalDays(filtered, employeesById);
   globalAgg.forEach((val, key) => {
     const [empId] = key.split('|');
     result.totalPay += val.dailyAmount;
     result.diagnostics.uniquePaidDays++;
-    if (isLeaveEntryType(val.dayType) && val.payable) result.diagnostics.paidLeaveDays++;
+    const leaveCredit = isLeaveEntryType(val.dayType) && val.payable
+      ? (Number.isFinite(val.multiplier) && val.multiplier > 0 ? val.multiplier : 1)
+      : 0;
+    if (leaveCredit) result.diagnostics.paidLeaveDays += leaveCredit;
     if (!perEmp[empId]) perEmp[empId] = { employee_id: empId, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
     perEmp[empId].pay += val.dailyAmount;
-    perEmp[empId].daysPaid++;
+    perEmp[empId].daysPaid += leaveCredit || 1;
   });
 
   filtered.forEach(row => {
@@ -131,12 +236,44 @@ export function computePeriodTotals({
       perEmp[row.employee_id] = { employee_id: row.employee_id, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
     }
     const bucket = perEmp[row.employee_id];
-    if (emp.employee_type === 'global') {
-      if (row.entry_type === 'hours') {
-        const hours = row.hours || 0;
-        result.totalHours += hours;
-        bucket.hours += hours;
+    const isGlobal = emp.employee_type === 'global';
+    if (isGlobal && row.entry_type === 'hours') {
+      const hours = row.hours || 0;
+      result.totalHours += hours;
+      bucket.hours += hours;
+      return;
+    }
+    if (isGlobal && isLeaveEntryType(row.entry_type)) {
+      return;
+    }
+    if (isGlobal && row.entry_type !== 'adjustment' && row.entry_type !== 'hours') {
+      return;
+    }
+    if (isLeaveEntryType(row.entry_type)) {
+      if (row.payable === false) return;
+      const key = `${row.employee_id}|${row.date}`;
+      const already = processedLeave.get(key) || 0;
+      if (already >= 1) return;
+      const sessionValue = resolveLeaveSessionValue(row, resolveLeaveValue, { employee: emp });
+      if (sessionValue.preStartDate) {
+        processedLeave.set(key, 1);
+        return;
       }
+      const multiplier = Number.isFinite(sessionValue.multiplier) && sessionValue.multiplier > 0
+        ? sessionValue.multiplier
+        : 1;
+      const remaining = Math.max(0, 1 - already);
+      if (remaining <= 0) return;
+      const credit = Math.min(multiplier, remaining);
+      const scale = multiplier ? credit / multiplier : 0;
+      const amount = sessionValue.amount * scale;
+      if (amount) {
+        result.totalPay += amount;
+        bucket.pay += amount;
+      }
+      processedLeave.set(key, already + credit);
+      bucket.daysPaid += credit;
+      result.diagnostics.paidLeaveDays += credit;
       return;
     }
     if (row.entry_type === 'adjustment') {

@@ -1,7 +1,15 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { effectiveWorkingDays, calculateGlobalDailyRate, aggregateGlobalDays, aggregateGlobalDayForDate } from '../src/lib/payroll.js';
-import { computePeriodTotals, clampDateString } from '../src/lib/payroll.js';
+import {
+  effectiveWorkingDays,
+  calculateGlobalDailyRate,
+  aggregateGlobalDays,
+  aggregateGlobalDayForDate,
+  computePeriodTotals,
+  clampDateString,
+  resolveLeaveSessionValue,
+} from '../src/lib/payroll.js';
+import { selectLeaveDayValue } from '../src/selectors.js';
 import { eachMonthOfInterval } from 'date-fns';
 
 const empSunThu = { working_days: ['SUN','MON','TUE','WED','THU'] };
@@ -92,6 +100,19 @@ describe('global day aggregation', () => {
     let sum = 0; agg.forEach(v => { sum += v.dailyAmount; });
     assert.equal(sum, daily * 2);
   });
+  it('ignores unpaid leave rows for salary aggregation', () => {
+    const monthlyRate = 3000;
+    const daily = calculateGlobalDailyRate(emp, '2024-02-05', monthlyRate);
+    const rows = [
+      { employee_id: 'e1', date: '2024-02-05', entry_type: 'leave_mixed', total_payment: daily, payable: false },
+      { employee_id: 'e1', date: '2024-02-05', entry_type: 'hours', total_payment: daily },
+    ];
+    const agg = aggregateGlobalDays(rows, { e1: emp });
+    assert.equal(agg.size, 1);
+    const only = agg.get('e1|2024-02-05');
+    assert(only);
+    assert.equal(only.dailyAmount, daily);
+  });
   it('session_hourly_unchanged', () => {
     const rows = [
       { employee_id: 'e2', entry_type: 'hours', total_payment: 100 },
@@ -125,6 +146,40 @@ describe('aggregateGlobalDayForDate', () => {
     ];
     const agg = aggregateGlobalDayForDate(rows, { e1: emp });
     assert.equal(agg.total, daily * 2);
+  });
+});
+
+describe('resolveLeaveSessionValue', () => {
+  it('skips resolver when session is unpaid', () => {
+    let called = 0;
+    const result = resolveLeaveSessionValue(
+      { entry_type: 'leave_unpaid', payable: false, employee_id: 'e1', date: '2024-02-05' },
+      () => {
+        called += 1;
+        return 999;
+      }
+    );
+    assert.equal(result.amount, 0);
+    assert.equal(result.multiplier, 0);
+    assert.equal(called, 0);
+  });
+
+  it('flags and zeroes leave before employee start date', () => {
+    const beforeStart = resolveLeaveSessionValue(
+      { entry_type: 'leave_system_paid', payable: true, employee_id: 'e1', date: '2024-01-15', total_payment: 200 },
+      () => 400,
+      { employee: { id: 'e1', start_date: '2024-02-01' } }
+    );
+    assert.equal(beforeStart.amount, 0);
+    assert.equal(beforeStart.preStartDate, true);
+
+    const afterStart = resolveLeaveSessionValue(
+      { entry_type: 'leave_system_paid', payable: true, employee_id: 'e1', date: '2024-02-10', total_payment: 200 },
+      () => 400,
+      { employee: { id: 'e1', start_date: '2024-02-01' } }
+    );
+    assert.equal(afterStart.amount, 400);
+    assert.equal(afterStart.preStartDate, false);
   });
 });
 
@@ -193,6 +248,87 @@ describe('computePeriodTotals aggregator', () => {
       endDate: '2024-02-28'
     });
     assert.equal(dash.totalPay, res.totalPay);
+  });
+
+  it('uses leave day selector for hourly paid leave', () => {
+    const hourlyEmployees = [
+      { id: 'h1', employee_type: 'hourly' },
+    ];
+    const history = [
+      { employee_id: 'h1', date: '2024-02-12', entry_type: 'hours', total_payment: 400, hours: 8 },
+      { employee_id: 'h1', date: '2024-03-03', entry_type: 'hours', total_payment: 360, hours: 6 },
+      { employee_id: 'h1', date: '2024-04-10', entry_type: 'hours', total_payment: 200, hours: 5 },
+      { employee_id: 'h1', date: '2024-04-15', entry_type: 'leave_employee_paid', payable: true, total_payment: 0 },
+    ];
+    const leavePayPolicy = {
+      default_method: 'legal',
+      lookback_months: 3,
+      legal_allow_12m_if_better: false,
+    };
+    const expected = selectLeaveDayValue('h1', '2024-04-15', {
+      employees: hourlyEmployees,
+      workSessions: history,
+      services: [],
+      leavePayPolicy,
+    });
+    const totals = computePeriodTotals({
+      workSessions: history,
+      employees: hourlyEmployees,
+      services: [],
+      startDate: '2024-04-01',
+      endDate: '2024-04-30',
+      leavePayPolicy,
+      leaveDayValueSelector: selectLeaveDayValue,
+    });
+    assert.equal(totals.diagnostics.paidLeaveDays, 1);
+    assert.equal(totals.totalPay, expected + 200);
+    const empTotals = totals.totalsByEmployee.find(item => item.employee_id === 'h1');
+    assert.ok(empTotals);
+    assert.equal(empTotals.pay, expected + 200);
+  });
+
+  it('counts half-day paid leave as half the selector value', () => {
+    const hourlyEmployees = [
+      { id: 'h1', employee_type: 'hourly' },
+    ];
+    const workSessions = [
+      { employee_id: 'h1', date: '2024-02-10', entry_type: 'hours', total_payment: 400, hours: 8 },
+      { employee_id: 'h1', date: '2024-03-12', entry_type: 'hours', total_payment: 300, hours: 6 },
+      {
+        employee_id: 'h1',
+        date: '2024-04-18',
+        entry_type: 'leave_half_day',
+        payable: true,
+        total_payment: 0,
+        metadata: { leave_fraction: 0.5, leave_type: 'half_day' },
+      },
+    ];
+    const leavePayPolicy = {
+      default_method: 'avg_hourly_x_avg_day_hours',
+      lookback_months: 3,
+      legal_allow_12m_if_better: false,
+    };
+    const expectedDaily = selectLeaveDayValue('h1', '2024-04-18', {
+      employees: hourlyEmployees,
+      workSessions,
+      services: [],
+      leavePayPolicy,
+    });
+    const totals = computePeriodTotals({
+      workSessions,
+      employees: hourlyEmployees,
+      services: [],
+      startDate: '2024-04-01',
+      endDate: '2024-04-30',
+      leavePayPolicy,
+      leaveDayValueSelector: selectLeaveDayValue,
+    });
+    const empTotals = totals.totalsByEmployee.find(item => item.employee_id === 'h1');
+    assert.ok(empTotals);
+    assert.equal(empTotals.pay, expectedDaily * 0.5);
+    assert.equal(empTotals.daysPaid, 0.5);
+    assert.equal(totals.diagnostics.paidLeaveDays, 0.5);
+    assert.equal(totals.totalPay, expectedDaily * 0.5);
   });
 });
 

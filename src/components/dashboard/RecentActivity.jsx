@@ -8,10 +8,21 @@ import { format, parseISO } from "date-fns";
 import { he } from "date-fns/locale";
 import { Link } from "react-router-dom";
 import { getColorForService } from '@/lib/colorUtils';
+import { createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
+import { selectLeaveDayValue } from '@/selectors.js';
+import { isLeaveEntryType } from '@/lib/leave.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
-export default function RecentActivity({ title = "פעילות אחרונה", sessions, employees, services, isLoading, showViewAllButton = true }) {
+export default function RecentActivity({ title = "פעילות אחרונה", sessions, employees, services, workSessions = [], leavePayPolicy, isLoading, showViewAllButton = true }) {
+
+  const resolveLeaveValue = React.useMemo(() => createLeaveDayValueResolver({
+    employees,
+    workSessions,
+    services,
+    leavePayPolicy,
+    leaveDayValueSelector: selectLeaveDayValue,
+  }), [employees, workSessions, services, leavePayPolicy]);
   
   const getEmployee = (employeeId) => employees.find(emp => emp.id === employeeId);
 
@@ -40,6 +51,16 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
             {sessions.map((session) => {
               const employee = getEmployee(session.employee_id);
               const isHourlyOrGlobal = employee?.employee_type === 'hourly' || employee?.employee_type === 'global';
+              const isPaidLeave = employee && employee.employee_type !== 'global' && isLeaveEntryType(session.entry_type) && session.payable !== false;
+              const resolverResult = isPaidLeave
+                ? resolveLeaveSessionValue(session, resolveLeaveValue, { employee })
+                : null;
+              const computedPayment = resolverResult ? resolverResult.amount : null;
+              const totalPayment = isPaidLeave
+                ? (typeof computedPayment === 'number' && Number.isFinite(computedPayment)
+                  ? computedPayment
+                  : (Number(session.total_payment) || 0))
+                : (Number(session.total_payment) || 0);
               
               return (
                 <div key={session.id} className="flex items-center gap-3 p-3 rounded-lg bg-slate-50">
@@ -54,7 +75,7 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
                       </div>
                     </div>
                     <div className="col-span-1 text-left">
-                      <p className="text-sm font-semibold text-slate-700 truncate">₪{session.total_payment.toLocaleString()}</p>
+                      <p className="text-sm font-semibold text-slate-700 truncate">₪{totalPayment.toLocaleString()}</p>
                       <p className="text-xs font-medium text-slate-500 truncate">
                         {isHourlyOrGlobal ? `${session.hours || 0} שעות` : `${session.sessions_count || 0} מפגשים`}
                       </p>

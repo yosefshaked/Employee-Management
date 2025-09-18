@@ -1,12 +1,61 @@
 import { calculateGlobalDailyRate } from '../../lib/payroll.js';
-import { getEntryTypeForLeaveKind, isLeaveEntryType } from '../../lib/leave.js';
+import {
+  getEntryTypeForLeaveKind,
+  getLeaveKindFromEntryType,
+  getLeaveValueMultiplier,
+  isLeaveEntryType,
+  resolveLeavePayMethodContext,
+} from '../../lib/leave.js';
+import {
+  buildLeaveMetadata,
+  buildSourceMetadata,
+  canUseWorkSessionMetadata,
+} from '../../lib/workSessionsMetadata.js';
+import { selectLeaveDayValue } from '../../selectors.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
-export function useTimeEntry({ employees, services, getRateForDate, supabaseClient }) {
+export function useTimeEntry({
+  employees,
+  services,
+  getRateForDate,
+  supabaseClient,
+  workSessions = [],
+  leavePayPolicy = null,
+}) {
+  const baseRegularSessions = new Set();
+  const baseLeaveSessions = new Set();
+  if (Array.isArray(workSessions)) {
+    workSessions.forEach(session => {
+      if (!session) return;
+      if (!session.employee_id || !session.date) return;
+      if (session.entry_type === 'adjustment') return;
+      if (isLeaveEntryType(session.entry_type)) {
+        baseLeaveSessions.add(`${session.employee_id}-${session.date}`);
+        return;
+      }
+      baseRegularSessions.add(`${session.employee_id}-${session.date}`);
+    });
+  }
+
+  const resolveLeaveValue = (employeeId, date, multiplier = 1) => {
+    const base = selectLeaveDayValue(employeeId, date, {
+      employees,
+      workSessions,
+      services,
+      leavePayPolicy,
+    });
+    const safeBase = typeof base === 'number' && Number.isFinite(base) && base > 0 ? base : 0;
+    const scale = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+    return safeBase * scale;
+  };
+
   const saveRows = async (rows, dayTypeMap = {}) => {
     const client = supabaseClient || (await import('../../supabaseClient.js')).supabase;
+    const canWriteMetadata = await canUseWorkSessionMetadata(client);
     const inserts = [];
+    const leaveConflicts = [];
+    const leaveOccupied = new Set(baseLeaveSessions);
     for (const row of rows) {
       const employee = employees.find(e => e.id === row.employee_id);
       if (!employee) continue;
@@ -14,16 +63,30 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
       const { rate: rateUsed, reason } = getRateForDate(employee.id, row.date, isHourlyOrGlobal ? null : row.service_id);
       if (!rateUsed) throw new Error(reason || 'missing rate');
       let totalPayment = 0;
-      const empDayType = dayTypeMap[row.employee_id];
+      const empDayType = dayTypeMap ? dayTypeMap[row.employee_id] : undefined;
       const originalType = row.entry_type;
       let entryType;
       if (employee.employee_type === 'global') {
-        entryType = empDayType === 'paid_leave' ? getEntryTypeForLeaveKind('system_paid') : 'hours';
+        if (empDayType === 'paid_leave') {
+          entryType = getEntryTypeForLeaveKind('system_paid');
+        } else {
+          entryType = 'hours';
+        }
       } else {
         entryType = employee.employee_type === 'instructor' ? 'session' : 'hours';
         if (originalType && isLeaveEntryType(originalType)) {
           row.notes = row.notes ? `${row.notes} (סומן בעבר כחופשה)` : 'סומן בעבר כחופשה';
         }
+      }
+
+      const key = `${employee.id}-${row.date}`;
+      if (!isLeaveEntryType(entryType) && leaveOccupied.has(key)) {
+        leaveConflicts.push({
+          employeeId: employee.id,
+          employeeName: employee.name || '',
+          date: row.date,
+        });
+        continue;
       }
 
       if (entryType === 'session') {
@@ -33,6 +96,22 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
           totalPayment = (parseInt(row.sessions_count, 10) || 0) * (parseInt(row.students_count, 10) || 0) * rateUsed;
         } else {
           totalPayment = (parseInt(row.sessions_count, 10) || 0) * rateUsed;
+        }
+      } else if (entryType && entryType.startsWith('leave_')) {
+        const leaveKind = getLeaveKindFromEntryType(entryType);
+        const multiplier = getLeaveValueMultiplier({ entry_type: entryType, leave_kind: leaveKind });
+        let value = resolveLeaveValue(employee.id, row.date, multiplier || 1);
+        if (employee.employee_type === 'global') {
+          if (!(typeof value === 'number' && Number.isFinite(value) && value > 0)) {
+            try {
+              const fallback = calculateGlobalDailyRate(employee, row.date, rateUsed);
+              value = (typeof fallback === 'number' && Number.isFinite(fallback) ? fallback : 0)
+                * (Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1);
+            } catch {
+              value = 0;
+            }
+          }
+          totalPayment = value;
         }
       } else if (employee.employee_type === 'hourly') {
         totalPayment = (parseFloat(row.hours) || 0) * rateUsed;
@@ -55,13 +134,51 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
       if (entryType && entryType.startsWith('leave_')) {
         payload.payable = true;
         payload.hours = 0;
+        leaveOccupied.add(key);
+        if (canWriteMetadata) {
+          const leaveKind = getLeaveKindFromEntryType(entryType) || 'system_paid';
+          const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
+          const fraction = leaveKind === 'half_day' ? 0.5 : 1;
+          const snapshot = typeof totalPayment === 'number' && Number.isFinite(totalPayment) && totalPayment > 0
+            ? (fraction && fraction !== 0 ? totalPayment / fraction : totalPayment)
+            : null;
+          const metadata = buildLeaveMetadata({
+            source: 'multi_date',
+            leaveType: leaveKind,
+            leaveKind,
+            payable: true,
+            fraction,
+            halfDay: leaveKind === 'half_day',
+            method: payContext.method,
+            lookbackMonths: payContext.lookback_months,
+            legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
+            dailyValueSnapshot: snapshot,
+            overrideApplied: payContext.override_applied,
+          });
+          if (metadata) {
+            payload.metadata = metadata;
+          }
+        }
+      } else if (canWriteMetadata) {
+        const metadata = buildSourceMetadata('multi_date');
+        if (metadata) {
+          payload.metadata = metadata;
+        }
       }
       inserts.push(payload);
     }
-    if (!inserts.length) throw new Error('no valid rows');
+    if (!inserts.length) {
+      if (leaveConflicts.length > 0) {
+        const error = new Error('regular_conflicts');
+        error.code = 'TIME_ENTRY_REGULAR_CONFLICT';
+        error.conflicts = leaveConflicts;
+        throw error;
+      }
+      throw new Error('no valid rows');
+    }
     const { error } = await client.from('WorkSessions').insert(inserts);
     if (error) throw error;
-    return inserts;
+    return { inserted: inserts, conflicts: leaveConflicts };
   };
 
   const saveMixedLeave = async (entries = [], options = {}) => {
@@ -69,13 +186,36 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
     const { leaveType = 'mixed' } = options;
     const entryType = getEntryTypeForLeaveKind(leaveType);
     if (!entryType) throw new Error('סוג חופשה לא נתמך');
+    const canWriteMetadata = await canUseWorkSessionMetadata(client);
     const inserts = [];
+    const conflicts = [];
+    const invalidStartDates = [];
+    const occupied = new Set(baseRegularSessions);
     for (const item of entries) {
       const employee = employees.find(e => e.id === item.employee_id);
       if (!employee) continue;
       const dateStr = item.date;
       if (!dateStr) continue;
+      const key = `${employee.id}-${dateStr}`;
+      if (employee.start_date && dateStr < employee.start_date) {
+        invalidStartDates.push({
+          employeeId: employee.id,
+          employeeName: employee.name || '',
+          date: dateStr,
+          startDate: employee.start_date,
+        });
+        continue;
+      }
+      if (occupied.has(key)) {
+        conflicts.push({
+          employeeId: employee.id,
+          employeeName: employee.name || '',
+          date: dateStr,
+        });
+        continue;
+      }
       const isPaid = item.paid !== false;
+      const leaveFraction = leaveType === 'half_day' ? 0.5 : 1;
       let rateUsed = null;
       let totalPayment = 0;
       if (isPaid) {
@@ -85,9 +225,18 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
           throw new Error(reason || 'missing rate');
         }
         if (employee.employee_type === 'global') {
-          const dailyRate = calculateGlobalDailyRate(employee, dateStr, resolvedRate);
           rateUsed = resolvedRate;
-          totalPayment = dailyRate;
+          let baseValue = resolveLeaveValue(employee.id, dateStr, leaveFraction || 1);
+          if (!(typeof baseValue === 'number' && Number.isFinite(baseValue) && baseValue > 0)) {
+            try {
+              const dailyRate = calculateGlobalDailyRate(employee, dateStr, resolvedRate);
+              baseValue = (typeof dailyRate === 'number' && Number.isFinite(dailyRate) ? dailyRate : 0)
+                * (leaveFraction || 1);
+            } catch {
+              baseValue = 0;
+            }
+          }
+          totalPayment = baseValue;
         } else {
           rateUsed = resolvedRate || null;
         }
@@ -105,11 +254,44 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
         total_payment: totalPayment,
         payable: isPaid,
       });
+      const payload = inserts[inserts.length - 1];
+      if (canWriteMetadata) {
+        const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
+        const metadata = buildLeaveMetadata({
+          source: 'multi_date_leave',
+          leaveType,
+          leaveKind: leaveType,
+          payable: isPaid,
+          fraction: leaveFraction,
+          halfDay: leaveType === 'half_day',
+          mixedPaid: leaveType === 'mixed' ? Boolean(isPaid) : null,
+          method: payContext.method,
+          lookbackMonths: payContext.lookback_months,
+          legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
+          dailyValueSnapshot: (typeof totalPayment === 'number' && Number.isFinite(totalPayment) && totalPayment > 0)
+            ? (leaveFraction ? totalPayment / leaveFraction : totalPayment)
+            : null,
+          overrideApplied: payContext.override_applied,
+        });
+        if (metadata) {
+          payload.metadata = metadata;
+        }
+      }
+      occupied.add(key);
     }
-    if (!inserts.length) throw new Error('no valid rows');
+    if (!inserts.length) {
+      if (conflicts.length > 0 || invalidStartDates.length > 0) {
+        const error = new Error('leave_conflicts');
+        error.code = 'TIME_ENTRY_LEAVE_CONFLICT';
+        error.conflicts = conflicts;
+        error.invalidStartDates = invalidStartDates;
+        throw error;
+      }
+      throw new Error('no valid rows');
+    }
     const { error } = await client.from('WorkSessions').insert(inserts);
     if (error) throw error;
-    return inserts;
+    return { inserted: inserts, conflicts, invalidStartDates };
   };
 
   return { saveRows, saveMixedLeave };
