@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import RecentActivity from "../components/dashboard/RecentActivity";
 import TimeEntryTable from '../components/time-entry/TimeEntryTable';
 import TrashTab from '../components/time-entry/TrashTab.jsx';
@@ -9,6 +9,9 @@ import { format } from "date-fns";
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { hasDuplicateSession } from '@/lib/workSessionsUtils.js';
 import { restoreWorkSessions, permanentlyDeleteWorkSessions } from '@/api/workSessions.js';
+import StorageUsageWidget from '@/components/storage/StorageUsageWidget.jsx';
+import { fetchStorageQuotaSettings, fetchStorageUsageMetrics } from '@/api/storage.js';
+import { DEFAULT_STORAGE_SETTINGS, resolvePlanQuotas, calculateUsagePercent } from '@/lib/storage.js';
 import {
   DEFAULT_LEAVE_POLICY,
   DEFAULT_LEAVE_PAY_POLICY,
@@ -64,31 +67,36 @@ export default function TimeEntry() {
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('all');
-  const [storageUsage, setStorageUsage] = useState(null);
+  const [storageSettings, setStorageSettings] = useState(DEFAULT_STORAGE_SETTINGS);
+  const [storageMetrics, setStorageMetrics] = useState(null);
+  const [isStorageLoading, setIsStorageLoading] = useState(false);
+
+  const storageSettingsRef = useRef(storageSettings);
 
   useEffect(() => {
-    loadInitialData();
-  }, []);
+    storageSettingsRef.current = storageSettings;
+  }, [storageSettings]);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-    const bootstrap = window.__storageUsage;
-    if (bootstrap && typeof bootstrap === 'object') {
-      setStorageUsage(bootstrap);
-    }
-    const handleStorageUsage = (event) => {
-      const detail = event?.detail;
-      if (detail && typeof detail === 'object') {
-        setStorageUsage(detail);
+  const refreshStorageUsage = useCallback(async (settingsOverride, { silent = false } = {}) => {
+    const effectiveSettings = settingsOverride || storageSettingsRef.current;
+    if (!effectiveSettings) return;
+    setIsStorageLoading(true);
+    try {
+      const metrics = await fetchStorageUsageMetrics(supabase, {
+        includeDatabase: Boolean(effectiveSettings.show_db_and_storage),
+      });
+      setStorageMetrics(metrics);
+    } catch (error) {
+      console.error('Error fetching storage usage metrics:', error);
+      if (!silent) {
+        toast.error('שגיאה בטעינת שימוש האחסון');
       }
-    };
-    window.addEventListener('storage-usage', handleStorageUsage);
-    return () => {
-      window.removeEventListener('storage-usage', handleStorageUsage);
-    };
+    } finally {
+      setIsStorageLoading(false);
+    }
   }, []);
 
-  const loadInitialData = async ({ silent = false } = {}) => {
+  const loadInitialData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setIsLoading(true);
     try {
       const [
@@ -146,13 +154,27 @@ export default function TimeEntry() {
       } else {
         setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicySettings.data?.settings_value));
       }
+
+      let resolvedStorageSettings = DEFAULT_STORAGE_SETTINGS;
+      try {
+        resolvedStorageSettings = await fetchStorageQuotaSettings(supabase);
+      } catch (settingsError) {
+        console.error('Error loading storage quota settings:', settingsError);
+        toast.error('שגיאה בטעינת הגדרות האחסון');
+      }
+      setStorageSettings(resolvedStorageSettings);
+      await refreshStorageUsage(resolvedStorageSettings);
     } catch (error) {
       console.error("Error loading data:", error);
       toast.error("שגיאה בטעינת הנתונים");
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [refreshStorageUsage]);
+
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
 
   const getRateForDate = (employeeId, date, serviceId = null) => {
     const employee = employees.find(e => e.id === employeeId);
@@ -559,49 +581,52 @@ export default function TimeEntry() {
     [],
   );
 
+  const resolvedStorageQuotas = useMemo(() => resolvePlanQuotas(storageSettings), [storageSettings]);
+
   const storageUsagePercent = useMemo(() => {
-    if (!storageUsage) return null;
-    const candidates = [
-      storageUsage.usagePercent,
-      storageUsage.percent,
-      typeof storageUsage.usageRatio === 'number' ? storageUsage.usageRatio * 100 : null,
-      typeof storageUsage.usedFraction === 'number' ? storageUsage.usedFraction * 100 : null,
-    ].filter(value => typeof value === 'number' && Number.isFinite(value));
-    if (!candidates.length) return null;
-    return Math.round(candidates[0]);
-  }, [storageUsage]);
+    if (!storageMetrics) return null;
+    return calculateUsagePercent(storageMetrics.storageBytes ?? 0, resolvedStorageQuotas.storageQuotaGb);
+  }, [resolvedStorageQuotas.storageQuotaGb, storageMetrics]);
+
+  const databaseUsagePercent = useMemo(() => {
+    if (!storageMetrics || !storageSettings?.show_db_and_storage) return null;
+    if (storageMetrics.dbBytes == null) return null;
+    return calculateUsagePercent(storageMetrics.dbBytes, resolvedStorageQuotas.dbQuotaGb);
+  }, [resolvedStorageQuotas.dbQuotaGb, storageMetrics, storageSettings?.show_db_and_storage]);
 
   const showStorageBanner = useMemo(() => {
-    if (!storageUsage) return false;
-    if (storageUsage.isHighUsage) return true;
-    if (storageUsage.status && typeof storageUsage.status === 'string') {
-      const normalized = storageUsage.status.toLowerCase();
-      if (normalized === 'high' || normalized === 'warning' || normalized === 'critical') {
-        return true;
-      }
+    if (typeof storageUsagePercent === 'number' && storageUsagePercent >= 85) {
+      return true;
     }
-    if (typeof storageUsagePercent === 'number' && storageUsagePercent >= 80) {
+    if (typeof databaseUsagePercent === 'number' && databaseUsagePercent >= 85) {
       return true;
     }
     return false;
-  }, [storageUsage, storageUsagePercent]);
+  }, [databaseUsagePercent, storageUsagePercent]);
 
   const storageUsageLabel = useMemo(() => {
+    const parts = [];
     if (typeof storageUsagePercent === 'number') {
-      return `${storageUsagePercent}% מנוצל`;
+      parts.push(`אחסון ${storageUsagePercent}%`);
     }
-    if (typeof storageUsage?.formattedUsage === 'string') {
-      return storageUsage.formattedUsage;
+    if (typeof databaseUsagePercent === 'number') {
+      parts.push(`מסד נתונים ${databaseUsagePercent}%`);
     }
-    if (typeof storageUsage?.usageLabel === 'string') {
-      return storageUsage.usageLabel;
-    }
-    return null;
-  }, [storageUsage, storageUsagePercent]);
+    return parts.length ? parts.join(' · ') : null;
+  }, [databaseUsagePercent, storageUsagePercent]);
 
-  const storageBannerHeadline = storageUsage?.headline || 'שטח האחסון כמעט מלא';
-  const storageBannerMessage = storageUsage?.message
-    || 'מומלץ למחוק לצמיתות פריטים מסל האשפה ולפנות מקום כדי למנוע הפרעות.';
+  const storageBannerHeadline = useMemo(() => {
+    if (
+      typeof databaseUsagePercent === 'number'
+      && databaseUsagePercent >= (storageUsagePercent ?? 0)
+      && databaseUsagePercent >= 85
+    ) {
+      return 'מסד הנתונים כמעט מלא';
+    }
+    return 'שטח האחסון כמעט מלא';
+  }, [databaseUsagePercent, storageUsagePercent]);
+
+  const storageBannerMessage = 'מומלץ למחוק לצמיתות פריטים מסל האשפה ולפנות מקום כדי למנוע הפרעות.';
 
   const handleTrashRestore = async (ids) => {
     const idsArray = Array.isArray(ids) ? ids : [ids];
@@ -642,6 +667,14 @@ export default function TimeEntry() {
           <h1 className="text-3xl font-bold text-slate-900">רישום זמנים</h1>
           <p className="text-slate-600">ניהול רישומי שעות, חופשות והתאמות במקום אחד</p>
         </div>
+
+        <StorageUsageWidget
+          settings={storageSettings}
+          metrics={storageMetrics}
+          isLoading={isStorageLoading}
+          showRefreshButton
+          onRefresh={() => refreshStorageUsage(undefined, { silent: false })}
+        />
 
         {showStorageBanner && (
           <div
