@@ -1,12 +1,40 @@
 import { STORAGE_SETTINGS_KEY, DEFAULT_STORAGE_SETTINGS, normalizeStorageQuotaSettings } from '@/lib/storage.js';
 
+const toFiniteNumber = (value) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
 const extractUsageValue = (payload, key) => {
   if (payload == null) return null;
-  if (typeof payload === 'number' && Number.isFinite(payload)) return payload;
-  if (typeof payload === 'object') {
-    const value = payload[key] ?? payload[key.toLowerCase()];
-    if (Number.isFinite(value)) return value;
+
+  const directNumber = toFiniteNumber(payload);
+  if (directNumber != null) return directNumber;
+
+  if (Array.isArray(payload)) {
+    for (const entry of payload) {
+      const value = extractUsageValue(entry, key);
+      if (value != null) return value;
+    }
+    return null;
   }
+
+  if (typeof payload === 'object') {
+    const candidates = [];
+    if (key in payload) candidates.push(payload[key]);
+    const lowerKey = typeof key === 'string' ? key.toLowerCase() : key;
+    if (lowerKey in payload) candidates.push(payload[lowerKey]);
+
+    for (const candidate of candidates) {
+      const value = extractUsageValue(candidate, key);
+      if (value != null) return value;
+    }
+  }
+
   return null;
 };
 
