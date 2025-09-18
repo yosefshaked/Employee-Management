@@ -26,11 +26,18 @@ function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, 
   const [selectedDates, setSelectedDates] = useState([]);
   const [selectedEmployees, setSelectedEmployees] = useState(employees.map(e => e.id));
   const displaySessions = useMemo(
-    () => (Array.isArray(workSessions) ? workSessions : []),
+    () => (Array.isArray(workSessions)
+      ? workSessions.filter(session => session && !session.deleted)
+      : []),
     [workSessions],
   );
   const contextSessions = useMemo(
-    () => (Array.isArray(allWorkSessions) && allWorkSessions.length ? allWorkSessions : displaySessions),
+    () => {
+      if (Array.isArray(allWorkSessions) && allWorkSessions.length) {
+        return allWorkSessions.filter(session => session && !session.deleted);
+      }
+      return displaySessions;
+    },
     [allWorkSessions, displaySessions],
   );
   const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees]);

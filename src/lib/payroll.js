@@ -23,6 +23,7 @@ export function calculateGlobalDailyRate(employee, date, monthlyRate) {
 export function aggregateGlobalDays(rows, employeesById) {
   const map = new Map();
   rows.forEach((row, index) => {
+    if (!row || row.deleted) return;
     const emp = employeesById[row.employee_id];
     if (!emp || emp.employee_type !== 'global') return;
     if (emp.start_date && row.date < emp.start_date) return;
@@ -64,6 +65,7 @@ export function aggregateGlobalDayForDate(rows, employeesById) {
   const byKey = new Map();
   let total = 0;
   rows.forEach(row => {
+    if (!row || row.deleted) return;
     const emp = employeesById[row.employee_id];
     if (!emp || emp.employee_type !== 'global') return;
     if (emp.start_date && row.date < emp.start_date) return;

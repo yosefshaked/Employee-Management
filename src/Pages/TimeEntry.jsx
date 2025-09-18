@@ -134,7 +134,8 @@ export default function TimeEntry() {
       if (trashData.error) throw trashData.error;
 
       setEmployees(employeesData.data || []);
-      setWorkSessions(sessionsData.data || []);
+      const activeSessions = (sessionsData.data || []).filter(session => !session?.deleted);
+      setWorkSessions(activeSessions);
       setTrashSessions(trashData.data || []);
       setRateHistories(ratesData.data || []);
       const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
@@ -564,7 +565,9 @@ export default function TimeEntry() {
   };
 
   const tabbedSessions = useMemo(() => {
-    const base = Array.isArray(workSessions) ? workSessions : [];
+    const base = Array.isArray(workSessions)
+      ? workSessions.filter(session => session && !session.deleted)
+      : [];
     const work = base.filter(row => row && (row.entry_type === 'hours' || row.entry_type === 'session'));
     const leave = base.filter(row => row && isLeaveEntryType(row.entry_type));
     const adjustments = base.filter(row => row && row.entry_type === 'adjustment');
