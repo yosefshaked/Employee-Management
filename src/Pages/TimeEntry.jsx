@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import RecentActivity from "../components/dashboard/RecentActivity";
 import TimeEntryTable from '../components/time-entry/TimeEntryTable';
 import TrashTab from '../components/time-entry/TrashTab.jsx';
@@ -9,9 +9,6 @@ import { format } from "date-fns";
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { hasDuplicateSession } from '@/lib/workSessionsUtils.js';
 import { restoreWorkSessions, permanentlyDeleteWorkSessions } from '@/api/workSessions.js';
-import StorageUsageWidget from '@/components/storage/StorageUsageWidget.jsx';
-import { fetchStorageQuotaSettings, fetchStorageUsageMetrics } from '@/api/storage.js';
-import { DEFAULT_STORAGE_SETTINGS, resolvePlanQuotas, calculateUsagePercent } from '@/lib/storage.js';
 import {
   DEFAULT_LEAVE_POLICY,
   DEFAULT_LEAVE_PAY_POLICY,
@@ -67,35 +64,6 @@ export default function TimeEntry() {
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('all');
-  const [storageSettings, setStorageSettings] = useState(DEFAULT_STORAGE_SETTINGS);
-  const [storageMetrics, setStorageMetrics] = useState(null);
-  const [isStorageLoading, setIsStorageLoading] = useState(false);
-
-  const storageSettingsRef = useRef(storageSettings);
-
-  useEffect(() => {
-    storageSettingsRef.current = storageSettings;
-  }, [storageSettings]);
-
-  const refreshStorageUsage = useCallback(async (settingsOverride, { silent = false } = {}) => {
-    const effectiveSettings = settingsOverride || storageSettingsRef.current;
-    if (!effectiveSettings) return;
-    setIsStorageLoading(true);
-    try {
-      const metrics = await fetchStorageUsageMetrics(supabase, {
-        includeDatabase: Boolean(effectiveSettings.show_db_and_storage),
-      });
-      setStorageMetrics(metrics);
-    } catch (error) {
-      console.error('Error fetching storage usage metrics:', error);
-      if (!silent) {
-        toast.error('שגיאה בטעינת שימוש האחסון');
-      }
-    } finally {
-      setIsStorageLoading(false);
-    }
-  }, []);
-
   const loadInitialData = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setIsLoading(true);
     try {
@@ -156,22 +124,13 @@ export default function TimeEntry() {
         setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicySettings.data?.settings_value));
       }
 
-      let resolvedStorageSettings = DEFAULT_STORAGE_SETTINGS;
-      try {
-        resolvedStorageSettings = await fetchStorageQuotaSettings(supabase);
-      } catch (settingsError) {
-        console.error('Error loading storage quota settings:', settingsError);
-        toast.error('שגיאה בטעינת הגדרות האחסון');
-      }
-      setStorageSettings(resolvedStorageSettings);
-      await refreshStorageUsage(resolvedStorageSettings);
     } catch (error) {
       console.error("Error loading data:", error);
       toast.error("שגיאה בטעינת הנתונים");
     } finally {
       setIsLoading(false);
     }
-  }, [refreshStorageUsage]);
+  }, []);
 
   useEffect(() => {
     loadInitialData();
@@ -584,53 +543,6 @@ export default function TimeEntry() {
     [],
   );
 
-  const resolvedStorageQuotas = useMemo(() => resolvePlanQuotas(storageSettings), [storageSettings]);
-
-  const storageUsagePercent = useMemo(() => {
-    if (!storageMetrics) return null;
-    return calculateUsagePercent(storageMetrics.storageBytes ?? 0, resolvedStorageQuotas.storageQuotaGb);
-  }, [resolvedStorageQuotas.storageQuotaGb, storageMetrics]);
-
-  const databaseUsagePercent = useMemo(() => {
-    if (!storageMetrics || !storageSettings?.show_db_and_storage) return null;
-    if (storageMetrics.dbBytes == null) return null;
-    return calculateUsagePercent(storageMetrics.dbBytes, resolvedStorageQuotas.dbQuotaGb);
-  }, [resolvedStorageQuotas.dbQuotaGb, storageMetrics, storageSettings?.show_db_and_storage]);
-
-  const showStorageBanner = useMemo(() => {
-    if (typeof storageUsagePercent === 'number' && storageUsagePercent >= 85) {
-      return true;
-    }
-    if (typeof databaseUsagePercent === 'number' && databaseUsagePercent >= 85) {
-      return true;
-    }
-    return false;
-  }, [databaseUsagePercent, storageUsagePercent]);
-
-  const storageUsageLabel = useMemo(() => {
-    const parts = [];
-    if (typeof storageUsagePercent === 'number') {
-      parts.push(`אחסון ${storageUsagePercent}%`);
-    }
-    if (typeof databaseUsagePercent === 'number') {
-      parts.push(`מסד נתונים ${databaseUsagePercent}%`);
-    }
-    return parts.length ? parts.join(' · ') : null;
-  }, [databaseUsagePercent, storageUsagePercent]);
-
-  const storageBannerHeadline = useMemo(() => {
-    if (
-      typeof databaseUsagePercent === 'number'
-      && databaseUsagePercent >= (storageUsagePercent ?? 0)
-      && databaseUsagePercent >= 85
-    ) {
-      return 'מסד הנתונים כמעט מלא';
-    }
-    return 'שטח האחסון כמעט מלא';
-  }, [databaseUsagePercent, storageUsagePercent]);
-
-  const storageBannerMessage = 'מומלץ למחוק לצמיתות פריטים מסל האשפה ולפנות מקום כדי למנוע הפרעות.';
-
   const handleTrashRestore = async (ids) => {
     const idsArray = Array.isArray(ids) ? ids : [ids];
     const normalized = Array.from(new Set(idsArray.map(String)));
@@ -671,28 +583,7 @@ export default function TimeEntry() {
           <p className="text-slate-600">ניהול רישומי שעות, חופשות והתאמות במקום אחד</p>
         </div>
 
-        <StorageUsageWidget
-          settings={storageSettings}
-          metrics={storageMetrics}
-          isLoading={isStorageLoading}
-          showRefreshButton
-          onRefresh={() => refreshStorageUsage(undefined, { silent: false })}
-        />
-
-        {showStorageBanner && (
-          <div
-            className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
-            role="status"
-          >
-            <p className="font-medium flex flex-wrap items-baseline gap-2">
-              <span>{storageBannerHeadline}</span>
-              {storageUsageLabel && (
-                <span className="text-amber-700 text-xs md:text-sm">{storageUsageLabel}</span>
-              )}
-            </p>
-            <p className="mt-1 leading-relaxed">{storageBannerMessage}</p>
-          </div>
-        )}
+        {/* Storage Usage widget temporarily disabled; flip features.storageUsage=true to re-enable (requires RPCs). */}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="flex flex-wrap justify-center gap-2 rounded-lg bg-white/70 p-1 shadow-sm">

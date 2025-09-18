@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -11,7 +11,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { Plus, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/supabaseClient';
-import StorageUsageWidget from '@/components/storage/StorageUsageWidget.jsx';
 import {
   DEFAULT_LEAVE_POLICY,
   HOLIDAY_TYPE_LABELS,
@@ -24,17 +23,6 @@ import {
   normalizeLeavePayPolicy,
   DEFAULT_LEGAL_INFO_URL,
 } from '@/lib/leave.js';
-import {
-  DEFAULT_STORAGE_SETTINGS,
-  normalizeStorageQuotaSettings,
-  resolvePlanQuotas,
-  formatGigabytes,
-} from '@/lib/storage.js';
-import {
-  fetchStorageQuotaSettings,
-  fetchStorageUsageMetrics,
-  saveStorageQuotaSettings,
-} from '@/api/storage.js';
 
 function createNewRule() {
   const today = new Date().toISOString().slice(0, 10);
@@ -123,36 +111,6 @@ export default function Settings() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingLeavePayPolicy, setIsSavingLeavePayPolicy] = useState(false);
-  const [storageSettings, setStorageSettings] = useState(() => normalizeStorageQuotaSettings(DEFAULT_STORAGE_SETTINGS));
-  const [storageUsageMetrics, setStorageUsageMetrics] = useState(null);
-  const [isStorageLoading, setIsStorageLoading] = useState(true);
-  const [isSavingStorageSettings, setIsSavingStorageSettings] = useState(false);
-
-  const storageSettingsRef = useRef(storageSettings);
-
-  useEffect(() => {
-    storageSettingsRef.current = storageSettings;
-  }, [storageSettings]);
-
-  const refreshStorageUsage = useCallback(async (settingsOverride, { silent = false } = {}) => {
-    const effectiveSettings = settingsOverride || storageSettingsRef.current;
-    if (!effectiveSettings) return;
-    setIsStorageLoading(true);
-    try {
-      const metrics = await fetchStorageUsageMetrics(supabase, {
-        includeDatabase: Boolean(effectiveSettings.show_db_and_storage),
-      });
-      setStorageUsageMetrics(metrics);
-    } catch (error) {
-      console.error('Error loading storage usage metrics', error);
-      if (!silent) {
-        toast.error('שגיאה בטעינת נתוני האחסון');
-      }
-    } finally {
-      setIsStorageLoading(false);
-    }
-  }, []);
-
   useEffect(() => {
     const loadPolicy = async () => {
       setIsLoading(true);
@@ -184,61 +142,16 @@ export default function Settings() {
           setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicyResponse.data?.settings_value));
         }
 
-        let loadedStorageSettings = normalizeStorageQuotaSettings(DEFAULT_STORAGE_SETTINGS);
-        try {
-          loadedStorageSettings = await fetchStorageQuotaSettings(supabase);
-        } catch (storageError) {
-          console.error('Error loading storage quota settings', storageError);
-          toast.error('שגיאה בטעינת הגדרות האחסון');
-        }
-        setStorageSettings(loadedStorageSettings);
-        await refreshStorageUsage(loadedStorageSettings, { silent: true });
       } catch (error) {
         console.error('Error loading leave policy', error);
         toast.error('שגיאה בטעינת הגדרות החופשה');
         setPolicy(DEFAULT_LEAVE_POLICY);
         setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
-        const fallbackSettings = normalizeStorageQuotaSettings(DEFAULT_STORAGE_SETTINGS);
-        setStorageSettings(fallbackSettings);
-        await refreshStorageUsage(fallbackSettings, { silent: true });
       }
       setIsLoading(false);
     };
     loadPolicy();
-  }, [refreshStorageUsage]);
-
-  const storagePresetsByPlan = useMemo(() => {
-    const map = new Map();
-    (storageSettings.presets || []).forEach((preset) => {
-      map.set(preset.plan, preset);
-    });
-    return map;
-  }, [storageSettings.presets]);
-
-  const storagePlanOptions = useMemo(() => ([
-    {
-      value: 'Free',
-      title: 'חינמי',
-      description: 'מתאים אם אינכם משלמים לסופבייס; אפשר להישאר עם ברירת המחדל.',
-      preset: storagePresetsByPlan.get('Free'),
-    },
-    {
-      value: 'Pro',
-      title: 'מקצועי',
-      description: 'בחרו באפשרות זו אם פרויקט Supabase שלכם בתוכנית Pro.',
-      preset: storagePresetsByPlan.get('Pro'),
-    },
-    {
-      value: 'Custom',
-      title: 'מותאם אישית',
-      description: 'קבעו מכסה ידנית עבור אחסון ומסד הנתונים.',
-    },
-  ]), [storagePresetsByPlan]);
-
-  const resolvedStorageQuotas = useMemo(
-    () => resolvePlanQuotas(storageSettings),
-    [storageSettings],
-  );
+  }, []);
 
   const handleToggle = (key) => (checked) => {
     setPolicy(prev => ({ ...prev, [key]: checked }));
@@ -308,77 +221,6 @@ export default function Settings() {
     const hasRule = (policy.holiday_rules || []).some(rule => rule.id === ruleId);
     if (!hasRule) return;
     await handleSave();
-  };
-
-  const handleStoragePlanChange = (event) => {
-    const { value } = event.target;
-    setStorageSettings(prev => {
-      const next = { ...prev, plan: value };
-      if (value === 'Custom') {
-        const quotas = resolvePlanQuotas(next);
-        return {
-          ...next,
-          quota_gb: quotas.storageQuotaGb,
-          db_quota_gb: quotas.dbQuotaGb,
-        };
-      }
-      return next;
-    });
-  };
-
-  const handleStorageQuotaChange = (key) => (event) => {
-    const { value } = event.target;
-    const numeric = Number(value);
-    setStorageSettings(prev => ({
-      ...prev,
-      [key]: value === '' ? '' : (Number.isNaN(numeric) ? prev[key] : numeric),
-    }));
-  };
-
-  const handleStoragePresetChange = (index, field) => (event) => {
-    const { value } = event.target;
-    const numeric = Number(value);
-    setStorageSettings(prev => ({
-      ...prev,
-      presets: (prev.presets || []).map((preset, presetIndex) => {
-        if (presetIndex !== index) return preset;
-        return {
-          ...preset,
-          [field]: value === '' ? '' : (Number.isNaN(numeric) ? preset[field] : numeric),
-        };
-      }),
-    }));
-  };
-
-  const handleStorageToggle = (checked) => {
-    const nextSettings = { ...storageSettings, show_db_and_storage: checked };
-    setStorageSettings(nextSettings);
-    if (checked) {
-      refreshStorageUsage(nextSettings, { silent: true });
-    } else {
-      setStorageUsageMetrics(prev => (prev ? { ...prev, dbBytes: null } : prev));
-    }
-  };
-
-  const handleStorageNoteChange = (event) => {
-    setStorageSettings(prev => ({
-      ...prev,
-      note: event.target.value,
-    }));
-  };
-
-  const handleSaveStorageSettings = async () => {
-    setIsSavingStorageSettings(true);
-    try {
-      const normalized = await saveStorageQuotaSettings(supabase, storageSettings);
-      setStorageSettings(normalized);
-      toast.success('הגדרות האחסון נשמרו בהצלחה');
-      await refreshStorageUsage(normalized, { silent: true });
-    } catch (error) {
-      console.error('Error saving storage settings', error);
-      toast.error('שמירת הגדרות האחסון נכשלה');
-    }
-    setIsSavingStorageSettings(false);
   };
 
   const handleLeavePayMethodChange = (event) => {
@@ -452,160 +294,7 @@ export default function Settings() {
           <p className="text-slate-600">נהל את מדיניות החופשות והחגים הארגונית במקום מרכזי אחד</p>
         </div>
 
-        <Card className="border-0 shadow-lg bg-white/80">
-          <CardHeader className="border-b">
-            <CardTitle className="text-xl font-semibold text-slate-900">אחסון ושטח מסד נתונים</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <StorageUsageWidget
-              settings={storageSettings}
-              metrics={storageUsageMetrics}
-              isLoading={isStorageLoading}
-              showRefreshButton
-              onRefresh={() => refreshStorageUsage(undefined, { silent: false })}
-            />
-
-            {isLoading ? (
-              <div className="space-y-4">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-2/3" />
-                <Skeleton className="h-10 w-1/2" />
-              </div>
-            ) : (
-              <div className="space-y-6">
-                <div className="space-y-3">
-                  <Label className="text-sm font-semibold text-slate-700">בחרו תוכנית</Label>
-                  <div className="space-y-3">
-                    {storagePlanOptions.map(option => {
-                      const isActive = storageSettings.plan === option.value;
-                      const quotaSummary = option.preset
-                        ? `אחסון ${formatGigabytes(option.preset.quota_gb)} · מסד נתונים ${formatGigabytes(option.preset.db_quota_gb)}`
-                        : null;
-                      return (
-                        <label
-                          key={option.value}
-                          className={`flex items-center gap-4 border rounded-lg p-4 cursor-pointer transition-colors flex-row-reverse ${
-                            isActive ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white'
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name="storage-plan"
-                            value={option.value}
-                            checked={isActive}
-                            onChange={handleStoragePlanChange}
-                            className="w-4 h-4"
-                          />
-                          <div className="flex-1 text-right">
-                            <p className="font-semibold text-slate-800">{option.title}</p>
-                            {option.description && (
-                              <p className="text-sm text-slate-500 mt-1">{option.description}</p>
-                            )}
-                            {quotaSummary && (
-                              <p className="text-xs text-slate-500 mt-1">{quotaSummary}</p>
-                            )}
-                          </div>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {storageSettings.plan === 'Custom' && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label className="text-sm font-semibold text-slate-700">מכסת אחסון (GB)</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        step="0.1"
-                        value={storageSettings.quota_gb ?? ''}
-                        onChange={handleStorageQuotaChange('quota_gb')}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-sm font-semibold text-slate-700">מכסת מסד נתונים (GB)</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        step="0.1"
-                        value={storageSettings.db_quota_gb ?? ''}
-                        onChange={handleStorageQuotaChange('db_quota_gb')}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-3">
-                  <div className="flex flex-col gap-1">
-                    <Label className="text-sm font-semibold text-slate-700">עדכון מכסה לתוכניות</Label>
-                    <p className="text-xs text-slate-500">המספרים נשמרים ב-Settings כך שאפשר לכוונן אותם בלי פריסה חדשה.</p>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {(storageSettings.presets || []).map((preset, index) => (
-                      <div key={preset.plan} className="border rounded-lg p-4 bg-slate-50 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-slate-800">{preset.plan}</span>
-                          <Badge variant="outline" className="bg-white text-slate-600 border-slate-300">
-                            {formatGigabytes(preset.quota_gb)} אחסון
-                          </Badge>
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-xs text-slate-600">מכסת אחסון (GB)</Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            step="0.1"
-                            value={preset.quota_gb ?? ''}
-                            onChange={handleStoragePresetChange(index, 'quota_gb')}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-xs text-slate-600">מכסת מסד נתונים (GB)</Label>
-                          <Input
-                            type="number"
-                            min={0}
-                            step="0.1"
-                            value={preset.db_quota_gb ?? ''}
-                            onChange={handleStoragePresetChange(index, 'db_quota_gb')}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between border rounded-lg p-4 bg-slate-50">
-                  <div className="text-right">
-                    <Label className="text-sm font-semibold text-slate-700">הצג גם שימוש במסד הנתונים</Label>
-                    <p className="text-xs text-slate-500 mt-1">כאשר האפשרות פעילה נציג גם את pg_database_size לצד האחסון.</p>
-                  </div>
-                  <Switch checked={storageSettings.show_db_and_storage} onCheckedChange={handleStorageToggle} />
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-sm font-semibold text-slate-700">הערת מנהל (לא חובה)</Label>
-                  <Textarea
-                    value={storageSettings.note || ''}
-                    onChange={handleStorageNoteChange}
-                    placeholder="הערות פנימיות לגבי מכסת Supabase..."
-                    rows={3}
-                  />
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500">
-                  <span>
-                    המכסה המחושבת כעת: אחסון {formatGigabytes(resolvedStorageQuotas.storageQuotaGb)} · מסד נתונים {formatGigabytes(resolvedStorageQuotas.dbQuotaGb)}
-                  </span>
-                  <Button onClick={handleSaveStorageSettings} disabled={isSavingStorageSettings || isLoading} className="gap-2">
-                    <Save className="w-4 h-4" />
-                    {isSavingStorageSettings ? 'שומר...' : 'שמור הגדרות אחסון'}
-                  </Button>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        {/* Storage Usage widget temporarily disabled; flip features.storageUsage=true to re-enable (requires RPCs). */}
 
         <Card className="border-0 shadow-lg bg-white/80">
           <CardHeader className="border-b">
