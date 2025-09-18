@@ -179,8 +179,6 @@ export default function TimeEntryForm({
       if (res.removed) setSegments(res.rows);
       return;
     }
-    const active = segments.filter(s => s._status !== 'deleted');
-    if (active.length <= 1) return;
     const summary = {
       employeeName: employee.name,
       date: format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy'),
