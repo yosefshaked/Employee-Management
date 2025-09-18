@@ -12,8 +12,9 @@ import { useTimeEntry } from './useTimeEntry.js';
 import { ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import he from '@/i18n/he.json';
-import { calculateGlobalDailyRate, aggregateGlobalDays } from '@/lib/payroll.js';
+import { calculateGlobalDailyRate, aggregateGlobalDays, createLeaveDayValueResolver } from '@/lib/payroll.js';
 import { isLeaveEntryType, LEAVE_TYPE_OPTIONS } from '@/lib/leave.js';
+import { selectLeaveDayValue } from '@/selectors.js';
 
 function validateRow(row, employee, services, getRateForDate) {
   const errors = {};
@@ -42,7 +43,18 @@ function validateRow(row, employee, services, getRateForDate) {
   return { valid: Object.keys(errors).length === 0, errors };
 }
 
-export default function MultiDateEntryModal({ open, onClose, employees, services, selectedEmployees, selectedDates, getRateForDate, onSaved, workSessions = [] }) {
+export default function MultiDateEntryModal({
+  open,
+  onClose,
+  employees,
+  services,
+  selectedEmployees,
+  selectedDates,
+  getRateForDate,
+  onSaved,
+  workSessions = [],
+  leavePayPolicy = null,
+}) {
   const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees]);
   const initialRows = useMemo(() => {
     const items = [];
@@ -71,7 +83,23 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
 
   const [rows, setRows] = useState(initialRows);
   useEffect(() => { setRows(initialRows); }, [initialRows]);
-  const { saveRows, saveMixedLeave } = useTimeEntry({ employees, services, getRateForDate, workSessions });
+  const { saveRows, saveMixedLeave } = useTimeEntry({
+    employees,
+    services,
+    getRateForDate,
+    workSessions,
+    leavePayPolicy,
+  });
+
+  const leaveValueResolver = useMemo(() => {
+    return createLeaveDayValueResolver({
+      employees,
+      workSessions,
+      services,
+      leavePayPolicy,
+      leaveDayValueSelector: selectLeaveDayValue,
+    });
+  }, [employees, workSessions, services, leavePayPolicy]);
 
   const [mode, setMode] = useState('regular');
   const handleModeChange = useCallback((nextMode) => {
@@ -111,8 +139,8 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
     [rows, employeesById, services, getRateForDate]
   );
   const payments = useMemo(
-    () => rows.map(r => computeRowPayment(r, employeesById[r.employee_id], services, getRateForDate)),
-    [rows, employeesById, services, getRateForDate]
+    () => rows.map(r => computeRowPayment(r, employeesById[r.employee_id], services, getRateForDate, { leaveValueResolver })),
+    [rows, employeesById, services, getRateForDate, leaveValueResolver]
   );
   const globalAgg = useMemo(() => {
     const withPay = rows.map((r, i) => ({
@@ -481,6 +509,7 @@ export default function MultiDateEntryModal({ open, onClose, employees, services
                               employee={emp}
                               services={services}
                               getRateForDate={getRateForDate}
+                              leaveValueResolver={leaveValueResolver}
                               onChange={(patch) => updateRow(index, patch)}
                               onCopyField={(field) => handleCopy(index, field)}
                               showSummary={true}

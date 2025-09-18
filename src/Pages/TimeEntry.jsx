@@ -224,8 +224,28 @@ export default function TimeEntry() {
           return null;
         }
 
+        const isLeaveEntry = isLeaveEntryType(entryType);
         let totalPayment = 0;
-        if (employee.employee_type === 'hourly') {
+        let leaveValue = null;
+        if (isLeaveEntry) {
+          leaveValue = selectLeaveDayValue(employee.id, row.date, {
+            employees,
+            workSessions,
+            services,
+            leavePayPolicy,
+          });
+          if (typeof leaveValue === 'number' && Number.isFinite(leaveValue) && leaveValue > 0) {
+            totalPayment = leaveValue;
+          } else if (employee.employee_type === 'global') {
+            try {
+              const dailyRate = calculateGlobalDailyRate(employee, row.date, rateUsed);
+              totalPayment = dailyRate;
+            } catch (err) {
+              toast.error(err.message, { duration: 15000 });
+              return null;
+            }
+          }
+        } else if (employee.employee_type === 'hourly') {
           totalPayment = (parseFloat(row.hours) || 0) * rateUsed;
         } else if (employee.employee_type === 'global') {
           try {
@@ -252,7 +272,7 @@ export default function TimeEntry() {
           toast.error('paid_leave only allowed for global employees', { duration: 15000 });
           return null;
         }
-        if (isLeaveEntryType(entryType)) {
+        if (isLeaveEntry) {
           if (employee.start_date && row.date < employee.start_date) {
             const formattedStart = format(new Date(employee.start_date + 'T00:00:00'), 'dd/MM/yyyy');
             const formattedTarget = format(new Date(row.date + 'T00:00:00'), 'dd/MM/yyyy');
@@ -308,6 +328,10 @@ export default function TimeEntry() {
         if (canWriteMetadata) {
           if (isLeaveEntryType(session.entry_type)) {
             const leaveKind = getLeaveKindFromEntryType(session.entry_type) || 'system_paid';
+            const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
+            const baseSnapshot = typeof leaveValue === 'number' && Number.isFinite(leaveValue) && leaveValue > 0
+              ? leaveValue
+              : (totalPayment || null);
             const metadata = buildLeaveMetadata({
               source: 'form',
               leaveType: leaveKind,
@@ -315,8 +339,11 @@ export default function TimeEntry() {
               payable: true,
               fraction: leaveKind === 'half_day' ? 0.5 : 1,
               halfDay: leaveKind === 'half_day',
-              method: 'global_contract',
-              dailyValueSnapshot: totalPayment || null,
+              method: payContext.method,
+              lookbackMonths: payContext.lookback_months,
+              legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
+              dailyValueSnapshot: baseSnapshot,
+              overrideApplied: payContext.override_applied,
             });
             if (metadata) {
               session.metadata = metadata;
@@ -539,6 +566,7 @@ export default function TimeEntry() {
         const leaveFraction = leaveType === 'half_day' ? 0.5 : 1;
         let rateUsed = 0;
         let totalPayment = 0;
+        let resolvedLeaveValue = 0;
         if (isPayable) {
           const { rate, reason } = getRateForDate(employee.id, day, GENERIC_RATE_SERVICE_ID);
           rateUsed = rate || 0;
@@ -547,12 +575,32 @@ export default function TimeEntry() {
             return;
           }
           if (employee.employee_type === 'global') {
-            try {
-              const dailyRateValue = calculateGlobalDailyRate(employee, day, rateUsed);
-              totalPayment = dailyRateValue * leaveFraction;
-            } catch (err) {
-              toast.error(err.message, { duration: 15000 });
-              return;
+            const selectorValue = selectLeaveDayValue(employee.id, day, {
+              employees,
+              workSessions,
+              services,
+              leavePayPolicy,
+            });
+            if (typeof selectorValue === 'number' && Number.isFinite(selectorValue) && selectorValue > 0) {
+              resolvedLeaveValue = selectorValue;
+            } else {
+              try {
+                resolvedLeaveValue = calculateGlobalDailyRate(employee, day, rateUsed);
+              } catch (err) {
+                toast.error(err.message, { duration: 15000 });
+                return;
+              }
+            }
+            totalPayment = resolvedLeaveValue * leaveFraction;
+          } else {
+            const selectorValue = selectLeaveDayValue(employee.id, day, {
+              employees,
+              workSessions,
+              services,
+              leavePayPolicy,
+            });
+            if (typeof selectorValue === 'number' && Number.isFinite(selectorValue) && selectorValue > 0) {
+              resolvedLeaveValue = selectorValue;
             }
           }
         }
@@ -562,7 +610,7 @@ export default function TimeEntry() {
           date: dateStr,
           notes: paidLeaveNotes || null,
           rate_used: isPayable ? (rateUsed || null) : null,
-          total_payment: isPayable ? totalPayment : 0,
+          total_payment: isPayable && employee.employee_type === 'global' ? totalPayment : 0,
           entry_type: entryType,
           hours: 0,
           service_id: null,
@@ -578,20 +626,11 @@ export default function TimeEntry() {
 
         if (canWriteMetadata) {
           const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
-          const isGlobalEmployee = employee.employee_type === 'global';
-          let dailyValueSnapshot = null;
-          if (isPayable) {
-            if (isGlobalEmployee) {
-              dailyValueSnapshot = leaveFraction ? (totalPayment / leaveFraction) : (totalPayment || null);
-            } else {
-              dailyValueSnapshot = selectLeaveDayValue(employee.id, day, {
-                employees,
-                workSessions,
-                services,
-                leavePayPolicy,
-              });
-            }
-          }
+          const dailyValueSnapshot = isPayable
+            ? ((typeof resolvedLeaveValue === 'number' && Number.isFinite(resolvedLeaveValue) && resolvedLeaveValue > 0)
+              ? resolvedLeaveValue
+              : null)
+            : null;
           const metadata = buildLeaveMetadata({
             source: 'table',
             leaveType,
@@ -600,11 +639,11 @@ export default function TimeEntry() {
             fraction: leaveFraction,
             halfDay: leaveType === 'half_day',
             mixedPaid: isMixed ? mixedIsPaid : null,
-            method: isGlobalEmployee ? 'global_contract' : payContext.method,
-            lookbackMonths: isGlobalEmployee ? null : payContext.lookback_months,
-            legalAllow12mIfBetter: isGlobalEmployee ? null : payContext.legal_allow_12m_if_better,
+            method: payContext.method,
+            lookbackMonths: payContext.lookback_months,
+            legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
             dailyValueSnapshot,
-            overrideApplied: isGlobalEmployee ? null : payContext.override_applied,
+            overrideApplied: payContext.override_applied,
           });
           if (metadata) {
             leaveRow.metadata = metadata;

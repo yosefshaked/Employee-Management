@@ -335,7 +335,9 @@ export function selectLeaveDayValue(
   }
 
   if (method === 'fixed_rate') {
-    const employeeRate = parsePositiveNumber(employee?.leave_fixed_day_rate);
+    const employeeRate = parsePositiveNumber(
+      employee?.leave_fixed_day_rate ?? employee?.fixed_day_rate,
+    );
     if (employeeRate !== null) {
       return buildResult(employeeRate, { diagnostics: emptyDiagnostics });
     }

@@ -1,14 +1,28 @@
 import { calculateGlobalDailyRate } from '../../lib/payroll.js';
-import { getEntryTypeForLeaveKind, getLeaveKindFromEntryType, isLeaveEntryType } from '../../lib/leave.js';
+import {
+  getEntryTypeForLeaveKind,
+  getLeaveKindFromEntryType,
+  getLeaveValueMultiplier,
+  isLeaveEntryType,
+  resolveLeavePayMethodContext,
+} from '../../lib/leave.js';
 import {
   buildLeaveMetadata,
   buildSourceMetadata,
   canUseWorkSessionMetadata,
 } from '../../lib/workSessionsMetadata.js';
+import { selectLeaveDayValue } from '../../selectors.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
-export function useTimeEntry({ employees, services, getRateForDate, supabaseClient, workSessions = [] }) {
+export function useTimeEntry({
+  employees,
+  services,
+  getRateForDate,
+  supabaseClient,
+  workSessions = [],
+  leavePayPolicy = null,
+}) {
   const baseRegularSessions = new Set();
   const baseLeaveSessions = new Set();
   if (Array.isArray(workSessions)) {
@@ -23,6 +37,18 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
       baseRegularSessions.add(`${session.employee_id}-${session.date}`);
     });
   }
+
+  const resolveLeaveValue = (employeeId, date, multiplier = 1) => {
+    const base = selectLeaveDayValue(employeeId, date, {
+      employees,
+      workSessions,
+      services,
+      leavePayPolicy,
+    });
+    const safeBase = typeof base === 'number' && Number.isFinite(base) && base > 0 ? base : 0;
+    const scale = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+    return safeBase * scale;
+  };
 
   const saveRows = async (rows, dayTypeMap = {}) => {
     const client = supabaseClient || (await import('../../supabaseClient.js')).supabase;
@@ -71,6 +97,22 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
         } else {
           totalPayment = (parseInt(row.sessions_count, 10) || 0) * rateUsed;
         }
+      } else if (entryType && entryType.startsWith('leave_')) {
+        const leaveKind = getLeaveKindFromEntryType(entryType);
+        const multiplier = getLeaveValueMultiplier({ entry_type: entryType, leave_kind: leaveKind });
+        let value = resolveLeaveValue(employee.id, row.date, multiplier || 1);
+        if (employee.employee_type === 'global') {
+          if (!(typeof value === 'number' && Number.isFinite(value) && value > 0)) {
+            try {
+              const fallback = calculateGlobalDailyRate(employee, row.date, rateUsed);
+              value = (typeof fallback === 'number' && Number.isFinite(fallback) ? fallback : 0)
+                * (Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1);
+            } catch {
+              value = 0;
+            }
+          }
+          totalPayment = value;
+        }
       } else if (employee.employee_type === 'hourly') {
         totalPayment = (parseFloat(row.hours) || 0) * rateUsed;
       } else if (employee.employee_type === 'global') {
@@ -95,15 +137,23 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
         leaveOccupied.add(key);
         if (canWriteMetadata) {
           const leaveKind = getLeaveKindFromEntryType(entryType) || 'system_paid';
+          const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
+          const fraction = leaveKind === 'half_day' ? 0.5 : 1;
+          const snapshot = typeof totalPayment === 'number' && Number.isFinite(totalPayment) && totalPayment > 0
+            ? (fraction && fraction !== 0 ? totalPayment / fraction : totalPayment)
+            : null;
           const metadata = buildLeaveMetadata({
             source: 'multi_date',
             leaveType: leaveKind,
             leaveKind,
             payable: true,
-            fraction: leaveKind === 'half_day' ? 0.5 : 1,
+            fraction,
             halfDay: leaveKind === 'half_day',
-            method: employee.employee_type === 'global' ? 'global_contract' : null,
-            dailyValueSnapshot: totalPayment || null,
+            method: payContext.method,
+            lookbackMonths: payContext.lookback_months,
+            legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
+            dailyValueSnapshot: snapshot,
+            overrideApplied: payContext.override_applied,
           });
           if (metadata) {
             payload.metadata = metadata;
@@ -175,9 +225,18 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
           throw new Error(reason || 'missing rate');
         }
         if (employee.employee_type === 'global') {
-          const dailyRate = calculateGlobalDailyRate(employee, dateStr, resolvedRate);
           rateUsed = resolvedRate;
-          totalPayment = dailyRate * leaveFraction;
+          let baseValue = resolveLeaveValue(employee.id, dateStr, leaveFraction || 1);
+          if (!(typeof baseValue === 'number' && Number.isFinite(baseValue) && baseValue > 0)) {
+            try {
+              const dailyRate = calculateGlobalDailyRate(employee, dateStr, resolvedRate);
+              baseValue = (typeof dailyRate === 'number' && Number.isFinite(dailyRate) ? dailyRate : 0)
+                * (leaveFraction || 1);
+            } catch {
+              baseValue = 0;
+            }
+          }
+          totalPayment = baseValue;
         } else {
           rateUsed = resolvedRate || null;
         }
@@ -197,6 +256,7 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
       });
       const payload = inserts[inserts.length - 1];
       if (canWriteMetadata) {
+        const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
         const metadata = buildLeaveMetadata({
           source: 'multi_date_leave',
           leaveType,
@@ -205,8 +265,13 @@ export function useTimeEntry({ employees, services, getRateForDate, supabaseClie
           fraction: leaveFraction,
           halfDay: leaveType === 'half_day',
           mixedPaid: leaveType === 'mixed' ? Boolean(isPaid) : null,
-          method: employee.employee_type === 'global' ? 'global_contract' : null,
-          dailyValueSnapshot: totalPayment && leaveFraction ? totalPayment / leaveFraction : totalPayment || null,
+          method: payContext.method,
+          lookbackMonths: payContext.lookback_months,
+          legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
+          dailyValueSnapshot: (typeof totalPayment === 'number' && Number.isFinite(totalPayment) && totalPayment > 0)
+            ? (leaveFraction ? totalPayment / leaveFraction : totalPayment)
+            : null,
+          overrideApplied: payContext.override_applied,
         });
         if (metadata) {
           payload.metadata = metadata;

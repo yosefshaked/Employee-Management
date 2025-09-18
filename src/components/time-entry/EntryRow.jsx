@@ -17,13 +17,22 @@ import { isLeaveEntryType } from '@/lib/leave.js';
 import { useEffect, useState } from 'react';
 import ConfirmPermanentDeleteModal from './ConfirmPermanentDeleteModal.jsx';
 
-export function computeRowPayment(row, employee, services, getRateForDate) {
+export function computeRowPayment(row, employee, services, getRateForDate, options = {}) {
   const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
   const { rate } = getRateForDate(employee.id, row.date, isHourlyOrGlobal ? null : row.service_id);
   if (employee.employee_type === 'hourly') {
     return (parseFloat(row.hours) || 0) * rate;
   }
   if (employee.employee_type === 'global') {
+    if (row.dayType === 'paid_leave') {
+      const resolver = typeof options.leaveValueResolver === 'function' ? options.leaveValueResolver : null;
+      if (resolver) {
+        const resolved = resolver(employee.id, row.date);
+        if (typeof resolved === 'number' && Number.isFinite(resolved) && resolved > 0) {
+          return resolved;
+        }
+      }
+    }
     try {
       return calculateGlobalDailyRate(employee, row.date, rate);
     } catch {
@@ -49,6 +58,7 @@ export default function EntryRow({
   employee,
   services,
   getRateForDate,
+  leaveValueResolver = null,
   allowRemove = false,
   onRemove,
   showSummary = true,
@@ -62,7 +72,7 @@ export default function EntryRow({
   const row = value;
   const handleChange = (field, val) => onChange({ [field]: val });
   const selectedService = services.find(s => s.id === row.service_id);
-  const rowPayment = computeRowPayment(row, employee, services, getRateForDate);
+  const rowPayment = computeRowPayment(row, employee, services, getRateForDate, { leaveValueResolver });
   const [flash, setFlash] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
 

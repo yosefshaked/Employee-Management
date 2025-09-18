@@ -112,10 +112,10 @@ export default function TimeEntryForm({
   }, [isLeaveDay, leaveType, mixedPaid]);
 
   const isPaidLeavePreview = useMemo(() => {
-    if (!isLeaveDay || isGlobal) return false;
+    if (!isLeaveDay) return false;
     if (!leaveKindForPay) return false;
     return isPayableLeaveKind(leaveKindForPay);
-  }, [isLeaveDay, isGlobal, leaveKindForPay]);
+  }, [isLeaveDay, leaveKindForPay]);
 
   const leavePayMethod = useMemo(() => {
     const override = employee?.leave_pay_method;
@@ -288,36 +288,6 @@ export default function TimeEntryForm({
 
   const leaveSummary = useMemo(() => {
     if (!isLeaveDay) return null;
-    if (isGlobal) {
-      const startDateStr = typeof employee.start_date === 'string' ? employee.start_date : null;
-      const selectedKey = selectedDate || '';
-      const isBeforeStart = Boolean(startDateStr && selectedKey && selectedKey < startDateStr);
-      if (!leaveType) {
-        return 'בחרו סוג חופשה כדי לחשב שווי.';
-      }
-      const fraction = leaveType === 'half_day' ? 0.5 : 1;
-      const isPaidKind = isPayableLeaveKind(leaveKindForPay);
-      const amount = (!isBeforeStart && isPaidKind) ? (dailyRate * fraction) : 0;
-      const headline = leaveType === 'half_day' ? 'שווי חצי יום חופשה' : 'שכר יומי';
-      const unpaidNote = !isPaidKind
-        ? (leaveType === 'mixed' ? 'היום המעורב סומן כלא משולם.' : 'היום סומן כחופשה ללא תשלום.')
-        : null;
-      return (
-        <>
-          <div className="text-base font-medium text-slate-900">{`${headline}: ₪${amount.toFixed(2)}`}</div>
-          {unpaidNote ? (
-            <div className="mt-1 text-xs text-slate-600 text-right">
-              {unpaidNote}
-            </div>
-          ) : null}
-          {isBeforeStart ? (
-            <div className="mt-1 text-xs text-amber-700 text-right">
-              תאריך לפני תחילת עבודה—הושמט מהסכום
-            </div>
-          ) : null}
-        </>
-      );
-    }
     if (!leaveType) {
       return 'בחרו סוג חופשה כדי לחשב שווי.';
     }
@@ -352,10 +322,7 @@ export default function TimeEntryForm({
     );
   }, [
     isLeaveDay,
-    isGlobal,
-    dailyRate,
     leaveType,
-    leaveKindForPay,
     mixedPaid,
     isPaidLeavePreview,
     leaveDayValue,
@@ -364,8 +331,6 @@ export default function TimeEntryForm({
     leaveMethodDescription,
     showInsufficientHistoryHint,
     showPreStartWarning,
-    employee?.start_date,
-    selectedDate,
   ]);
 
   const summary = isLeaveDay ? leaveSummary : baseSummary;
