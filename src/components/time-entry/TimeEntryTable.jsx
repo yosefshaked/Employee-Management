@@ -19,12 +19,20 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { HOLIDAY_TYPE_LABELS, getLeaveKindFromEntryType, isLeaveEntryType } from '@/lib/leave.js';
 import { selectLeaveDayValue } from '@/selectors.js';
-function TimeEntryTableInner({ employees, workSessions, services, getRateForDate, onTableSubmit, onImported, onDeleted, leavePolicy, leavePayPolicy }) {
+function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, services, getRateForDate, onTableSubmit, onImported, onDeleted, leavePolicy, leavePayPolicy }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
   const [multiMode, setMultiMode] = useState(false);
   const [selectedDates, setSelectedDates] = useState([]);
   const [selectedEmployees, setSelectedEmployees] = useState(employees.map(e => e.id));
+  const displaySessions = useMemo(
+    () => (Array.isArray(workSessions) ? workSessions : []),
+    [workSessions],
+  );
+  const contextSessions = useMemo(
+    () => (Array.isArray(allWorkSessions) && allWorkSessions.length ? allWorkSessions : displaySessions),
+    [allWorkSessions, displaySessions],
+  );
   const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees]);
   const [importOpen, setImportOpen] = useState(false);
   const [multiModalOpen, setMultiModalOpen] = useState(false);
@@ -56,20 +64,20 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
     });
     const resolveLeaveValue = createLeaveDayValueResolver({
       employees,
-      workSessions,
+      workSessions: contextSessions,
       services,
       leavePayPolicy,
       leaveDayValueSelector: selectLeaveDayValue,
     });
     const processedLeave = new Map();
     const globalAgg = aggregateGlobalDays(
-      workSessions.filter(s => {
+      displaySessions.filter(s => {
         const d = parseISO(s.date);
         return d >= start && d <= end;
       }),
       employeesById
     );
-    workSessions.forEach(s => {
+    displaySessions.forEach(s => {
       const sessionDate = parseISO(s.date);
       if (sessionDate < start || sessionDate > end) return;
       const emp = employeesById[s.employee_id];
@@ -126,7 +134,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
       if (empTotals) empTotals.payment += v.dailyAmount;
     });
     return totals;
-  }, [workSessions, employees, services, leavePayPolicy, employeesById, currentMonth]);
+  }, [displaySessions, contextSessions, employees, services, leavePayPolicy, employeesById, currentMonth]);
 
   const toggleDateSelection = (day) => {
     setSelectedDates(prev => {
@@ -223,7 +231,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
 
                             {/* For each day, loop through employees to create a cell */}
                             {employees.map(emp => {
-                                const dailySessions = workSessions.filter(s =>
+                                const dailySessions = displaySessions.filter(s =>
                                 s.employee_id === emp.id &&
                                 format(parseISO(s.date), 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd')
                                 );
@@ -393,7 +401,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
             <TimeEntryForm
               employee={editingCell.employee}
               allEmployees={employees}
-              workSessions={workSessions}
+              workSessions={contextSessions}
               services={services}
               initialRows={editingCell.existingSessions}
               initialDayType={editingCell.dayType || 'regular'}
@@ -427,9 +435,20 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
                   // keep modal open on error
                 }
               }}
-              onDeleted={(id) => {
-                setEditingCell(prev => prev ? { ...prev, existingSessions: prev.existingSessions.filter(s => s.id !== id) } : prev);
-                onDeleted([id]);
+              onDeleted={(ids, rows = []) => {
+                setEditingCell(prev => {
+                  if (!prev) return prev;
+                  const toRemove = new Set((ids || []).map(val => String(val)));
+                  return {
+                    ...prev,
+                    existingSessions: Array.isArray(prev.existingSessions)
+                      ? prev.existingSessions.filter(s => !toRemove.has(String(s.id)))
+                      : prev.existingSessions,
+                  };
+                });
+                if (typeof onDeleted === 'function') {
+                  onDeleted(ids, rows);
+                }
               }}
             />
           )}
@@ -441,7 +460,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
           employees={employees}
           services={services}
           getRateForDate={getRateForDate}
-          workSessions={workSessions}
+          workSessions={contextSessions}
           onImported={onImported}
         />
         <MultiDateEntryModal
@@ -452,7 +471,7 @@ function TimeEntryTableInner({ employees, workSessions, services, getRateForDate
           selectedEmployees={selectedEmployees}
           selectedDates={selectedDates}
           getRateForDate={getRateForDate}
-          workSessions={workSessions}
+          workSessions={contextSessions}
           leavePayPolicy={leavePayPolicy}
           onSaved={() => {
             onImported();

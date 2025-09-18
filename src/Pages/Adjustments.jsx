@@ -31,6 +31,7 @@ export default function Adjustments() {
       supabase.from('Employees').select('*').eq('is_active', true).order('name'),
       supabase.from('WorkSessions').select('*, employee:employee_id(name)')
                                     .eq('entry_type', 'adjustment')
+                                    .eq('deleted', false)
                                     .order('created_at', { ascending: false })
                                     .limit(5)
     ]);

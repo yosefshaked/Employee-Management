@@ -22,7 +22,7 @@ export default function Dashboard() {
       const [employeesData, sessionsData, servicesData, leavePayPolicySettings] = await Promise.all([
         supabase.from('Employees').select('*').eq('is_active', true),
         // === התיקון הסופי והנכון באמת: מיון לפי created_at ===
-        supabase.from('WorkSessions').select('*').order('created_at', { ascending: false }),
+        supabase.from('WorkSessions').select('*').eq('deleted', false).order('created_at', { ascending: false }),
         supabase.from('Services').select('*'),
         supabase.from('Settings').select('settings_value').eq('key', 'leave_pay_policy').single(),
       ]);
@@ -33,7 +33,8 @@ export default function Dashboard() {
       if (leavePayPolicySettings.error && leavePayPolicySettings.error.code !== 'PGRST116') throw leavePayPolicySettings.error;
 
       setEmployees(employeesData.data || []);
-      setWorkSessions(sessionsData.data || []);
+      const safeSessions = (sessionsData.data || []).filter(session => !session?.deleted);
+      setWorkSessions(safeSessions);
       const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
       setServices(filteredServices);
       if (!leavePayPolicySettings.error) {

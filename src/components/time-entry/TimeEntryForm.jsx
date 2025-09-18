@@ -6,7 +6,7 @@ import InstructorSegment from './segments/InstructorSegment.jsx';
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { sumHours, removeSegment } from './dayUtils.js';
 import ConfirmPermanentDeleteModal from './ConfirmPermanentDeleteModal.jsx';
-import { deleteWorkSession } from '@/api/workSessions.js';
+import { softDeleteWorkSession } from '@/api/workSessions.js';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import he from '@/i18n/he.json';
@@ -192,13 +192,15 @@ export default function TimeEntryForm({
   };
   const confirmDelete = async () => {
     try {
-      await deleteWorkSession(pendingDelete.id);
+      const deletedRow = await softDeleteWorkSession(pendingDelete.id);
       setSegments(prev => prev.filter(s => s.id !== pendingDelete.id));
-      onDeleted?.(pendingDelete.id);
+      const payload = deletedRow ? [deletedRow] : [];
+      onDeleted?.([pendingDelete.id], payload);
       toast.success(he['toast.delete.success']);
       setPendingDelete(null);
     } catch (err) {
       toast.error(he['toast.delete.error']);
+      setPendingDelete(null);
       throw err;
     }
   };

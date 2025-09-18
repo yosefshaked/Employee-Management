@@ -100,6 +100,9 @@ export function createLeaveDayValueResolver({
   const selector = typeof leaveDayValueSelector === 'function' ? leaveDayValueSelector : null;
   const cache = new Map();
   const employeesById = new Map(Array.isArray(employees) ? employees.filter(e => e && e.id).map(emp => [emp.id, emp]) : []);
+  const activeSessions = Array.isArray(workSessions)
+    ? workSessions.filter(session => session && !session.deleted)
+    : [];
   const toKey = (value) => {
     if (!value) return null;
     if (typeof value === 'string' && value.length >= 10) {
@@ -123,7 +126,7 @@ export function createLeaveDayValueResolver({
     }
     const value = selector(employeeId, date, {
       employees,
-      workSessions,
+      workSessions: activeSessions,
       services,
       leavePayPolicy,
       settings,
@@ -183,7 +186,10 @@ export function computePeriodTotals({
   const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
   const start = new Date(startDate);
   const end = new Date(endDate);
-  const filtered = workSessions.filter(row => {
+  const baseSessions = Array.isArray(workSessions)
+    ? workSessions.filter(row => row && !row.deleted)
+    : [];
+  const filtered = baseSessions.filter(row => {
     const d = new Date(row.date);
     if (d < start || d > end) return false;
     const emp = employeesById[row.employee_id];
@@ -208,7 +214,7 @@ export function computePeriodTotals({
   const processedLeave = new Map();
   const resolveLeaveValue = createLeaveDayValueResolver({
     employees,
-    workSessions,
+    workSessions: baseSessions,
     services,
     leavePayPolicy,
     settings,
@@ -305,6 +311,7 @@ export function computePeriodTotals({
 }
 
 function entryMatchesFilters(row, emp, filters = {}) {
+  if (!row || row.deleted) return false;
   const { dateFrom, dateTo, selectedEmployee, employeeType = 'all', serviceId = 'all' } = filters;
   if (dateFrom && new Date(row.date) < new Date(dateFrom)) return false;
   if (dateTo && new Date(row.date) > new Date(dateTo)) return false;
@@ -317,6 +324,7 @@ function entryMatchesFilters(row, emp, filters = {}) {
 export function sumHourlyHours(entries = [], employees = [], filters = {}) {
   const byId = Object.fromEntries(employees.map(e => [e.id, e]));
   return entries.reduce((sum, row) => {
+    if (!row || row.deleted) return sum;
     const emp = byId[row.employee_id];
     if (!emp || emp.employee_type !== 'hourly') return sum;
     if (!entryMatchesFilters(row, emp, filters)) return sum;
@@ -330,6 +338,7 @@ export function countGlobalEffectiveDays(entries = [], employees = [], filters =
   const byId = Object.fromEntries(employees.map(e => [e.id, e]));
   const days = new Set();
   entries.forEach(row => {
+    if (!row || row.deleted) return;
     const emp = byId[row.employee_id];
     if (!emp || emp.employee_type !== 'global') return;
     if (!entryMatchesFilters(row, emp, filters)) return;
@@ -342,9 +351,10 @@ export function countGlobalEffectiveDays(entries = [], employees = [], filters =
 
 export function sumInstructorSessions(entries = [], services = [], employees = [], filters = {}) {
   const serviceSet = new Set(services.map(s => s.id));
-  
+
   const byId = Object.fromEntries(employees.map(e => [e.id, e]));
   return entries.reduce((sum, row) => {
+    if (!row || row.deleted) return sum;
     const emp = byId[row.employee_id];
     if (!emp || emp.employee_type !== 'instructor') return sum;
     if (!serviceSet.has(row.service_id)) return sum;
