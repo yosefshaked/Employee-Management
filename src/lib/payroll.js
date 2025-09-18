@@ -236,12 +236,17 @@ export function computePeriodTotals({
       perEmp[row.employee_id] = { employee_id: row.employee_id, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
     }
     const bucket = perEmp[row.employee_id];
-    if (emp.employee_type === 'global') {
-      if (row.entry_type === 'hours') {
-        const hours = row.hours || 0;
-        result.totalHours += hours;
-        bucket.hours += hours;
-      }
+    const isGlobal = emp.employee_type === 'global';
+    if (isGlobal && row.entry_type === 'hours') {
+      const hours = row.hours || 0;
+      result.totalHours += hours;
+      bucket.hours += hours;
+      return;
+    }
+    if (isGlobal && isLeaveEntryType(row.entry_type)) {
+      return;
+    }
+    if (isGlobal && row.entry_type !== 'adjustment' && row.entry_type !== 'hours') {
       return;
     }
     if (isLeaveEntryType(row.entry_type)) {
