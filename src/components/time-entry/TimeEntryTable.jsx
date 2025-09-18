@@ -17,7 +17,16 @@ import {
   resolveLeaveSessionValue,
 } from '@/lib/payroll.js';
 import { Badge } from '@/components/ui/badge';
-import { HOLIDAY_TYPE_LABELS, getLeaveKindFromEntryType, inferLeaveType, isLeaveEntryType } from '@/lib/leave.js';
+import {
+  HOLIDAY_TYPE_LABELS,
+  MIXED_SUBTYPE_LABELS,
+  DEFAULT_MIXED_SUBTYPE,
+  getLeaveKindFromEntryType,
+  inferLeaveType,
+  isLeaveEntryType,
+  parseMixedLeaveDetails,
+  normalizeMixedSubtype,
+} from '@/lib/leave.js';
 import { selectLeaveDayValue } from '@/selectors.js';
 function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, services, getRateForDate, onTableSubmit, onImported, onDeleted, leavePolicy, leavePayPolicy }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -273,10 +282,18 @@ function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, 
                                     ? (HOLIDAY_TYPE_LABELS[inferredType] || inferredType)
                                     : (leaveKind ? (HOLIDAY_TYPE_LABELS[leaveKind] || leaveKind) : null);
                                   if (inferredType === 'mixed' || leaveKind === 'mixed') {
-                                    const isPaid = paidLeave.payable !== false;
-                                    const status = isPaid ? 'בתשלום' : 'לא בתשלום';
-                                    summaryText = `מעורב · ${status}`;
-                                    leaveLabel = `מעורב · ${status}`;
+                                    const mixedDetails = parseMixedLeaveDetails(paidLeave);
+                                    const resolvedSubtype = normalizeMixedSubtype(mixedDetails.subtype) || DEFAULT_MIXED_SUBTYPE;
+                                    const subtypeLabel = MIXED_SUBTYPE_LABELS[resolvedSubtype] || null;
+                                    const isPaid = mixedDetails.paid === null ? (paidLeave.payable !== false) : mixedDetails.paid;
+                                    const parts = [
+                                      'מעורב',
+                                      subtypeLabel,
+                                      isPaid ? 'בתשלום' : 'ללא תשלום',
+                                      isPaid && mixedDetails.halfDay ? 'חצי יום' : null,
+                                    ].filter(Boolean);
+                                    summaryText = parts.join(' · ') || 'מעורב';
+                                    leaveLabel = summaryText;
                                   } else {
                                     summaryText = leaveLabel || 'חופשה';
                                   }
@@ -314,7 +331,14 @@ function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, 
                                               const inferredType = inferLeaveType(paidLeave);
                                               payload.leaveType = inferredType || leaveKind || null;
                                               if (leaveKind === 'mixed') {
-                                                payload.mixedPaid = paidLeave.payable !== false;
+                                                const mixedDetails = parseMixedLeaveDetails(paidLeave);
+                                                const resolvedSubtype = normalizeMixedSubtype(mixedDetails.subtype) || DEFAULT_MIXED_SUBTYPE;
+                                                const isPaid = mixedDetails.paid === null
+                                                  ? (paidLeave.payable !== false)
+                                                  : mixedDetails.paid;
+                                                payload.mixedPaid = isPaid;
+                                                payload.mixedSubtype = resolvedSubtype;
+                                                payload.mixedHalfDay = isPaid && mixedDetails.halfDay === true;
                                               }
                                             }
                                             setEditingCell(payload);
@@ -424,6 +448,8 @@ function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, 
               allowDayTypeSelection
               allowHalfDay={leavePolicy?.allow_half_day}
               initialMixedPaid={editingCell.mixedPaid}
+              initialMixedSubtype={editingCell.mixedSubtype}
+              initialMixedHalfDay={editingCell.mixedHalfDay}
               leavePayPolicy={leavePayPolicy}
               onSubmit={async (result) => {
                 if (!result) {
@@ -440,6 +466,8 @@ function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, 
                     paidLeaveNotes: result.paidLeaveNotes,
                     leaveType: result.leaveType,
                     mixedPaid: result.mixedPaid,
+                    mixedSubtype: result.mixedSubtype,
+                    mixedHalfDay: result.mixedHalfDay,
                   });
                   setEditingCell(null);
                 } catch {
@@ -484,6 +512,7 @@ function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, 
           getRateForDate={getRateForDate}
           workSessions={contextSessions}
           leavePayPolicy={leavePayPolicy}
+          allowHalfDay={leavePolicy?.allow_half_day}
           onSaved={() => {
             onImported();
             setSelectedDates([]);

@@ -21,10 +21,15 @@ import {
   LEAVE_PAY_METHOD_DESCRIPTIONS,
   LEAVE_PAY_METHOD_LABELS,
   LEAVE_TYPE_OPTIONS,
+  MIXED_SUBTYPE_OPTIONS,
+  MIXED_SUBTYPE_LABELS,
+  DEFAULT_MIXED_SUBTYPE,
   getLeaveBaseKind,
   isPayableLeaveKind,
   normalizeLeavePayPolicy,
+  normalizeMixedSubtype,
 } from '@/lib/leave.js';
+import { Switch } from '@/components/ui/switch';
 
 const VALID_LEAVE_PAY_METHODS = new Set(Object.keys(LEAVE_PAY_METHOD_LABELS));
 
@@ -45,6 +50,8 @@ export default function TimeEntryForm({
   initialLeaveType = null,
   allowHalfDay = false,
   initialMixedPaid = true,
+  initialMixedSubtype = DEFAULT_MIXED_SUBTYPE,
+  initialMixedHalfDay = false,
   leavePayPolicy = DEFAULT_LEAVE_PAY_POLICY,
 }) {
   const isGlobal = employee.employee_type === 'global';
@@ -63,6 +70,17 @@ export default function TimeEntryForm({
   const [mixedPaid, setMixedPaid] = useState(
     initialLeaveType === 'mixed' ? (initialMixedPaid !== false) : true
   );
+  const [mixedSubtype, setMixedSubtype] = useState(() => {
+    if (initialLeaveType === 'mixed') {
+      return normalizeMixedSubtype(initialMixedSubtype) || DEFAULT_MIXED_SUBTYPE;
+    }
+    return DEFAULT_MIXED_SUBTYPE;
+  });
+  const [mixedHalfDay, setMixedHalfDay] = useState(() => (
+    initialLeaveType === 'mixed' && initialMixedPaid !== false
+      ? Boolean(initialMixedHalfDay)
+      : false
+  ));
   const [errors, setErrors] = useState({});
   const [pendingDelete, setPendingDelete] = useState(null);
 
@@ -80,10 +98,28 @@ export default function TimeEntryForm({
   }, [allowHalfDay, leaveType, leaveTypeOptions]);
 
   useEffect(() => {
+    if (!allowHalfDay && mixedHalfDay) {
+      setMixedHalfDay(false);
+    }
+  }, [allowHalfDay, mixedHalfDay]);
+
+  useEffect(() => {
     if (initialLeaveType === 'mixed') {
       setMixedPaid(initialMixedPaid !== false);
+      setMixedSubtype(normalizeMixedSubtype(initialMixedSubtype) || DEFAULT_MIXED_SUBTYPE);
+      setMixedHalfDay(initialMixedPaid !== false ? Boolean(initialMixedHalfDay) : false);
     }
-  }, [initialLeaveType, initialMixedPaid]);
+  }, [initialLeaveType, initialMixedPaid, initialMixedSubtype, initialMixedHalfDay]);
+
+  useEffect(() => {
+    if (leaveType !== 'mixed') return;
+    if (!normalizeMixedSubtype(mixedSubtype)) {
+      setMixedSubtype(DEFAULT_MIXED_SUBTYPE);
+    }
+    if (!mixedPaid && mixedHalfDay) {
+      setMixedHalfDay(false);
+    }
+  }, [leaveType, mixedSubtype, mixedPaid, mixedHalfDay]);
 
   const dailyRate = useMemo(() => {
     if (!isGlobal) return 0;
@@ -162,7 +198,8 @@ export default function TimeEntryForm({
   const showInsufficientHistoryHint = leaveDayValueInfo.insufficientData;
   const showPreStartWarning = leaveDayValueInfo.preStartDate;
 
-  const isHalfDaySelection = leaveKindForPay === 'half_day';
+  const isMixedHalfDay = leaveType === 'mixed' && mixedPaid && mixedHalfDay && allowHalfDay;
+  const isHalfDaySelection = leaveType === 'half_day' || isMixedHalfDay;
 
   const addSeg = () => setSegments(prev => [...prev, createSeg()]);
   const duplicateSeg = (id) => {
@@ -258,13 +295,26 @@ export default function TimeEntryForm({
         toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 10000 });
         return;
       }
+      if (leaveType === 'mixed') {
+        const normalizedSubtype = normalizeMixedSubtype(mixedSubtype);
+        if (!normalizedSubtype) {
+          toast.error('יש לבחור סוג חופשה מעורבת.', { duration: 15000 });
+          return;
+        }
+      }
       onSubmit({
         rows: [],
         dayType,
         paidLeaveId,
         paidLeaveNotes,
         leaveType,
-        mixedPaid: leaveType === 'mixed' ? mixedPaid : null
+        mixedPaid: leaveType === 'mixed' ? mixedPaid : null,
+        mixedSubtype: leaveType === 'mixed'
+          ? (normalizeMixedSubtype(mixedSubtype) || DEFAULT_MIXED_SUBTYPE)
+          : null,
+        mixedHalfDay: leaveType === 'mixed'
+          ? (mixedPaid && allowHalfDay ? Boolean(mixedHalfDay) : false)
+          : null,
       });
       return;
     }
@@ -292,19 +342,52 @@ export default function TimeEntryForm({
     if (!leaveType) {
       return 'בחרו סוג חופשה כדי לחשב שווי.';
     }
+    const resolvedMixedSubtype = normalizeMixedSubtype(mixedSubtype) || DEFAULT_MIXED_SUBTYPE;
+    const mixedSubtypeLabel = MIXED_SUBTYPE_LABELS[resolvedMixedSubtype] || null;
     if (leaveType === 'mixed' && !mixedPaid) {
-      return 'היום המעורב סומן כלא משולם.';
+      const details = ['מעורב', mixedSubtypeLabel, 'ללא תשלום'].filter(Boolean).join(' · ');
+      return (
+        <>
+          <div className="text-base font-medium text-slate-900">היום המעורב סומן כחופשה ללא תשלום.</div>
+          {details ? (
+            <div className="text-xs text-slate-600 text-right">{details}</div>
+          ) : null}
+        </>
+      );
     }
     if (!isPaidLeavePreview) {
-      return 'היום סומן כחופשה ללא תשלום.';
+      const details = leaveType === 'mixed'
+        ? ['מעורב', mixedSubtypeLabel, 'ללא תשלום'].filter(Boolean).join(' · ')
+        : null;
+      return (
+        <>
+          <div className="text-base font-medium text-slate-900">היום סומן כחופשה ללא תשלום.</div>
+          {details ? (
+            <div className="text-xs text-slate-600 text-right">{details}</div>
+          ) : null}
+        </>
+      );
     }
     const value = Number.isFinite(leaveDayValue) ? leaveDayValue : 0;
     const baseAmount = isHalfDaySelection ? value / 2 : value;
     const amount = showPreStartWarning ? 0 : baseAmount;
-    const headline = isHalfDaySelection ? 'שווי חצי יום חופשה' : 'שווי יום חופשה';
+    const headline = leaveType === 'mixed'
+      ? (isMixedHalfDay ? 'שווי חצי יום חופשה מעורבת' : 'שווי יום חופשה מעורבת')
+      : (isHalfDaySelection ? 'שווי חצי יום חופשה' : 'שווי יום חופשה');
+    const detailParts = leaveType === 'mixed'
+      ? [
+        'מעורב',
+        mixedSubtypeLabel,
+        mixedPaid ? 'בתשלום' : null,
+        mixedPaid && mixedHalfDay ? 'חצי יום' : null,
+      ].filter(Boolean)
+      : null;
     return (
       <>
         <div className="text-base font-medium text-slate-900">{`${headline}: ₪${amount.toFixed(2)}`}</div>
+        {detailParts?.length ? (
+          <div className="text-xs text-slate-600 text-right">{detailParts.join(' · ')}</div>
+        ) : null}
         <div className="flex items-center justify-end gap-2 text-xs text-slate-600">
           <span>{`שיטה: ${leaveMethodLabel}`}</span>
           {leaveMethodDescription ? <InfoTooltip text={leaveMethodDescription} /> : null}
@@ -325,9 +408,12 @@ export default function TimeEntryForm({
     isLeaveDay,
     leaveType,
     mixedPaid,
+    mixedHalfDay,
+    mixedSubtype,
     isPaidLeavePreview,
     leaveDayValue,
     isHalfDaySelection,
+    isMixedHalfDay,
     leaveMethodLabel,
     leaveMethodDescription,
     showInsufficientHistoryHint,
@@ -412,26 +498,70 @@ export default function TimeEntryForm({
         />
       </div>
       {leaveType === 'mixed' && (
-        <div className="space-y-1">
-          <Label className="text-sm font-medium text-slate-700">האם היום המעורב בתשלום?</Label>
-          <div className="flex gap-2" role="radiogroup" aria-label="האם היום המעורב בתשלום?">
-            <Button
-              type="button"
-              variant={mixedPaid ? 'default' : 'ghost'}
-              className="flex-1 h-10"
-              onClick={() => setMixedPaid(true)}
-            >
-              כן
-            </Button>
-            <Button
-              type="button"
-              variant={!mixedPaid ? 'default' : 'ghost'}
-              className="flex-1 h-10"
-              onClick={() => setMixedPaid(false)}
-            >
-              לא
-            </Button>
+        <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <div className="text-sm font-semibold text-slate-800">הגדרות חופשה מעורבת</div>
+          <div className="space-y-1">
+            <Label className="text-sm font-medium text-slate-700">סוג חופשה</Label>
+            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="סוג חופשה">
+              {MIXED_SUBTYPE_OPTIONS.map(option => {
+                const isActive = normalizeMixedSubtype(mixedSubtype) === option.value;
+                return (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    variant={isActive ? 'default' : 'ghost'}
+                    className="h-10 w-full"
+                    onClick={() => setMixedSubtype(option.value)}
+                  >
+                    {option.label}
+                  </Button>
+                );
+              })}
+            </div>
           </div>
+          <div className="space-y-1">
+            <Label className="text-sm font-medium text-slate-700">תשלום</Label>
+            <div className="flex gap-2" role="radiogroup" aria-label="תשלום">
+              <Button
+                type="button"
+                variant={mixedPaid ? 'default' : 'ghost'}
+                className="flex-1 h-10"
+                onClick={() => setMixedPaid(true)}
+              >
+                בתשלום
+              </Button>
+              <Button
+                type="button"
+                variant={!mixedPaid ? 'default' : 'ghost'}
+                className="flex-1 h-10"
+                onClick={() => {
+                  setMixedPaid(false);
+                  setMixedHalfDay(false);
+                }}
+              >
+                ללא תשלום
+              </Button>
+            </div>
+          </div>
+          <div className="flex items-center justify-between rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+            <div>
+              <div className="text-sm font-medium text-slate-700">חצי יום</div>
+              <div className="text-xs text-slate-500">
+                {allowHalfDay ? 'זמין רק לחופשה בתשלום' : 'חצי יום מושבת במדיניות החופשות'}
+              </div>
+            </div>
+            <Switch
+              checked={mixedHalfDay}
+              onCheckedChange={checked => setMixedHalfDay(checked)}
+              disabled={!mixedPaid || !allowHalfDay}
+              aria-label="חצי יום"
+            />
+          </div>
+          {!allowHalfDay ? (
+            <div className="text-xs text-slate-500">
+              להפעלת חצי יום, עדכנו את הגדרת המדיניות במסך ההגדרות.
+            </div>
+          ) : null}
         </div>
       )}
     </div>

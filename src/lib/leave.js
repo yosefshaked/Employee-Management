@@ -51,6 +51,22 @@ export const LEAVE_PAY_METHOD_DESCRIPTIONS = LEAVE_PAY_METHOD_OPTIONS.reduce((ac
 const LEAVE_PAY_METHOD_VALUES = new Set(LEAVE_PAY_METHOD_OPTIONS.map(option => option.value));
 
 const UNPAID_SUBTYPE_SET = new Set(['holiday_unpaid', 'vacation_unpaid']);
+const MIXED_SUBTYPE_SET = new Set(['holiday', 'vacation']);
+
+function coerceBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) return null;
+    if (['true', '1', 'yes', 'paid'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'unpaid'].includes(normalized)) return false;
+  }
+  return null;
+}
 
 function normalizeLeaveToken(value) {
   if (typeof value !== 'string') return null;
@@ -78,6 +94,26 @@ export const HOLIDAY_TYPE_LABELS = LEAVE_TYPE_OPTIONS.reduce((acc, option) => {
   acc[option.value] = option.label;
   return acc;
 }, {});
+
+export const MIXED_SUBTYPE_OPTIONS = [
+  { value: 'holiday', label: 'חג' },
+  { value: 'vacation', label: 'חופשה' },
+];
+
+export const MIXED_SUBTYPE_LABELS = MIXED_SUBTYPE_OPTIONS.reduce((acc, option) => {
+  acc[option.value] = option.label;
+  return acc;
+}, {});
+
+export const DEFAULT_MIXED_SUBTYPE = MIXED_SUBTYPE_OPTIONS[0]?.value || 'holiday';
+
+export function normalizeMixedSubtype(value) {
+  const normalized = normalizeLeaveToken(value);
+  if (!normalized) return null;
+  if (normalized.startsWith('holiday')) return 'holiday';
+  if (normalized.startsWith('vacation')) return 'vacation';
+  return MIXED_SUBTYPE_SET.has(normalized) ? normalized : null;
+}
 
 export function getLeaveSubtypeFromValue(value) {
   const normalized = normalizeLeaveToken(value);
@@ -215,6 +251,69 @@ export function inferLeaveType(details = {}) {
     return 'vacation_unpaid';
   }
   return base;
+}
+
+export function parseMixedLeaveDetails(details = {}) {
+  const metadata = parseLeaveMetadata(details.metadata);
+  const subtypeCandidates = [
+    details.mixed_subtype,
+    details.mixedSubtype,
+    details.leave_subtype,
+    details.leaveSubtype,
+    metadata?.leave?.subtype,
+    metadata?.leave_subtype,
+    metadata?.leaveSubtype,
+  ];
+  let subtype = null;
+  for (const candidate of subtypeCandidates) {
+    const normalized = normalizeMixedSubtype(candidate);
+    if (normalized) {
+      subtype = normalized;
+      break;
+    }
+  }
+  const paidCandidates = [
+    details.mixed_paid,
+    details.mixedPaid,
+    details.paid,
+    details.payable,
+    metadata?.leave?.mixed_paid,
+    metadata?.leave?.paid,
+    metadata?.leave?.payable,
+  ];
+  let paid = null;
+  for (const candidate of paidCandidates) {
+    const coerced = coerceBoolean(candidate);
+    if (coerced !== null) {
+      paid = coerced;
+      break;
+    }
+  }
+  const halfDayCandidates = [
+    details.mixed_half_day,
+    details.mixedHalfDay,
+    details.half_day,
+    details.halfDay,
+    metadata?.leave?.half_day,
+    metadata?.leave_half_day,
+    metadata?.leaveHalfDay,
+  ];
+  let halfDay = null;
+  for (const candidate of halfDayCandidates) {
+    const coerced = coerceBoolean(candidate);
+    if (coerced !== null) {
+      halfDay = coerced;
+      break;
+    }
+  }
+  if (paid === false) {
+    halfDay = false;
+  }
+  return {
+    subtype: subtype || null,
+    paid: paid === null ? null : paid,
+    halfDay: halfDay === null ? false : halfDay,
+  };
 }
 
 function parseLeaveMetadata(value) {

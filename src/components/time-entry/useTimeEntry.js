@@ -8,6 +8,8 @@ import {
   getLeaveValueMultiplier,
   isLeaveEntryType,
   resolveLeavePayMethodContext,
+  normalizeMixedSubtype,
+  DEFAULT_MIXED_SUBTYPE,
 } from '../../lib/leave.js';
 import {
   buildLeaveMetadata,
@@ -242,7 +244,14 @@ export function useTimeEntry({
         continue;
       }
       const isPaid = item.paid !== false;
-      const leaveFraction = leaveType === 'half_day' ? 0.5 : 1;
+      const mixedSubtype = leaveType === 'mixed'
+        ? (normalizeMixedSubtype(item.subtype) || DEFAULT_MIXED_SUBTYPE)
+        : null;
+      const leaveFraction = leaveType === 'half_day'
+        ? 0.5
+        : (leaveType === 'mixed'
+          ? (isPaid && item.half_day === true ? 0.5 : 1)
+          : 1);
       let rateUsed = null;
       let totalPayment = 0;
       if (isPaid) {
@@ -288,9 +297,10 @@ export function useTimeEntry({
           source: 'multi_date_leave',
           leaveType,
           leaveKind: leaveType,
+          subtype: leaveType === 'mixed' ? mixedSubtype : getLeaveSubtypeFromValue(leaveType),
           payable: isPaid,
-          fraction: leaveFraction,
-          halfDay: leaveType === 'half_day',
+          fraction: isPaid ? leaveFraction : null,
+          halfDay: leaveType === 'half_day' || (leaveType === 'mixed' && isPaid && item.half_day === true),
           mixedPaid: leaveType === 'mixed' ? Boolean(isPaid) : null,
           method: payContext.method,
           lookbackMonths: payContext.lookback_months,

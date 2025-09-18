@@ -25,6 +25,8 @@ import {
   getLeaveBaseKind,
   getLeaveSubtypeFromValue,
   resolveLeavePayMethodContext,
+  normalizeMixedSubtype,
+  DEFAULT_MIXED_SUBTYPE,
 } from '@/lib/leave.js';
 import { selectLeaveDayValue, selectLeaveRemaining } from '@/selectors.js';
 import {
@@ -189,7 +191,18 @@ export default function TimeEntry() {
   };
 
 
-  const handleTableSubmit = async ({ employee, day, dayType, updatedRows, paidLeaveId, paidLeaveNotes, leaveType, mixedPaid }) => {
+  const handleTableSubmit = async ({
+    employee,
+    day,
+    dayType,
+    updatedRows,
+    paidLeaveId,
+    paidLeaveNotes,
+    leaveType,
+    mixedPaid,
+    mixedSubtype,
+    mixedHalfDay,
+  }) => {
     setIsLoading(true);
     try {
       const canWriteMetadata = await canUseWorkSessionMetadata(supabase);
@@ -342,7 +355,11 @@ export default function TimeEntry() {
         }
 
         const baseLeaveKind = getLeaveBaseKind(leaveType) || leaveType;
-        const leaveSubtype = getLeaveSubtypeFromValue(leaveType);
+        const isMixed = baseLeaveKind === 'mixed';
+        const resolvedMixedSubtype = isMixed
+          ? (normalizeMixedSubtype(mixedSubtype) || DEFAULT_MIXED_SUBTYPE)
+          : null;
+        const leaveSubtype = isMixed ? null : getLeaveSubtypeFromValue(leaveType);
         const entryType = getEntryTypeForLeaveKind(baseLeaveKind) || getEntryTypeForLeaveKind('system_paid');
         if (!entryType) {
           toast.error('סוג חופשה לא נתמך', { duration: 15000 });
@@ -372,10 +389,13 @@ export default function TimeEntry() {
           }
         }
 
-        const isMixed = baseLeaveKind === 'mixed';
         const mixedIsPaid = isMixed ? (mixedPaid !== false) : false;
+        const mixedHalfDayRequested = isMixed && mixedIsPaid && mixedHalfDay === true;
+        const mixedHalfDayEnabled = mixedHalfDayRequested && leavePolicy.allow_half_day;
         const isPayable = isMixed ? mixedIsPaid : isPayableLeaveKind(baseLeaveKind);
-        const leaveFraction = baseLeaveKind === 'half_day' ? 0.5 : 1;
+        const leaveFraction = baseLeaveKind === 'half_day'
+          ? 0.5
+          : (isMixed ? (mixedHalfDayEnabled ? 0.5 : 1) : 1);
         let rateUsed = 0;
         let totalPayment = 0;
         let resolvedLeaveValue = 0;
@@ -447,10 +467,10 @@ export default function TimeEntry() {
             source: 'table',
             leaveType: baseLeaveKind,
             leaveKind: baseLeaveKind,
-            subtype: leaveSubtype,
+            subtype: isMixed ? resolvedMixedSubtype : leaveSubtype,
             payable: isPayable,
-            fraction: leaveFraction,
-            halfDay: baseLeaveKind === 'half_day',
+            fraction: isPayable ? leaveFraction : null,
+            halfDay: baseLeaveKind === 'half_day' || mixedHalfDayEnabled,
             mixedPaid: isMixed ? mixedIsPaid : null,
             method: payContext.method,
             lookbackMonths: payContext.lookback_months,

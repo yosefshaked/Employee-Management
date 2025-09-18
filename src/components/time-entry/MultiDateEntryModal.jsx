@@ -13,7 +13,14 @@ import { ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import he from '@/i18n/he.json';
 import { calculateGlobalDailyRate, aggregateGlobalDays, createLeaveDayValueResolver } from '@/lib/payroll.js';
-import { isLeaveEntryType, LEAVE_TYPE_OPTIONS } from '@/lib/leave.js';
+import {
+  isLeaveEntryType,
+  LEAVE_TYPE_OPTIONS,
+  MIXED_SUBTYPE_OPTIONS,
+  DEFAULT_MIXED_SUBTYPE,
+  normalizeMixedSubtype,
+} from '@/lib/leave.js';
+import { Switch } from '@/components/ui/switch';
 import { selectLeaveDayValue } from '@/selectors.js';
 
 function validateRow(row, employee, services, getRateForDate) {
@@ -54,6 +61,7 @@ export default function MultiDateEntryModal({
   onSaved,
   workSessions = [],
   leavePayPolicy = null,
+  allowHalfDay = false,
 }) {
   const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees]);
   const initialRows = useMemo(() => {
@@ -105,6 +113,13 @@ export default function MultiDateEntryModal({
   const handleModeChange = useCallback((nextMode) => {
     setMode(nextMode);
   }, []);
+  const defaultMixedSubtype = DEFAULT_MIXED_SUBTYPE;
+  const ensureMixedSelection = useCallback((value = {}) => {
+    const paid = value && value.paid !== false;
+    const subtype = normalizeMixedSubtype(value?.subtype) || defaultMixedSubtype;
+    const halfDay = allowHalfDay && paid ? Boolean(value?.halfDay) : false;
+    return { paid, subtype, halfDay };
+  }, [allowHalfDay, defaultMixedSubtype]);
   const leaveTypeOptions = useMemo(
     () => LEAVE_TYPE_OPTIONS.filter(option => option.value === 'mixed'),
     []
@@ -120,19 +135,23 @@ export default function MultiDateEntryModal({
     () => [...selectedDates].sort((a, b) => a - b),
     [selectedDates]
   );
+  const [globalMixedSubtype, setGlobalMixedSubtype] = useState(DEFAULT_MIXED_SUBTYPE);
   const defaultMixedSelections = useMemo(() => {
     const base = {};
     selectedEmployees.forEach(empId => {
       const inner = {};
       sortedDates.forEach(d => {
-        inner[format(d, 'yyyy-MM-dd')] = true;
+        inner[format(d, 'yyyy-MM-dd')] = ensureMixedSelection();
       });
       base[empId] = inner;
     });
     return base;
-  }, [selectedEmployees, sortedDates]);
+  }, [selectedEmployees, sortedDates, ensureMixedSelection]);
   const [mixedSelections, setMixedSelections] = useState(defaultMixedSelections);
-  useEffect(() => { setMixedSelections(defaultMixedSelections); }, [defaultMixedSelections]);
+  useEffect(() => {
+    setMixedSelections(defaultMixedSelections);
+    setGlobalMixedSubtype(DEFAULT_MIXED_SUBTYPE);
+  }, [defaultMixedSelections]);
 
   const validation = useMemo(
     () => rows.map(r => validateRow(r, employeesById[r.employee_id], services, getRateForDate)),
@@ -240,23 +259,75 @@ export default function MultiDateEntryModal({
     }
   }, [mode]);
 
-  const toggleMixedSelection = (empId, dateStr, paid) => {
+  const updateMixedSelection = useCallback((empId, dateStr, updater) => {
     setMixedSelections(prev => {
       const next = { ...prev };
       const current = { ...(next[empId] || {}) };
-      current[dateStr] = paid;
+      const existing = ensureMixedSelection(current[dateStr]);
+      const updated = typeof updater === 'function'
+        ? ensureMixedSelection(updater(existing))
+        : ensureMixedSelection({ ...existing, ...updater });
+      current[dateStr] = updated;
       next[empId] = current;
+      return next;
+    });
+  }, [ensureMixedSelection]);
+
+  const toggleMixedSelection = (empId, dateStr, paid) => {
+    updateMixedSelection(empId, dateStr, current => ({
+      ...current,
+      paid,
+      halfDay: paid ? current.halfDay : false,
+    }));
+  };
+
+  const markAllMixed = (paid) => {
+    setMixedSelections(prev => {
+      const next = {};
+      selectedEmployees.forEach(empId => {
+        const inner = { ...(prev[empId] || {}) };
+        sortedDates.forEach(d => {
+          const dateStr = format(d, 'yyyy-MM-dd');
+          const current = ensureMixedSelection(inner[dateStr]);
+          inner[dateStr] = ensureMixedSelection({
+            ...current,
+            paid,
+            halfDay: paid ? current.halfDay : false,
+          });
+        });
+        next[empId] = inner;
+      });
       return next;
     });
   };
 
-  const markAllMixed = (paid) => {
-    setMixedSelections(() => {
+  const applySubtypeToAll = (subtype) => {
+    const normalized = normalizeMixedSubtype(subtype) || DEFAULT_MIXED_SUBTYPE;
+    setMixedSelections(prev => {
       const next = {};
       selectedEmployees.forEach(empId => {
-        const inner = {};
+        const inner = { ...(prev[empId] || {}) };
         sortedDates.forEach(d => {
-          inner[format(d, 'yyyy-MM-dd')] = paid;
+          const dateStr = format(d, 'yyyy-MM-dd');
+          const current = ensureMixedSelection(inner[dateStr]);
+          inner[dateStr] = { ...current, subtype: normalized };
+        });
+        next[empId] = inner;
+      });
+      return next;
+    });
+  };
+
+  const applyHalfDayToPaid = () => {
+    if (!allowHalfDay) return;
+    setMixedSelections(prev => {
+      const next = {};
+      selectedEmployees.forEach(empId => {
+        const inner = { ...(prev[empId] || {}) };
+        sortedDates.forEach(d => {
+          const dateStr = format(d, 'yyyy-MM-dd');
+          const current = ensureMixedSelection(inner[dateStr]);
+          inner[dateStr] = current.paid ? { ...current, halfDay: true } : current;
         });
         next[empId] = inner;
       });
@@ -364,8 +435,14 @@ export default function MultiDateEntryModal({
       const map = mixedSelections[empId] || {};
       sortedDates.forEach(d => {
         const dateStr = format(d, 'yyyy-MM-dd');
-        const paid = map[dateStr] !== false;
-        selections.push({ employee_id: empId, date: dateStr, paid });
+        const entry = ensureMixedSelection(map[dateStr]);
+        selections.push({
+          employee_id: empId,
+          date: dateStr,
+          paid: entry.paid,
+          subtype: entry.subtype,
+          half_day: entry.paid ? entry.halfDay : false,
+        });
       });
     });
     if (!selections.length) {
@@ -533,7 +610,7 @@ export default function MultiDateEntryModal({
                 </>
               ) : (
                 <div className="space-y-4">
-                  <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
+                  <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:items-end">
                     <div className="space-y-1">
                       <Label className="text-sm font-medium text-slate-700">סוג חופשה</Label>
                       <Select value={selectedLeaveType} onValueChange={setSelectedLeaveType}>
@@ -547,9 +624,49 @@ export default function MultiDateEntryModal({
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="flex gap-2">
-                      <Button type="button" className="flex-1" onClick={() => markAllMixed(true)}>סמן הכל כבתשלום</Button>
-                      <Button type="button" variant="outline" className="flex-1" onClick={() => markAllMixed(false)}>סמן הכל כלא בתשלום</Button>
+                    <div className="flex flex-wrap gap-2 justify-end">
+                      <Button type="button" onClick={() => markAllMixed(true)}>סמן הכל כבתשלום</Button>
+                      <Button type="button" variant="outline" onClick={() => markAllMixed(false)}>סמן הכל כלא בתשלום</Button>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:items-end">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">סוג חופשה (ברירת מחדל)</Label>
+                      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="סוג חופשה מעורבת">
+                        {MIXED_SUBTYPE_OPTIONS.map(option => {
+                          const active = globalMixedSubtype === option.value;
+                          return (
+                            <Button
+                              key={option.value}
+                              type="button"
+                              variant={active ? 'default' : 'ghost'}
+                              className="h-10"
+                              onClick={() => {
+                                setGlobalMixedSubtype(option.value);
+                                applySubtypeToAll(option.value);
+                              }}
+                            >
+                              {option.label}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-slate-500">ניתן לשנות לכל יום בנפרד ברשימה למטה.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 justify-end">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={applyHalfDayToPaid}
+                        disabled={!allowHalfDay}
+                      >
+                        סמן חצי יום לכל הימים בתשלום
+                      </Button>
+                      {!allowHalfDay ? (
+                        <p className="text-xs text-slate-500">
+                          חצי יום מושבת במדיניות החופשות.
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                   <div className="space-y-4">
@@ -573,30 +690,62 @@ export default function MultiDateEntryModal({
                               )}
                               {sortedDates.map(d => {
                                 const dateStr = format(d, 'yyyy-MM-dd');
-                                const paid = map[dateStr] !== false;
+                                const entry = ensureMixedSelection(map[dateStr]);
+                                const paid = entry.paid;
+                                const subtypeValue = entry.subtype;
+                                const halfDay = entry.halfDay;
                                 return (
                                   <div
                                     key={`${empId}-${dateStr}`}
-                                    className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200"
+                                    className="space-y-2 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200"
                                   >
-                                    <span className="text-sm font-medium text-slate-700">{format(d, 'dd/MM/yyyy')}</span>
-                                    <div className="flex gap-2" role="radiogroup" aria-label={`האם ${format(d, 'dd/MM/yyyy')} בתשלום?`}>
-                                      <Button
-                                        type="button"
-                                        variant={paid ? 'default' : 'ghost'}
-                                        className="h-9"
-                                        onClick={() => toggleMixedSelection(empId, dateStr, true)}
-                                      >
-                                        בתשלום
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        variant={!paid ? 'default' : 'ghost'}
-                                        className="h-9"
-                                        onClick={() => toggleMixedSelection(empId, dateStr, false)}
-                                      >
-                                        לא בתשלום
-                                      </Button>
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                      <span className="text-sm font-medium text-slate-700">{format(d, 'dd/MM/yyyy')}</span>
+                                      <div className="flex gap-2" role="radiogroup" aria-label={`האם ${format(d, 'dd/MM/yyyy')} בתשלום?`}>
+                                        <Button
+                                          type="button"
+                                          variant={paid ? 'default' : 'ghost'}
+                                          className="h-9"
+                                          onClick={() => toggleMixedSelection(empId, dateStr, true)}
+                                        >
+                                          בתשלום
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant={!paid ? 'default' : 'ghost'}
+                                          className="h-9"
+                                          onClick={() => toggleMixedSelection(empId, dateStr, false)}
+                                        >
+                                          ללא תשלום
+                                        </Button>
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs font-medium text-slate-600">סוג חופשה</span>
+                                        <Select
+                                          value={subtypeValue}
+                                          onValueChange={value => updateMixedSelection(empId, dateStr, { subtype: value })}
+                                        >
+                                          <SelectTrigger className="h-9 w-[120px] bg-white text-sm">
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {MIXED_SUBTYPE_OPTIONS.map(option => (
+                                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <span className={`text-xs font-medium ${paid ? 'text-slate-600' : 'text-slate-400'}`}>חצי יום</span>
+                                        <Switch
+                                          checked={allowHalfDay && paid ? halfDay : false}
+                                          disabled={!paid || !allowHalfDay}
+                                          onCheckedChange={checked => updateMixedSelection(empId, dateStr, { halfDay: checked })}
+                                          aria-label="חצי יום"
+                                        />
+                                      </div>
                                     </div>
                                   </div>
                                 );
