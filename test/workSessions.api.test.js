@@ -120,15 +120,33 @@ describe('workSessions API', () => {
     const calls = [];
     const fakeClient = {
       from(table) {
-        calls.push(table);
+        calls.push({ table, stage: 'from' });
         return {
-          delete() {
+          select(cols) {
+            calls.push({ table, action: 'select', cols });
             return {
               in(col, ids) {
-                calls.push({ col, ids });
+                calls.push({ table, action: 'select.in', col, ids });
+                return Promise.resolve({
+                  data: ids.map(id => ({
+                    id,
+                    employee_id: 'emp',
+                    date: '2024-01-01',
+                    entry_type: 'hours',
+                  })),
+                  error: null,
+                });
+              },
+            };
+          },
+          delete() {
+            calls.push({ table, action: 'delete' });
+            return {
+              in(col, ids) {
+                calls.push({ table, action: 'delete.in', col, ids });
                 return {
                   select(cols) {
-                    calls.push(cols);
+                    calls.push({ table, action: 'delete.select', cols });
                     return Promise.resolve({ data: ids.map(id => ({ id })), error: null });
                   },
                 };
@@ -141,12 +159,20 @@ describe('workSessions API', () => {
     await permanentlyDeleteWorkSession('a', fakeClient);
     await permanentlyDeleteWorkSessions(['a', 'b'], fakeClient);
     assert.deepStrictEqual(calls, [
-      'WorkSessions',
-      { col: 'id', ids: ['a'] },
-      'id',
-      'WorkSessions',
-      { col: 'id', ids: ['a', 'b'] },
-      'id',
+      { table: 'WorkSessions', stage: 'from' },
+      { table: 'WorkSessions', action: 'select', cols: '*' },
+      { table: 'WorkSessions', action: 'select.in', col: 'id', ids: ['a'] },
+      { table: 'WorkSessions', stage: 'from' },
+      { table: 'WorkSessions', action: 'delete' },
+      { table: 'WorkSessions', action: 'delete.in', col: 'id', ids: ['a'] },
+      { table: 'WorkSessions', action: 'delete.select', cols: 'id' },
+      { table: 'WorkSessions', stage: 'from' },
+      { table: 'WorkSessions', action: 'select', cols: '*' },
+      { table: 'WorkSessions', action: 'select.in', col: 'id', ids: ['a', 'b'] },
+      { table: 'WorkSessions', stage: 'from' },
+      { table: 'WorkSessions', action: 'delete' },
+      { table: 'WorkSessions', action: 'delete.in', col: 'id', ids: ['a', 'b'] },
+      { table: 'WorkSessions', action: 'delete.select', cols: 'id' },
     ]);
   });
 
@@ -190,5 +216,150 @@ describe('workSessions API', () => {
       },
     };
     await assert.rejects(() => softDeleteWorkSessions(['a'], fakeClient), /No rows deleted/);
+  });
+
+  it('soft delete removes leave ledger entries', async () => {
+    let deletedIds = null;
+    const fakeClient = {
+      from(table) {
+        if (table === 'WorkSessions') {
+          return {
+            update() {
+              return {
+                in(col, ids) {
+                  assert.strictEqual(col, 'id');
+                  return {
+                    select() {
+                      return Promise.resolve({
+                        data: ids.map(id => ({
+                          id,
+                          employee_id: 'emp1',
+                          date: '2024-01-01',
+                          entry_type: 'leave_employee_paid',
+                          notes: 'note',
+                        })),
+                        error: null,
+                      });
+                    },
+                  };
+                },
+              };
+            },
+          };
+        }
+        if (table === 'LeaveBalances') {
+          return {
+            select() {
+              return {
+                in(col, values) {
+                  assert.strictEqual(col, 'employee_id');
+                  assert.deepStrictEqual(values, ['emp1']);
+                  return {
+                    in(col2, values2) {
+                      assert.strictEqual(col2, 'effective_date');
+                      assert.deepStrictEqual(values2, ['2024-01-01']);
+                      return {
+                        like(col3, pattern) {
+                          assert.strictEqual(col3, 'leave_type');
+                          assert.strictEqual(pattern, 'time_entry_leave%');
+                          return Promise.resolve({
+                            data: [{
+                              id: 'ledger1',
+                              employee_id: 'emp1',
+                              effective_date: '2024-01-01',
+                              leave_type: 'time_entry_leave_employee_paid',
+                              balance: -1,
+                            }],
+                            error: null,
+                          });
+                        },
+                      };
+                    },
+                  };
+                },
+              };
+            },
+            delete() {
+              return {
+                in(col, ids) {
+                  assert.strictEqual(col, 'id');
+                  deletedIds = ids;
+                  return Promise.resolve({ data: null, error: null });
+                },
+              };
+            },
+          };
+        }
+        throw new Error(`Unexpected table ${table}`);
+      },
+    };
+    await softDeleteWorkSessions(['abc'], fakeClient);
+    assert.deepStrictEqual(deletedIds, ['ledger1']);
+  });
+
+  it('restoring leave sessions recreates ledger rows when missing', async () => {
+    let insertedPayload = null;
+    const fakeClient = {
+      from(table) {
+        if (table === 'WorkSessions') {
+          return {
+            update() {
+              return {
+                in(col, ids) {
+                  assert.strictEqual(col, 'id');
+                  return {
+                    select() {
+                      return Promise.resolve({
+                        data: ids.map(id => ({
+                          id,
+                          employee_id: 'emp1',
+                          date: '2024-01-01',
+                          entry_type: 'leave_employee_paid',
+                          notes: 'note',
+                        })),
+                        error: null,
+                      });
+                    },
+                  };
+                },
+              };
+            },
+          };
+        }
+        if (table === 'LeaveBalances') {
+          return {
+            select() {
+              return {
+                in() {
+                  return {
+                    in() {
+                      return {
+                        like() {
+                          return Promise.resolve({ data: [], error: null });
+                        },
+                      };
+                    },
+                  };
+                },
+              };
+            },
+            insert(payload) {
+              insertedPayload = payload;
+              return Promise.resolve({ data: null, error: null });
+            },
+          };
+        }
+        throw new Error(`Unexpected table ${table}`);
+      },
+    };
+    await restoreWorkSessions(['abc'], fakeClient);
+    assert.ok(Array.isArray(insertedPayload));
+    assert.deepStrictEqual(insertedPayload, [{
+      employee_id: 'emp1',
+      effective_date: '2024-01-01',
+      leave_type: 'time_entry_leave_employee_paid',
+      balance: -1,
+      notes: 'note',
+    }]);
   });
 });

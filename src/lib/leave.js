@@ -20,6 +20,8 @@ export const DEFAULT_LEAVE_PAY_POLICY = {
   legal_info_url: DEFAULT_LEGAL_INFO_URL,
 };
 
+export const TIME_ENTRY_LEAVE_PREFIX = 'time_entry_leave';
+
 export const LEAVE_PAY_METHOD_OPTIONS = [
   {
     value: 'legal',

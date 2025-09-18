@@ -27,6 +27,7 @@ import {
   resolveLeavePayMethodContext,
   normalizeMixedSubtype,
   DEFAULT_MIXED_SUBTYPE,
+  TIME_ENTRY_LEAVE_PREFIX,
 } from '@/lib/leave.js';
 import { selectLeaveDayValue, selectLeaveRemaining } from '@/selectors.js';
 import {
@@ -36,7 +37,6 @@ import {
 } from '@/lib/workSessionsMetadata.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
-const TIME_ENTRY_LEAVE_PREFIX = 'time_entry_leave';
 const TIME_ENTRY_TABS = [
   { value: 'all', label: 'הכול' },
   { value: 'work', label: 'שעות/שיעורים' },
