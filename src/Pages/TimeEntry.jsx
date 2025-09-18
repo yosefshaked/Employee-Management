@@ -22,6 +22,8 @@ import {
   getLeaveLedgerEntryDelta,
   getLeaveLedgerEntryDate,
   getLeaveLedgerEntryType,
+  getLeaveBaseKind,
+  getLeaveSubtypeFromValue,
   resolveLeavePayMethodContext,
 } from '@/lib/leave.js';
 import { selectLeaveDayValue, selectLeaveRemaining } from '@/selectors.js';
@@ -339,13 +341,15 @@ export default function TimeEntry() {
           return;
         }
 
-        const entryType = getEntryTypeForLeaveKind(leaveType) || getEntryTypeForLeaveKind('system_paid');
+        const baseLeaveKind = getLeaveBaseKind(leaveType) || leaveType;
+        const leaveSubtype = getLeaveSubtypeFromValue(leaveType);
+        const entryType = getEntryTypeForLeaveKind(baseLeaveKind) || getEntryTypeForLeaveKind('system_paid');
         if (!entryType) {
           toast.error('סוג חופשה לא נתמך', { duration: 15000 });
           return;
         }
 
-        const ledgerDelta = getLeaveLedgerDelta(leaveType);
+        const ledgerDelta = getLeaveLedgerDelta(baseLeaveKind);
         const summary = selectLeaveRemaining(employee.id, dateStr, {
           employees,
           leaveBalances,
@@ -368,10 +372,10 @@ export default function TimeEntry() {
           }
         }
 
-        const isMixed = leaveType === 'mixed';
+        const isMixed = baseLeaveKind === 'mixed';
         const mixedIsPaid = isMixed ? (mixedPaid !== false) : false;
-        const isPayable = isMixed ? mixedIsPaid : isPayableLeaveKind(leaveType);
-        const leaveFraction = leaveType === 'half_day' ? 0.5 : 1;
+        const isPayable = isMixed ? mixedIsPaid : isPayableLeaveKind(baseLeaveKind);
+        const leaveFraction = baseLeaveKind === 'half_day' ? 0.5 : 1;
         let rateUsed = 0;
         let totalPayment = 0;
         let resolvedLeaveValue = 0;
@@ -441,11 +445,12 @@ export default function TimeEntry() {
             : null;
           const metadata = buildLeaveMetadata({
             source: 'table',
-            leaveType,
-            leaveKind: leaveType,
+            leaveType: baseLeaveKind,
+            leaveKind: baseLeaveKind,
+            subtype: leaveSubtype,
             payable: isPayable,
             fraction: leaveFraction,
-            halfDay: leaveType === 'half_day',
+            halfDay: baseLeaveKind === 'half_day',
             mixedPaid: isMixed ? mixedIsPaid : null,
             method: payContext.method,
             lookbackMonths: payContext.lookback_months,

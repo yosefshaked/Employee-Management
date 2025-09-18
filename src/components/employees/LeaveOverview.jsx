@@ -21,6 +21,7 @@ import {
   LEAVE_PAY_METHOD_OPTIONS,
   LEAVE_PAY_METHOD_DESCRIPTIONS,
   LEAVE_PAY_METHOD_LABELS,
+  getLeaveBaseKind,
   getNegativeBalanceFloor,
   resolveLeavePayMethodContext,
 } from '@/lib/leave.js';
@@ -34,8 +35,9 @@ const ENTRY_KINDS = [
 ];
 
 function determineUsageAmount(type) {
-  if (type === 'half_day') return 0.5;
-  if (type === 'system_paid' || type === 'unpaid') return 0;
+  const baseKind = getLeaveBaseKind(type) || type;
+  if (baseKind === 'half_day') return 0.5;
+  if (baseKind === 'system_paid' || baseKind === 'unpaid') return 0;
   return 1;
 }
 

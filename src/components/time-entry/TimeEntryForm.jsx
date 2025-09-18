@@ -21,6 +21,7 @@ import {
   LEAVE_PAY_METHOD_DESCRIPTIONS,
   LEAVE_PAY_METHOD_LABELS,
   LEAVE_TYPE_OPTIONS,
+  getLeaveBaseKind,
   isPayableLeaveKind,
   normalizeLeavePayPolicy,
 } from '@/lib/leave.js';
@@ -108,7 +109,7 @@ export default function TimeEntryForm({
     if (leaveType === 'mixed') {
       return mixedPaid ? 'employee_paid' : null;
     }
-    return leaveType;
+    return getLeaveBaseKind(leaveType);
   }, [isLeaveDay, leaveType, mixedPaid]);
 
   const isPaidLeavePreview = useMemo(() => {

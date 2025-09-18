@@ -2,6 +2,9 @@ import { calculateGlobalDailyRate } from '../../lib/payroll.js';
 import {
   getEntryTypeForLeaveKind,
   getLeaveKindFromEntryType,
+  getLeaveBaseKind,
+  getLeaveSubtypeFromValue,
+  inferLeaveType,
   getLeaveValueMultiplier,
   isLeaveEntryType,
   resolveLeavePayMethodContext,
@@ -113,6 +116,8 @@ export function useTimeEntry({
           }
           totalPayment = value;
         }
+      } else if (entryType === 'leave') {
+        totalPayment = 0;
       } else if (employee.employee_type === 'hourly') {
         totalPayment = (parseFloat(row.hours) || 0) * rateUsed;
       } else if (employee.employee_type === 'global') {
@@ -154,6 +159,28 @@ export function useTimeEntry({
             legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
             dailyValueSnapshot: snapshot,
             overrideApplied: payContext.override_applied,
+          });
+          if (metadata) {
+            payload.metadata = metadata;
+          }
+        }
+      } else if (entryType === 'leave') {
+        payload.payable = false;
+        payload.hours = 0;
+        payload.total_payment = 0;
+        payload.rate_used = null;
+        leaveOccupied.add(key);
+        if (canWriteMetadata) {
+          const inferred = inferLeaveType(row) || 'unpaid';
+          const subtype = getLeaveSubtypeFromValue(inferred) || getLeaveSubtypeFromValue(row.leave_type || row.leaveType);
+          const metadata = buildLeaveMetadata({
+            source: 'multi_date',
+            leaveType: getLeaveBaseKind(inferred) || 'unpaid',
+            leaveKind: getLeaveBaseKind(inferred) || 'unpaid',
+            subtype,
+            payable: false,
+            fraction: 1,
+            halfDay: false,
           });
           if (metadata) {
             payload.metadata = metadata;

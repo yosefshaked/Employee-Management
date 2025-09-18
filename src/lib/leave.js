@@ -50,10 +50,26 @@ export const LEAVE_PAY_METHOD_DESCRIPTIONS = LEAVE_PAY_METHOD_OPTIONS.reduce((ac
 
 const LEAVE_PAY_METHOD_VALUES = new Set(LEAVE_PAY_METHOD_OPTIONS.map(option => option.value));
 
+const UNPAID_SUBTYPE_SET = new Set(['holiday_unpaid', 'vacation_unpaid']);
+
+function normalizeLeaveToken(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const prefixes = ['time_entry_leave_', 'usage_', 'leave_', 'policy_'];
+  for (const prefix of prefixes) {
+    if (trimmed.startsWith(prefix)) {
+      return trimmed.slice(prefix.length);
+    }
+  }
+  return trimmed;
+}
+
 export const LEAVE_TYPE_OPTIONS = [
   { value: 'employee_paid', label: 'חופשה מהמכסה' },
   { value: 'system_paid', label: 'חג משולם (מערכת)' },
-  { value: 'unpaid', label: 'לא משולם' },
+  { value: 'holiday_unpaid', label: 'חג ללא תשלום' },
+  { value: 'vacation_unpaid', label: 'חופשה ללא תשלום' },
   { value: 'mixed', label: 'מעורב' },
   { value: 'half_day', label: 'חצי יום' },
 ];
@@ -63,10 +79,25 @@ export const HOLIDAY_TYPE_LABELS = LEAVE_TYPE_OPTIONS.reduce((acc, option) => {
   return acc;
 }, {});
 
+export function getLeaveSubtypeFromValue(value) {
+  const normalized = normalizeLeaveToken(value);
+  if (!normalized) return null;
+  return UNPAID_SUBTYPE_SET.has(normalized) ? normalized : null;
+}
+
+export function getLeaveBaseKind(value) {
+  const normalized = normalizeLeaveToken(value);
+  if (!normalized) return null;
+  if (UNPAID_SUBTYPE_SET.has(normalized)) {
+    return 'unpaid';
+  }
+  return normalized;
+}
+
 export const LEAVE_ENTRY_TYPES = {
   system_paid: 'leave_system_paid',
   employee_paid: 'leave_employee_paid',
-  unpaid: 'leave_unpaid',
+  unpaid: 'leave',
   half_day: 'leave_half_day',
   mixed: 'leave_mixed',
 };
@@ -76,6 +107,7 @@ const ENTRY_TYPE_TO_KIND = {
   leave_system_paid: 'system_paid',
   leave_employee_paid: 'employee_paid',
   leave_unpaid: 'unpaid',
+  leave: 'unpaid',
   leave_half_day: 'half_day',
   leave_mixed: 'mixed',
 };
@@ -85,7 +117,8 @@ export function getLeaveKindFromEntryType(entryType) {
 }
 
 export function getEntryTypeForLeaveKind(kind) {
-  return LEAVE_ENTRY_TYPES[kind] || null;
+  const base = getLeaveBaseKind(kind);
+  return base ? (LEAVE_ENTRY_TYPES[base] || null) : null;
 }
 
 export function isLeaveEntryType(entryType) {
@@ -93,13 +126,95 @@ export function isLeaveEntryType(entryType) {
 }
 
 export function isPayableLeaveKind(kind) {
-  return kind === 'system_paid' || kind === 'employee_paid' || kind === 'half_day';
+  const base = getLeaveBaseKind(kind);
+  return base === 'system_paid' || base === 'employee_paid' || base === 'half_day';
 }
 
 export function getLeaveLedgerDelta(kind) {
-  if (kind === 'employee_paid') return -1;
-  if (kind === 'half_day') return -0.5;
+  const base = getLeaveBaseKind(kind);
+  if (base === 'employee_paid') return -1;
+  if (base === 'half_day') return -0.5;
   return 0;
+}
+
+function extractSubtypeFromMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const candidates = [
+    metadata?.leave?.subtype,
+    metadata?.leave_subtype,
+    metadata?.leaveSubtype,
+    metadata?.leave?.type,
+    metadata?.leave_type,
+    metadata?.leaveType,
+  ];
+  for (const candidate of candidates) {
+    const subtype = getLeaveSubtypeFromValue(candidate);
+    if (subtype) return subtype;
+  }
+  return null;
+}
+
+export function inferLeaveSubtype(details = {}) {
+  const direct = [
+    details.leave_subtype,
+    details.leaveSubtype,
+    details.subtype,
+  ];
+  for (const candidate of direct) {
+    const subtype = getLeaveSubtypeFromValue(candidate);
+    if (subtype) return subtype;
+  }
+  const metadata = parseLeaveMetadata(details.metadata);
+  const metaSubtype = extractSubtypeFromMetadata(metadata);
+  if (metaSubtype) return metaSubtype;
+  const typeCandidates = [
+    details.leave_type,
+    details.leaveType,
+    details.leave_kind,
+    details.leaveKind,
+    metadata?.leave?.kind,
+    metadata?.leave_kind,
+    metadata?.leaveKind,
+    metadata?.leave?.type,
+    metadata?.leave_type,
+  ];
+  for (const candidate of typeCandidates) {
+    const subtype = getLeaveSubtypeFromValue(candidate);
+    if (subtype) return subtype;
+  }
+  return null;
+}
+
+export function inferLeaveKind(details = {}) {
+  const subtype = inferLeaveSubtype(details);
+  if (subtype) return 'unpaid';
+  const metadata = parseLeaveMetadata(details.metadata);
+  const candidates = [
+    details.leave_kind,
+    details.leaveKind,
+    details.leave_type,
+    details.leaveType,
+    metadata?.leave?.kind,
+    metadata?.leave_kind,
+    metadata?.leaveKind,
+    metadata?.leave?.type,
+    metadata?.leave_type,
+  ];
+  for (const candidate of candidates) {
+    const base = getLeaveBaseKind(candidate);
+    if (base) return base;
+  }
+  return getLeaveKindFromEntryType(details.entry_type || details.entryType) || null;
+}
+
+export function inferLeaveType(details = {}) {
+  const subtype = inferLeaveSubtype(details);
+  if (subtype) return subtype;
+  const base = inferLeaveKind(details);
+  if (base === 'unpaid') {
+    return 'vacation_unpaid';
+  }
+  return base;
 }
 
 function parseLeaveMetadata(value) {

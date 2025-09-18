@@ -17,7 +17,7 @@ import {
   resolveLeaveSessionValue,
 } from '@/lib/payroll.js';
 import { Badge } from '@/components/ui/badge';
-import { HOLIDAY_TYPE_LABELS, getLeaveKindFromEntryType, isLeaveEntryType } from '@/lib/leave.js';
+import { HOLIDAY_TYPE_LABELS, getLeaveKindFromEntryType, inferLeaveType, isLeaveEntryType } from '@/lib/leave.js';
 import { selectLeaveDayValue } from '@/selectors.js';
 function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, services, getRateForDate, onTableSubmit, onImported, onDeleted, leavePolicy, leavePayPolicy }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -267,9 +267,12 @@ function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, 
                                 );
 
                                 if (paidLeave) {
-                                  leaveKind = getLeaveKindFromEntryType(paidLeave.entry_type) || paidLeave.leave_type || paidLeave.leave_kind || paidLeave.metadata?.leave_type || paidLeave.metadata?.leave_kind || null;
-                                  leaveLabel = leaveKind ? (HOLIDAY_TYPE_LABELS[leaveKind] || leaveKind) : null;
-                                  if (leaveKind === 'mixed') {
+                                  const inferredType = inferLeaveType(paidLeave);
+                                  leaveKind = inferredType || getLeaveKindFromEntryType(paidLeave.entry_type) || null;
+                                  leaveLabel = inferredType
+                                    ? (HOLIDAY_TYPE_LABELS[inferredType] || inferredType)
+                                    : (leaveKind ? (HOLIDAY_TYPE_LABELS[leaveKind] || leaveKind) : null);
+                                  if (inferredType === 'mixed' || leaveKind === 'mixed') {
                                     const isPaid = paidLeave.payable !== false;
                                     const status = isPaid ? 'בתשלום' : 'לא בתשלום';
                                     summaryText = `מעורב · ${status}`;
@@ -308,7 +311,8 @@ function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, 
                                               payload.dayType = 'paid_leave';
                                               payload.paidLeaveId = paidLeave.id;
                                               payload.paidLeaveNotes = paidLeave.notes || '';
-                                              payload.leaveType = leaveKind || null;
+                                              const inferredType = inferLeaveType(paidLeave);
+                                              payload.leaveType = inferredType || leaveKind || null;
                                               if (leaveKind === 'mixed') {
                                                 payload.mixedPaid = paidLeave.payable !== false;
                                               }

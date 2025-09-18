@@ -7,7 +7,7 @@ import ConfirmPermanentDeleteModal from './ConfirmPermanentDeleteModal.jsx';
 import { format, parseISO, formatDistanceToNow } from 'date-fns';
 import { he } from 'date-fns/locale';
 import { Undo2, Trash2 } from 'lucide-react';
-import { HOLIDAY_TYPE_LABELS, getLeaveKindFromEntryType, isLeaveEntryType } from '@/lib/leave.js';
+import { HOLIDAY_TYPE_LABELS, getLeaveKindFromEntryType, inferLeaveType, isLeaveEntryType } from '@/lib/leave.js';
 import { Label } from '@/components/ui/label';
 
 function resolveEmployeeName(employeesById, id) {
@@ -47,6 +47,10 @@ function resolveTypeLabel(entry) {
   if (entry.entry_type === 'session') return 'שיעורים';
   if (entry.entry_type === 'adjustment') return 'התאמה';
   if (isLeaveEntryType(entry.entry_type)) {
+    const inferredType = inferLeaveType(entry);
+    if (inferredType) {
+      return HOLIDAY_TYPE_LABELS[inferredType] || inferredType;
+    }
     const leaveKind = getLeaveKindFromEntryType(entry.entry_type);
     return HOLIDAY_TYPE_LABELS[leaveKind] || leaveKind || 'חופשה';
   }
@@ -73,7 +77,11 @@ function resolveValueLabel(entry, servicesById) {
     return `${hours.toFixed(2)} שעות`;
   }
   if (isLeaveEntryType(entry.entry_type)) {
+    const inferredType = inferLeaveType(entry);
     if (entry.payable === false) {
+      if (inferredType) {
+        return HOLIDAY_TYPE_LABELS[inferredType] || 'חופשה ללא תשלום';
+      }
       return 'חופשה ללא תשלום';
     }
     const amount = Number(entry.total_payment) || 0;
