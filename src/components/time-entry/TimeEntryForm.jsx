@@ -30,6 +30,8 @@ import {
   normalizeMixedSubtype,
 } from '@/lib/leave.js';
 import { Switch } from '@/components/ui/switch';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Trash2 } from 'lucide-react';
 
 const VALID_LEAVE_PAY_METHODS = new Set(Object.keys(LEAVE_PAY_METHOD_LABELS));
 
@@ -83,6 +85,11 @@ export default function TimeEntryForm({
   ));
   const [errors, setErrors] = useState({});
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [currentPaidLeaveId, setCurrentPaidLeaveId] = useState(paidLeaveId);
+
+  useEffect(() => {
+    setCurrentPaidLeaveId(paidLeaveId);
+  }, [paidLeaveId]);
 
   const leaveTypeOptions = useMemo(() => {
     return LEAVE_TYPE_OPTIONS
@@ -224,14 +231,37 @@ export default function TimeEntryForm({
       hours: isHourly || isGlobal ? target.hours : null,
       meetings: isHourly || isGlobal ? null : target.sessions_count
     };
-    setPendingDelete({ id, summary });
+    setPendingDelete({ id, summary, kind: 'segment' });
+  };
+  const requestDeleteLeave = () => {
+    if (!currentPaidLeaveId) return;
+    const summary = {
+      employeeName: employee.name,
+      date: format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy'),
+      entryTypeLabel: 'חופשה',
+    };
+    setPendingDelete({ id: currentPaidLeaveId, summary, kind: 'leave' });
   };
   const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    const target = pendingDelete;
     try {
-      const deletedRow = await softDeleteWorkSession(pendingDelete.id);
-      setSegments(prev => prev.filter(s => s.id !== pendingDelete.id));
+      const deletedRow = await softDeleteWorkSession(target.id);
+      if (target.kind === 'segment') {
+        setSegments(prev => prev.filter(s => s.id !== target.id));
+      }
+      if (target.kind === 'leave') {
+        setCurrentPaidLeaveId(null);
+        setDayType('regular');
+        setLeaveType('');
+        setMixedPaid(true);
+        setMixedSubtype(DEFAULT_MIXED_SUBTYPE);
+        setMixedHalfDay(false);
+        setPaidLeaveNotes('');
+        setSegments(prev => (prev.length > 0 ? prev : [createSeg()]));
+      }
       const payload = deletedRow ? [deletedRow] : [];
-      onDeleted?.([pendingDelete.id], payload);
+      onDeleted?.([target.id], payload);
       toast.success(he['toast.delete.success']);
       setPendingDelete(null);
     } catch (err) {
@@ -305,7 +335,7 @@ export default function TimeEntryForm({
       onSubmit({
         rows: [],
         dayType,
-        paidLeaveId,
+        paidLeaveId: currentPaidLeaveId,
         paidLeaveNotes,
         leaveType,
         mixedPaid: leaveType === 'mixed' ? mixedPaid : null,
@@ -319,7 +349,7 @@ export default function TimeEntryForm({
       return;
     }
     if (!validate()) return;
-    onSubmit({ rows: segments, dayType, paidLeaveId, leaveType: null });
+    onSubmit({ rows: segments, dayType, paidLeaveId: currentPaidLeaveId, leaveType: null });
   };
 
   const baseSummary = useMemo(() => {
@@ -473,6 +503,25 @@ export default function TimeEntryForm({
 
   const renderPaidLeaveSegment = () => (
     <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5 space-y-4">
+      {currentPaidLeaveId ? (
+        <div className="flex justify-end mb-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={requestDeleteLeave}
+                aria-label="מחק רישום חופשה"
+                className="h-7 w-7 text-red-500 hover:bg-red-50"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>מחק רישום חופשה</TooltipContent>
+          </Tooltip>
+        </div>
+      ) : null}
       <div className="space-y-1">
         <Label className="text-sm font-medium text-slate-700">סוג חופשה</Label>
         <Select value={leaveType || ''} onValueChange={setLeaveType}>
@@ -587,6 +636,7 @@ export default function TimeEntryForm({
         onClose={() => setPendingDelete(null)}
         onConfirm={confirmDelete}
         summary={pendingDelete ? pendingDelete.summary : null}
+        summaryText={pendingDelete?.summaryText || ''}
       />
     </form>
   );
