@@ -25,4 +25,3 @@ release
 *.sw?
 settings.json
 .env
-public/runtime-config.json

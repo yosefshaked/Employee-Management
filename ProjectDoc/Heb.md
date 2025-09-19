@@ -1,7 +1,7 @@
 # תיק פרויקט: מערכת ניהול שכר ועובדים
 
-**גרסה: 1.5.1**
-**תאריך עדכון אחרון: 2025-10-06**
+**גרסה: 1.5.2**
+**תאריך עדכון אחרון: 2025-10-07**
 
 ## 1. חזון ומטרה
 
@@ -38,8 +38,8 @@
     *   **API:** נוצר אוטומטית על ידי Supabase (PostgREST).
 
 *   **ניהול תצורה:**
-    *   האישורים נטענים בזמן ריצה מקובץ `public/runtime-config.json` (או מהזרקה של `window.__EMPLOYEE_MANAGEMENT_PUBLIC_CONFIG__`), קובץ שנמצא ברשימת ההתעלמות של Git ולכן אינו מחיל מפתחות Supabase בבילד.
-    *   כתובות Supabase ומפתחות anon ארגוניים נשלפים לפי דרישה דרך פונקציית Azure `/api/config`, הדורשת את משתני הסביבה `APP_SUPABASE_URL` ו-`APP_SUPABASE_SERVICE_ROLE`.
+    *   האישורים נטענים בזמן ריצה אך ורק מפונקציית Azure `/api/config`. ללא טוקן היא מחזירה את כתובת ה-Supabase וה-anon key המוגדרים במשתנים `APP_SUPABASE_URL` ו-`APP_SUPABASE_ANON_KEY`.
+    *   לאחר התחברות ובחירת ארגון הלקוח מזרים כותרות `Authorization` ו-`x-org-id`, והפונקציה מאמתת חברות באמצעות `APP_SUPABASE_SERVICE_ROLE` לפני החזרת פרטי החיבור הארגוניים.
 
 ### 2.1 מודל ארגון וחברות
 
@@ -794,27 +794,24 @@ $$;
 
 - `setup_assistant_diagnostics()` מחזירה שורה לכל טבלה עם `has_table`, `rls_enabled`, `missing_policies[]` וקטע `delta_sql` שתוכלו להעתיק חזרה ל-SQL במידה שחסר משהו.
 - האשף מציג את ה-`delta_sql` ומריץ את הבדיקות מחדש בכל לחיצה על כפתור האימות עד שכל הסמלים הופכים לירוקים.
-4.  **הכן קובץ תצורה להרצה:**
-    *   העתק את `public/runtime-config.example.json` אל `public/runtime-config.json`.
-    *   מלא בקובץ את כתובת ה-Supabase ומפתח ה-anon של פרויקט המטא-דאטה של האפליקציה.
-    *   הקובץ מופיע ב-`.gitignore`, ולכן האישורים נשארים מחוץ למאגר ולבילד.
-5.  **הגדר פונקציית Azure (לבדיקות מקומיות):**
+4.  **הגדר את API runtime:**
     *   צור את `api/local.settings.json` עם התוכן הבא:
         ----------------------------------------------------------------
         {
           "IsEncrypted": false,
           "Values": {
             "APP_SUPABASE_URL": "https://<metadata-project>.supabase.co",
+            "APP_SUPABASE_ANON_KEY": "public-anon-key",
             "APP_SUPABASE_SERVICE_ROLE": "service-role-key-with-org-access"
           }
         }
         ----------------------------------------------------------------
-    *   הערכים הללו משרתים רק את פונקציית `/api/config` לאימות חברות ואסור לרשום אותם ללוגים.
-6.  **הרץ את אפליקציית הפיתוח:**
+    *   בעת פריסה ל-Azure Static Web Apps, הוסף את אותם משתנים תחת הגדרות ה-API כדי ש-`/api/config` ישרת גם את הבוטסטרפ וגם את חיבורי הארגונים.
+5.  **הרץ את אפליקציית הפיתוח:**
     -----------------------
     npm run electron:dev
     -----------------------
-    פעולה זו תפעיל את האפליקציה בחלון דסקטופ עם טעינה חמה (hot-reloading).
+    פעולה זו תפעיל את האפליקציה בחלון דסקטופ עם טעינה חמה (hot-reloading). בחלון טרמינל נוסף הרץ `swa start http://localhost:5173 --api-location api` כדי לחשוף את פונקציית `/api/config` בסביבה מקומית.
 
 ### בנייה ל-Production
 

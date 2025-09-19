@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 import { toast } from 'sonner';
 import { coreSupabase, OrgSupabaseProvider } from '@/supabaseClient.js';
+import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
@@ -278,52 +279,22 @@ export function OrgProvider({ children }) {
       setConfigStatus('loading');
 
       try {
-        const response = await fetch('/api/config', {
-          method: 'GET',
-          headers: {
-            Accept: 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-            'x-org-id': orgId,
-          },
-          cache: 'no-store',
-        });
-
-        const payload = await response
-          .json()
-          .catch(() => ({ error: 'שגיאת שרת בלתי צפויה בעת קריאת ההגדרות.' }));
+        const config = await loadRuntimeConfig({ accessToken, orgId, force: true });
 
         if (configRequestRef.current !== requestId) {
           return;
         }
 
-        if (!response.ok) {
-          const message = payload?.error || 'טעינת הגדרות הארגון נכשלה.';
-          toast.error(message);
-          setActiveOrgConfig(null);
-          setConfigStatus('error');
-          return;
-        }
-
-        const supabaseUrl = payload?.supabase_url;
-        const anonKey = payload?.anon_key;
-
-        if (!supabaseUrl || !anonKey) {
-          toast.error('חסרים פרטי חיבור עבור הארגון שנבחר.');
-          setActiveOrgConfig(null);
-          setConfigStatus('error');
-          return;
-        }
-
         console.info('Loaded organization runtime config', {
           orgId,
-          supabaseUrl: maskForDebug(supabaseUrl),
-          anonKey: maskForDebug(anonKey),
+          supabaseUrl: maskForDebug(config.supabaseUrl),
+          anonKey: maskForDebug(config.supabaseAnonKey),
         });
 
         setActiveOrgConfig((current) => {
           const normalized = {
-            supabaseUrl: String(supabaseUrl).trim(),
-            supabaseAnonKey: String(anonKey).trim(),
+            supabaseUrl: config.supabaseUrl,
+            supabaseAnonKey: config.supabaseAnonKey,
           };
           if (
             current &&
@@ -339,8 +310,13 @@ export function OrgProvider({ children }) {
         if (configRequestRef.current !== requestId) {
           return;
         }
+
+        const message = error instanceof MissingRuntimeConfigError
+          ? error.message
+          : 'לא ניתן היה לטעון את הגדרות הארגון. נסה שוב בעוד מספר רגעים.';
+
         console.error('Failed to fetch organization config', error);
-        toast.error('לא ניתן היה לטעון את הגדרות הארגון. נסה שוב בעוד מספר רגעים.');
+        toast.error(message);
         setActiveOrgConfig(null);
         setConfigStatus('error');
       }

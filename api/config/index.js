@@ -1,11 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 
-function jsonResponse(context, status, payload) {
+function jsonResponse(context, status, payload, extraHeaders = {}) {
   context.res = {
     status,
     headers: {
       'Content-Type': 'application/json',
       'Cache-Control': 'no-store',
+      ...extraHeaders,
     },
     body: JSON.stringify(payload),
   };
@@ -31,34 +32,57 @@ function readOrgId(req) {
   return headerId ? String(headerId) : null;
 }
 
+function respondWithBaseConfig(context, supabaseUrl, anonKey) {
+  jsonResponse(
+    context,
+    200,
+    {
+      supabase_url: supabaseUrl,
+      anon_key: anonKey,
+    },
+    {
+      'X-Config-Scope': 'app',
+    },
+  );
+}
+
 export default async function (context, req) {
   const request = req || context.req;
   const env = context.env ?? globalThis.process?.env ?? {};
 
   const supabaseUrl = env.APP_SUPABASE_URL;
+  const anonKey = env.APP_SUPABASE_ANON_KEY;
   const serviceRoleKey = env.APP_SUPABASE_SERVICE_ROLE;
 
-  if (!supabaseUrl || !serviceRoleKey) {
-    context.log.error('APP Supabase environment variables are missing.');
+  if (!supabaseUrl || !anonKey) {
+    context.log.error('APP Supabase public credentials are missing.');
     jsonResponse(context, 500, { error: 'חסרה תצורת שרת. פנה למנהל המערכת.' });
     return;
   }
 
-  const authorization = request.headers?.authorization || request.headers?.Authorization;
-  if (!authorization || !authorization.startsWith('Bearer ')) {
-    jsonResponse(context, 401, { error: 'פג תוקף ההתחברות. התחבר שוב ונסה מחדש.' });
+  const orgId = readOrgId(request);
+  const authorization = request.headers?.authorization || request.headers?.Authorization || '';
+  const isBearer = authorization.startsWith('Bearer ');
+
+  if (!orgId || !isBearer) {
+    if (orgId && !isBearer) {
+      context.log.warn('Ignoring organization config request without bearer token', {
+        orgId,
+      });
+    }
+    respondWithBaseConfig(context, supabaseUrl, anonKey);
+    return;
+  }
+
+  if (!serviceRoleKey) {
+    context.log.error('APP Supabase service role is missing for org config request.');
+    jsonResponse(context, 500, { error: 'שגיאת שרת בבדיקת ההרשאות.' });
     return;
   }
 
   const token = authorization.slice('Bearer '.length).trim();
   if (!token) {
     jsonResponse(context, 401, { error: 'פג תוקף ההתחברות. התחבר שוב ונסה מחדש.' });
-    return;
-  }
-
-  const orgId = readOrgId(request);
-  if (!orgId) {
-    jsonResponse(context, 400, { error: 'חסר מזהה ארגון בבקשה.' });
     return;
   }
 
@@ -141,10 +165,17 @@ export default async function (context, req) {
       anonKey: maskForLog(settings.anon_key),
     });
 
-    jsonResponse(context, 200, {
-      supabase_url: settings.supabase_url,
-      anon_key: settings.anon_key,
-    });
+    jsonResponse(
+      context,
+      200,
+      {
+        supabase_url: settings.supabase_url,
+        anon_key: settings.anon_key,
+      },
+      {
+        'X-Config-Scope': 'org',
+      },
+    );
   } catch (settingsError) {
     context.log.error('Failed to load org config', {
       orgId,

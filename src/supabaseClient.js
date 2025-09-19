@@ -5,7 +5,7 @@ import { getRuntimeConfig } from './runtime/config.js';
 const runtimeConfig = getRuntimeConfig();
 
 if (!runtimeConfig?.supabaseUrl || !runtimeConfig?.supabaseAnonKey) {
-  throw new Error('Supabase configuration missing. ודא שקובץ runtime-config.json נטען לפני הפעלת המערכת.');
+  throw new Error('Supabase configuration missing. ודא שפונקציית /api/config זמינה ומחזירה supabase_url ו-anon_key.');
 }
 
 export const coreSupabase = createClient(runtimeConfig.supabaseUrl, runtimeConfig.supabaseAnonKey);
