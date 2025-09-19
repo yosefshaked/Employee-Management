@@ -109,9 +109,6 @@ export default function Layout({ children }) {
           </SidebarHeader>
           
           <SidebarContent className="p-4">
-            <div className="mb-4">
-              <OrgSwitcher />
-            </div>
             <SidebarGroup>
               <SidebarGroupLabel className="text-sm font-semibold text-slate-600 mb-3">
                 ניווט
@@ -139,6 +136,7 @@ export default function Layout({ children }) {
           </SidebarContent>
 
           <SidebarFooter className="border-t border-slate-200 p-6 space-y-4">
+            <OrgSwitcher />
             <button
               onClick={() => setShowChangelog(true)}
               style={{
