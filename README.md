@@ -1,19 +1,39 @@
-# React + Vite
+# Employee Management
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+This project is a Vite + React application for managing employees, work sessions and payroll records. Supabase provides persistence and authentication.
 
-Currently, two official plugins are available:
+## Local development
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+1. Install dependencies:
+   ```bash
+   npm install
+   ```
+2. Create a `.env` file with your Supabase credentials:
+   ```bash
+   VITE_SUPABASE_URL=your-url
+   VITE_SUPABASE_ANON_KEY=your-anon-key
+   ```
+3. Start the dev server:
+   ```bash
+   npm run dev
+   ```
 
-## Expanding the ESLint configuration
+## Building for Cloudflare Pages
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+The production build uses the standard Vite flow:
 
-## API Key to SupaBase
+```bash
+npm run build
+```
 
-Create a file named .env and paste the following:
+The command outputs static assets to the `dist/` directory. Configure Cloudflare Pages to use `npm run build` as the build command and `dist` as the output directory.
 
-VITE_SUPABASE_URL=YOUR_URL_KEY
-VITE_SUPABASE_ANON_KEY=YOUR_ANON_KEY
+## Health check endpoint
+
+Cloudflare Pages automatically picks up Functions inside the `functions/` directory. The `/healthcheck` function responds with:
+
+```json
+{ "ok": true }
+```
+
+Use this endpoint for platform health probes after deploying to Pages.
