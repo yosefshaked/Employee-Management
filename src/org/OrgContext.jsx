@@ -15,7 +15,8 @@ import {
 } from '@/supabaseClient.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 
-const STORAGE_KEY_PREFIX = 'employee-management:last-org';
+const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
+const LEGACY_STORAGE_PREFIX = 'employee-management:last-org';
 
 function maskForDebug(value) {
   if (!value) return '';
@@ -24,15 +25,23 @@ function maskForDebug(value) {
   return `${trimmed.slice(0, 2)}••••${trimmed.slice(-2)}`;
 }
 
-function buildStorageKey(userId) {
-  if (!userId) return STORAGE_KEY_PREFIX;
-  return `${STORAGE_KEY_PREFIX}:${userId}`;
-}
-
 function readStoredOrgId(userId) {
   if (typeof window === 'undefined') return null;
   try {
-    return window.localStorage.getItem(buildStorageKey(userId));
+    const stored = window.localStorage.getItem(ACTIVE_ORG_STORAGE_KEY);
+    if (stored) {
+      return stored;
+    }
+    if (!userId) {
+      return null;
+    }
+    const legacyKeyWithUser = `${LEGACY_STORAGE_PREFIX}:${userId}`;
+    const legacyValueWithUser = window.localStorage.getItem(legacyKeyWithUser);
+    if (legacyValueWithUser) {
+      return legacyValueWithUser;
+    }
+    const legacyFallback = window.localStorage.getItem(LEGACY_STORAGE_PREFIX);
+    return legacyFallback;
   } catch {
     return null;
   }
@@ -41,12 +50,15 @@ function readStoredOrgId(userId) {
 function writeStoredOrgId(userId, orgId) {
   if (typeof window === 'undefined') return;
   try {
-    const key = buildStorageKey(userId);
     if (!orgId) {
-      window.localStorage.removeItem(key);
+      window.localStorage.removeItem(ACTIVE_ORG_STORAGE_KEY);
     } else {
-      window.localStorage.setItem(key, orgId);
+      window.localStorage.setItem(ACTIVE_ORG_STORAGE_KEY, orgId);
     }
+    if (userId) {
+      window.localStorage.removeItem(`${LEGACY_STORAGE_PREFIX}:${userId}`);
+    }
+    window.localStorage.removeItem(LEGACY_STORAGE_PREFIX);
   } catch {
     // ignore storage failures silently
   }
@@ -128,6 +140,7 @@ export function OrgProvider({ children }) {
   const [orgMembers, setOrgMembers] = useState([]);
   const [orgInvites, setOrgInvites] = useState([]);
   const [error, setError] = useState(null);
+  const [configStatus, setConfigStatus] = useState('idle');
   const loadingRef = useRef(false);
   const lastUserIdRef = useRef(null);
   const configRequestRef = useRef(0);
@@ -144,6 +157,7 @@ export function OrgProvider({ children }) {
     setOrgInvites([]);
     setError(null);
     setOrgSupabaseConfig(null);
+    setConfigStatus('idle');
   }, []);
 
   const loadMemberships = useCallback(async () => {
@@ -253,15 +267,18 @@ export function OrgProvider({ children }) {
     async (orgId) => {
       if (!orgId) {
         setOrgSupabaseConfig(null);
+        setConfigStatus('idle');
         return;
       }
 
       if (!accessToken) {
+        setConfigStatus('idle');
         return;
       }
 
       const requestId = configRequestRef.current + 1;
       configRequestRef.current = requestId;
+      setConfigStatus('loading');
 
       try {
         const response = await fetch(`/api/config?org_id=${encodeURIComponent(orgId)}`, {
@@ -286,6 +303,7 @@ export function OrgProvider({ children }) {
           const message = payload?.error || 'טעינת הגדרות הארגון נכשלה.';
           toast.error(message);
           setOrgSupabaseConfig(null);
+          setConfigStatus('error');
           return;
         }
 
@@ -295,6 +313,7 @@ export function OrgProvider({ children }) {
         if (!supabaseUrl || !anonKey) {
           toast.error('חסרים פרטי חיבור עבור הארגון שנבחר.');
           setOrgSupabaseConfig(null);
+          setConfigStatus('error');
           return;
         }
 
@@ -308,6 +327,7 @@ export function OrgProvider({ children }) {
           supabaseUrl,
           supabaseAnonKey: anonKey,
         });
+        setConfigStatus('success');
       } catch (error) {
         if (configRequestRef.current !== requestId) {
           return;
@@ -315,6 +335,7 @@ export function OrgProvider({ children }) {
         console.error('Failed to fetch organization config', error);
         toast.error('לא ניתן היה לטעון את הגדרות הארגון. נסה שוב בעוד מספר רגעים.');
         setOrgSupabaseConfig(null);
+        setConfigStatus('error');
       }
     },
     [accessToken],
@@ -337,6 +358,7 @@ export function OrgProvider({ children }) {
         setActiveOrgId(null);
         setActiveOrg(null);
         setOrgSupabaseConfig(null);
+        setConfigStatus('idle');
         return;
       }
 
@@ -344,6 +366,7 @@ export function OrgProvider({ children }) {
       setActiveOrg(org);
 
       setOrgSupabaseConfig(null);
+      setConfigStatus('idle');
     },
     [],
   );
@@ -374,7 +397,7 @@ export function OrgProvider({ children }) {
         const existing = orgList.find((item) => item.id === storedOrgId) || orgList[0] || null;
         if (existing) {
           applyActiveOrg(existing);
-          writeStoredOrgId(user.id, existing.id);
+          writeStoredOrgId(user?.id ?? null, existing.id);
           await loadOrgDirectory(existing.id);
         } else {
           applyActiveOrg(null);
@@ -414,7 +437,7 @@ export function OrgProvider({ children }) {
     async (orgId) => {
       if (!orgId) {
         applyActiveOrg(null);
-        if (user) writeStoredOrgId(user.id, '');
+        writeStoredOrgId(user?.id ?? null, '');
         setStatus(determineStatus(organizations));
         return;
       }
@@ -426,7 +449,7 @@ export function OrgProvider({ children }) {
       }
 
       applyActiveOrg(next);
-      if (user) writeStoredOrgId(user.id, orgId);
+      writeStoredOrgId(user?.id ?? null, orgId);
       await loadOrgDirectory(orgId);
       setStatus(determineStatus(organizations));
     },
@@ -444,7 +467,7 @@ export function OrgProvider({ children }) {
 
       if (nextActive) {
         applyActiveOrg(nextActive);
-        writeStoredOrgId(user.id, nextActive.id);
+        writeStoredOrgId(user?.id ?? null, nextActive.id);
         await loadOrgDirectory(nextActive.id);
       } else {
         applyActiveOrg(null);
@@ -681,6 +704,8 @@ export function OrgProvider({ children }) {
     [user, refreshOrganizations, selectOrg],
   );
 
+  const activeOrgConfigValue = getActiveOrgConfig();
+
   const value = useMemo(
     () => ({
       status,
@@ -702,7 +727,8 @@ export function OrgProvider({ children }) {
       removeMember,
       acceptInvite,
       activeOrgHasConnection: Boolean(activeOrg?.supabase_url && activeOrg?.supabase_anon_key),
-      activeOrgConfig: getActiveOrgConfig(),
+      activeOrgConfig: activeOrgConfigValue,
+      configStatus,
     }),
     [
       status,
@@ -723,6 +749,8 @@ export function OrgProvider({ children }) {
       revokeInvite,
       removeMember,
       acceptInvite,
+      configStatus,
+      activeOrgConfigValue,
     ],
   );
 
