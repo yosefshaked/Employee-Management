@@ -906,11 +906,6 @@ export default function MultiDateEntryModal({
                   <div className="text-sm text-slate-600">
                     מלאו סכום לכל התאמות שתרצו לשמור. שורות ללא סכום יידלגו אוטומטית.
                   </div>
-                  <div className="text-right font-medium text-slate-700">
-                    {adjustmentStats.filled > 0
-                      ? `סה"כ התאמות: ${adjustmentStats.sum >= 0 ? '+' : '-'}₪${Math.abs(adjustmentStats.sum).toLocaleString()} (${adjustmentStats.filled}/${adjustmentStats.total})`
-                      : 'לא הוזנו התאמות.'}
-                  </div>
                   {selectedEmployees.length === 0 ? (
                     <div className="text-sm text-slate-600">בחרו לפחות עובד אחד להזנת התאמות.</div>
                   ) : null}
@@ -1000,15 +995,26 @@ export default function MultiDateEntryModal({
 
             <div
               data-testid="md-footer"
-              className="shrink-0 bg-background border-t px-4 py-3 flex justify-end gap-2"
+              className="shrink-0 bg-background border-t px-4 py-3"
             >
-              <Button variant="outline" onClick={onClose}>בטל</Button>
-              <Button
-                onClick={handlePrimarySave}
-                disabled={primaryDisabled}
-              >
-                שמור רישומים
-              </Button>
+              <div className="flex flex-wrap items-center justify-end gap-3 sm:flex-row-reverse">
+                {mode === 'adjustment' ? (
+                  <div className="text-sm font-medium text-slate-700 text-right">
+                    {adjustmentStats.total > 0
+                      ? `סה"כ התאמות: ${adjustmentStats.sum > 0 ? '+' : adjustmentStats.sum < 0 ? '-' : ''}₪${Math.abs(adjustmentStats.sum).toLocaleString()} (${adjustmentStats.filled}/${adjustmentStats.total})`
+                      : 'סה"כ התאמות: ₪0'}
+                  </div>
+                ) : null}
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={onClose}>בטל</Button>
+                  <Button
+                    onClick={handlePrimarySave}
+                    disabled={primaryDisabled}
+                  >
+                    שמור רישומים
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
         </DialogContent>
