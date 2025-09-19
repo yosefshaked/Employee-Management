@@ -331,5 +331,44 @@ export function useTimeEntry({
     return { inserted: inserts, conflicts, invalidStartDates };
   };
 
-  return { saveRows, saveMixedLeave };
+  const saveAdjustments = async (items = []) => {
+    const client = supabaseClient || (await import('../../supabaseClient.js')).supabase;
+    const canWriteMetadata = await canUseWorkSessionMetadata(client);
+    const inserts = [];
+    for (const item of items) {
+      const employee = employees.find(e => e.id === item.employee_id);
+      if (!employee) continue;
+      if (!item.date) continue;
+      const amountValue = parseFloat(item.amount);
+      if (!item.amount || Number.isNaN(amountValue) || amountValue <= 0) continue;
+      const normalizedAmount = item.type === 'debit' ? -Math.abs(amountValue) : Math.abs(amountValue);
+      const payload = {
+        employee_id: employee.id,
+        date: item.date,
+        entry_type: 'adjustment',
+        notes: item.notes || null,
+        total_payment: normalizedAmount,
+        rate_used: normalizedAmount,
+        hours: null,
+        service_id: null,
+        sessions_count: null,
+        students_count: null,
+      };
+      if (canWriteMetadata) {
+        const metadata = buildSourceMetadata('multi_date');
+        if (metadata) {
+          payload.metadata = metadata;
+        }
+      }
+      inserts.push(payload);
+    }
+    if (!inserts.length) {
+      throw new Error('לא נמצאו התאמות לשמירה');
+    }
+    const { error } = await client.from('WorkSessions').insert(inserts);
+    if (error) throw error;
+    return { inserted: inserts };
+  };
+
+  return { saveRows, saveMixedLeave, saveAdjustments };
 }

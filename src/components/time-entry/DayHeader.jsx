@@ -51,6 +51,15 @@ const DayHeader = React.forwardRef(function DayHeader(
             >
               חופשה
             </Button>
+            <Button
+              type="button"
+              variant={dayType === 'adjustment' ? 'default' : 'ghost'}
+              className="flex-1 h-10 rounded-none"
+              onClick={() => onChange('adjustment')}
+              aria-label="התאמות"
+            >
+              התאמות
+            </Button>
           </div>
           {dayTypeError && <p className="text-sm text-red-600">יש לבחור סוג יום</p>}
           {employee?.employee_type === 'global' && (

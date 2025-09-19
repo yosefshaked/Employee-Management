@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import EntryRow, { computeRowPayment } from './EntryRow.jsx';
 import { copyFromPrevious, formatDatesCount, isRowCompleteForProgress } from './multiDateUtils.js';
@@ -91,7 +93,7 @@ export default function MultiDateEntryModal({
 
   const [rows, setRows] = useState(initialRows);
   useEffect(() => { setRows(initialRows); }, [initialRows]);
-  const { saveRows, saveMixedLeave } = useTimeEntry({
+  const { saveRows, saveMixedLeave, saveAdjustments } = useTimeEntry({
     employees,
     services,
     getRateForDate,
@@ -152,6 +154,57 @@ export default function MultiDateEntryModal({
     setMixedSelections(defaultMixedSelections);
     setGlobalMixedSubtype(DEFAULT_MIXED_SUBTYPE);
   }, [defaultMixedSelections]);
+
+  const defaultAdjustmentValues = useMemo(() => {
+    const base = {};
+    selectedEmployees.forEach(empId => {
+      const inner = {};
+      sortedDates.forEach(d => {
+        const dateStr = format(d, 'yyyy-MM-dd');
+        inner[dateStr] = { type: 'credit', amount: '', notes: '' };
+      });
+      base[empId] = inner;
+    });
+    return base;
+  }, [selectedEmployees, sortedDates]);
+
+  const [adjustmentValues, setAdjustmentValues] = useState(defaultAdjustmentValues);
+
+  useEffect(() => {
+    setAdjustmentValues(defaultAdjustmentValues);
+  }, [defaultAdjustmentValues]);
+
+  const updateAdjustmentValue = useCallback((empId, dateStr, patch) => {
+    setAdjustmentValues(prev => {
+      const next = { ...prev };
+      const inner = { ...(next[empId] || {}) };
+      const current = inner[dateStr] || { type: 'credit', amount: '', notes: '' };
+      inner[dateStr] = { ...current, ...patch };
+      next[empId] = inner;
+      return next;
+    });
+  }, []);
+
+  const adjustmentStats = useMemo(() => {
+    let filled = 0;
+    let total = 0;
+    let sum = 0;
+    selectedEmployees.forEach(empId => {
+      const inner = adjustmentValues[empId] || {};
+      sortedDates.forEach(d => {
+        total += 1;
+        const dateStr = format(d, 'yyyy-MM-dd');
+        const entry = inner[dateStr];
+        if (!entry) return;
+        const amountValue = parseFloat(entry.amount);
+        if (!entry.amount || Number.isNaN(amountValue) || amountValue <= 0) return;
+        filled += 1;
+        const normalized = entry.type === 'debit' ? -Math.abs(amountValue) : Math.abs(amountValue);
+        sum += normalized;
+      });
+    });
+    return { filled, total, sum };
+  }, [adjustmentValues, selectedEmployees, sortedDates]);
 
   const validation = useMemo(
     () => rows.map(r => validateRow(r, employeesById[r.employee_id], services, getRateForDate)),
@@ -253,7 +306,7 @@ export default function MultiDateEntryModal({
   }, [employeesById]);
 
   useEffect(() => {
-    if (mode === 'leave') {
+    if (mode !== 'regular') {
       setShowBanner(false);
       setShowErrors(false);
     }
@@ -494,6 +547,46 @@ export default function MultiDateEntryModal({
 
   const regularSaveDisabled = mode === 'regular' && rows.length === 0;
   const leaveSaveDisabled = mode === 'leave' && (!selectedEmployees.length || !sortedDates.length);
+  const handleAdjustmentSave = async () => {
+    const entries = [];
+    selectedEmployees.forEach(empId => {
+      const inner = adjustmentValues[empId] || {};
+      sortedDates.forEach(d => {
+        const dateStr = format(d, 'yyyy-MM-dd');
+        const entry = inner[dateStr];
+        if (!entry) return;
+        const amountValue = parseFloat(entry.amount);
+        if (!entry.amount || Number.isNaN(amountValue) || amountValue <= 0) return;
+        entries.push({
+          employee_id: empId,
+          date: dateStr,
+          type: entry.type === 'debit' ? 'debit' : 'credit',
+          amount: amountValue,
+          notes: entry.notes || '',
+        });
+      });
+    });
+    if (!entries.length) {
+      toast.error('נא להזין סכום לפחות להתאמה אחת.', { duration: 15000 });
+      return;
+    }
+    try {
+      const result = await saveAdjustments(entries);
+      const insertedCount = Array.isArray(result?.inserted) ? result.inserted.length : entries.length;
+      toast.success(`נשמרו ${insertedCount} התאמות`);
+      onSaved();
+      onClose();
+    } catch (error) {
+      toast.error(error.message);
+    }
+  };
+  const adjustmentSaveDisabled = mode === 'adjustment' && adjustmentStats.filled === 0;
+  const primaryDisabled = mode === 'leave'
+    ? leaveSaveDisabled
+    : (mode === 'adjustment' ? adjustmentSaveDisabled : regularSaveDisabled);
+  const handlePrimarySave = mode === 'leave'
+    ? handleSaveMixed
+    : (mode === 'adjustment' ? handleAdjustmentSave : handleRegularSave);
 
   return (
       <Dialog open={open} onOpenChange={onClose}>
@@ -528,7 +621,7 @@ export default function MultiDateEntryModal({
               className="flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-24 space-y-3 relative"
               data-testid="md-body"
             >
-              <div className="flex items-center justify-between bg-slate-100 rounded-lg ring-1 ring-slate-200 p-1">
+              <div className="flex items-center bg-slate-100 rounded-lg ring-1 ring-slate-200 p-1 gap-1">
                 <Button
                   type="button"
                   variant={mode === 'regular' ? 'default' : 'ghost'}
@@ -544,6 +637,14 @@ export default function MultiDateEntryModal({
                   onClick={() => handleModeChange('leave')}
                 >
                   חופשה
+                </Button>
+                <Button
+                  type="button"
+                  variant={mode === 'adjustment' ? 'default' : 'ghost'}
+                  className="flex-1 h-9"
+                  onClick={() => handleModeChange('adjustment')}
+                >
+                  התאמות
                 </Button>
               </div>
 
@@ -564,51 +665,51 @@ export default function MultiDateEntryModal({
                     </div>
                   )}
                   {groupedRows.map(([empId, items], idx) => {
-                const emp = employeesById[empId];
-                const isCollapsed = collapsed[empId];
-                return (
-                  <div key={empId} className="space-y-3">
-                    <div
-                      className="flex items-center bg-slate-100 px-3 py-2 rounded-xl ring-1 ring-slate-200 cursor-pointer"
-                      onClick={() => toggleEmp(empId)}
-                    >
-                      <span className="truncate max-w-[60%] text-[17px] font-semibold">{emp.name}</span>
-                      <span className="ml-auto text-sm text-slate-600">{formatDatesCount(items.length)}</span>
-                      <ChevronUp className={`h-4 w-4 mr-1 transition-transform ${isCollapsed ? 'rotate-180' : ''}`} />
-                    </div>
-                    {!isCollapsed && (
-                      <div className="space-y-3 mt-2 relative">
-                        <div className="flex flex-col gap-3 mt-2">
-                          {items.map(({ row, index }) => (
-                            <EntryRow
-                              key={`${row.employee_id}-${row.date}-${index}`}
-                              value={row}
-                              employee={emp}
-                              services={services}
-                              getRateForDate={getRateForDate}
-                              leaveValueResolver={leaveValueResolver}
-                              onChange={(patch) => updateRow(index, patch)}
-                              onCopyField={(field) => handleCopy(index, field)}
-                              showSummary={true}
-                              readOnlyDate
-                              rowId={`row-${index}`}
-                              flashField={flash && flash.index === index ? flash.field : null}
-                              errors={showErrors ? validation[index].errors : {}}
-                              isDuplicate={!!duplicateMap[index]}
-                              hideDayType={emp.employee_type === 'global'}
-                              allowRemove
-                              onRemove={() => removeRow(index)}
-                            />
-                          ))}
+                    const emp = employeesById[empId];
+                    const isCollapsed = collapsed[empId];
+                    return (
+                      <div key={empId} className="space-y-3">
+                        <div
+                          className="flex items-center bg-slate-100 px-3 py-2 rounded-xl ring-1 ring-slate-200 cursor-pointer"
+                          onClick={() => toggleEmp(empId)}
+                        >
+                          <span className="truncate max-w-[60%] text-[17px] font-semibold">{emp.name}</span>
+                          <span className="ml-auto text-sm text-slate-600">{formatDatesCount(items.length)}</span>
+                          <ChevronUp className={`h-4 w-4 mr-1 transition-transform ${isCollapsed ? 'rotate-180' : ''}`} />
                         </div>
+                        {!isCollapsed && (
+                          <div className="space-y-3 mt-2 relative">
+                            <div className="flex flex-col gap-3 mt-2">
+                              {items.map(({ row, index }) => (
+                                <EntryRow
+                                  key={`${row.employee_id}-${row.date}-${index}`}
+                                  value={row}
+                                  employee={emp}
+                                  services={services}
+                                  getRateForDate={getRateForDate}
+                                  leaveValueResolver={leaveValueResolver}
+                                  onChange={(patch) => updateRow(index, patch)}
+                                  onCopyField={(field) => handleCopy(index, field)}
+                                  showSummary={true}
+                                  readOnlyDate
+                                  rowId={`row-${index}`}
+                                  flashField={flash && flash.index === index ? flash.field : null}
+                                  errors={showErrors ? validation[index].errors : {}}
+                                  isDuplicate={!!duplicateMap[index]}
+                                  hideDayType={emp.employee_type === 'global'}
+                                  allowRemove
+                                  onRemove={() => removeRow(index)}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {idx !== groupedRows.length - 1 && <Separator className="my-4" />}
                       </div>
-                    )}
-                    {idx !== groupedRows.length - 1 && <Separator className="my-4" />}
-                  </div>
-                );
-              })}
+                    );
+                  })}
                 </>
-              ) : (
+              ) : mode === 'leave' ? (
                 <div className="space-y-4">
                   <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:items-end">
                     <div className="space-y-1">
@@ -757,6 +858,93 @@ export default function MultiDateEntryModal({
                     })}
                   </div>
                 </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="text-sm text-slate-600">
+                    מלאו סכום לכל התאמות שתרצו לשמור. שורות ללא סכום יידלגו אוטומטית.
+                  </div>
+                  <div className="text-right font-medium text-slate-700">
+                    {adjustmentStats.filled > 0
+                      ? `סה"כ התאמות: ${adjustmentStats.sum >= 0 ? '+' : '-'}₪${Math.abs(adjustmentStats.sum).toLocaleString()} (${adjustmentStats.filled}/${adjustmentStats.total})`
+                      : 'לא הוזנו התאמות.'}
+                  </div>
+                  {selectedEmployees.length === 0 ? (
+                    <div className="text-sm text-slate-600">בחרו לפחות עובד אחד להזנת התאמות.</div>
+                  ) : null}
+                  {selectedEmployees.map(empId => {
+                    const emp = employeesById[empId];
+                    const map = adjustmentValues[empId] || {};
+                    return (
+                      <div key={empId} className="space-y-3 rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[17px] font-semibold truncate max-w-[60%]">{emp?.name || 'עובד'}</span>
+                          <span className="text-sm text-slate-600">{formatDatesCount(sortedDates.length)}</span>
+                        </div>
+                        <div className="space-y-2">
+                          {sortedDates.length === 0 ? (
+                            <div className="text-sm text-slate-600">בחרו תאריכים להזנת התאמות.</div>
+                          ) : null}
+                          {sortedDates.map(d => {
+                            const dateStr = format(d, 'yyyy-MM-dd');
+                            const entry = map[dateStr] || { type: 'credit', amount: '', notes: '' };
+                            const isDebit = entry.type === 'debit';
+                            return (
+                              <div
+                                key={`${empId}-${dateStr}`}
+                                className="space-y-3 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200"
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                  <span className="text-sm font-medium text-slate-700">{format(d, 'dd/MM/yyyy')}</span>
+                                  <div className="flex gap-2" role="radiogroup" aria-label={`סוג התאמה עבור ${format(d, 'dd/MM/yyyy')}`}>
+                                    <Button
+                                      type="button"
+                                      variant={!isDebit ? 'default' : 'ghost'}
+                                      className="h-9"
+                                      onClick={() => updateAdjustmentValue(empId, dateStr, { type: 'credit' })}
+                                    >
+                                      זיכוי
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant={isDebit ? 'default' : 'ghost'}
+                                      className="h-9"
+                                      onClick={() => updateAdjustmentValue(empId, dateStr, { type: 'debit' })}
+                                    >
+                                      ניכוי
+                                    </Button>
+                                  </div>
+                                </div>
+                                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                                  <div className="space-y-1">
+                                    <Label className="text-sm font-medium text-slate-700">סכום (₪)</Label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={entry.amount}
+                                      onChange={event => updateAdjustmentValue(empId, dateStr, { amount: event.target.value })}
+                                      className="bg-white h-10 text-base"
+                                    />
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label className="text-sm font-medium text-slate-700">הערות</Label>
+                                    <Textarea
+                                      value={entry.notes}
+                                      onChange={event => updateAdjustmentValue(empId, dateStr, { notes: event.target.value })}
+                                      rows={2}
+                                      className="bg-white text-base leading-6"
+                                      placeholder="הסבר קצר (לא חובה)"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
 
@@ -766,8 +954,8 @@ export default function MultiDateEntryModal({
             >
               <Button variant="outline" onClick={onClose}>בטל</Button>
               <Button
-                onClick={mode === 'leave' ? handleSaveMixed : handleRegularSave}
-                disabled={regularSaveDisabled || leaveSaveDisabled}
+                onClick={handlePrimarySave}
+                disabled={primaryDisabled}
               >
                 שמור רישומים
               </Button>

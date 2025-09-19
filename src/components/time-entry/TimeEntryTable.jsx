@@ -28,7 +28,19 @@ import {
   normalizeMixedSubtype,
 } from '@/lib/leave.js';
 import { selectLeaveDayValue } from '@/selectors.js';
-function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, services, getRateForDate, onTableSubmit, onImported, onDeleted, leavePolicy, leavePayPolicy }) {
+function TimeEntryTableInner({
+  employees,
+  workSessions,
+  allWorkSessions = null,
+  services,
+  getRateForDate,
+  onTableSubmit,
+  onImported,
+  onDeleted,
+  leavePolicy,
+  leavePayPolicy,
+  activeTab = 'all',
+}) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
   const [multiMode, setMultiMode] = useState(false);
@@ -323,7 +335,12 @@ function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, 
                                         className={`text-center transition-colors p-2 ${isSelected ? 'bg-blue-50' : ''} ${multiMode ? '' : 'cursor-pointer hover:bg-blue-50'}`}
                                         onClick={() => {
                                           if (!multiMode) {
-                                            const payload = { day, employee: emp, existingSessions: regularSessions };
+                                            const payload = {
+                                              day,
+                                              employee: emp,
+                                              existingSessions: regularSessions,
+                                              adjustments,
+                                            };
                                             if (paidLeave) {
                                               payload.dayType = 'paid_leave';
                                               payload.paidLeaveId = paidLeave.id;
@@ -340,6 +357,11 @@ function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, 
                                                 payload.mixedSubtype = resolvedSubtype;
                                                 payload.mixedHalfDay = isPaid && mixedDetails.halfDay === true;
                                               }
+                                            } else if (activeTab === 'adjustments') {
+                                              payload.dayType = 'adjustment';
+                                            }
+                                            if (!payload.dayType && !paidLeave && regularSessions.length === 0 && adjustments.length > 0) {
+                                              payload.dayType = 'adjustment';
                                             }
                                             setEditingCell(payload);
                                           }
@@ -439,6 +461,7 @@ function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, 
               workSessions={contextSessions}
               services={services}
               initialRows={editingCell.existingSessions}
+              initialAdjustments={editingCell.adjustments}
               initialDayType={editingCell.dayType || 'regular'}
               paidLeaveId={editingCell.paidLeaveId}
               paidLeaveNotes={editingCell.paidLeaveNotes}
@@ -468,6 +491,7 @@ function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, 
                     mixedPaid: result.mixedPaid,
                     mixedSubtype: result.mixedSubtype,
                     mixedHalfDay: result.mixedHalfDay,
+                    adjustments: result.adjustments,
                   });
                   setEditingCell(null);
                 } catch {
@@ -483,6 +507,9 @@ function TimeEntryTableInner({ employees, workSessions, allWorkSessions = null, 
                     existingSessions: Array.isArray(prev.existingSessions)
                       ? prev.existingSessions.filter(s => !toRemove.has(String(s.id)))
                       : prev.existingSessions,
+                    adjustments: Array.isArray(prev.adjustments)
+                      ? prev.adjustments.filter(s => !toRemove.has(String(s.id)))
+                      : prev.adjustments,
                   };
                 });
                 if (typeof onDeleted === 'function') {

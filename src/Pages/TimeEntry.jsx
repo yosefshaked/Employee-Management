@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import RecentActivity from "../components/dashboard/RecentActivity";
 import TimeEntryTable from '../components/time-entry/TimeEntryTable';
 import TrashTab from '../components/time-entry/TrashTab.jsx';
-import AdjustmentsTab from '../components/time-entry/AdjustmentsTab.jsx';
 import { toast } from "sonner";
 import { supabase } from "../supabaseClient";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -237,13 +236,75 @@ export default function TimeEntry() {
     mixedPaid,
     mixedSubtype,
     mixedHalfDay,
+    adjustments = [],
   }) => {
     setIsLoading(true);
     try {
+      const dateStr = format(day, 'yyyy-MM-dd');
       const canWriteMetadata = await canUseWorkSessionMetadata(supabase);
+
+      if (dayType === 'adjustment') {
+        const normalizedAdjustments = Array.isArray(adjustments) ? adjustments : [];
+        if (!normalizedAdjustments.length) {
+          toast.error('יש להזין לפחות התאמה אחת.', { duration: 15000 });
+          return;
+        }
+        const insertPayload = [];
+        const updatePayloads = [];
+        for (const entry of normalizedAdjustments) {
+          const amountValue = parseFloat(entry.amount);
+          if (!entry.amount || Number.isNaN(amountValue) || amountValue <= 0) {
+            toast.error('נא להזין סכום גדול מ-0 עבור כל התאמה.', { duration: 15000 });
+            return;
+          }
+          const normalizedAmount = entry.type === 'debit' ? -Math.abs(amountValue) : Math.abs(amountValue);
+          const basePayload = {
+            employee_id: employee.id,
+            date: dateStr,
+            entry_type: 'adjustment',
+            notes: entry.notes || null,
+            total_payment: normalizedAmount,
+            rate_used: normalizedAmount,
+            hours: null,
+            service_id: null,
+            sessions_count: null,
+            students_count: null,
+          };
+          if (!entry.id && canWriteMetadata) {
+            const metadata = buildSourceMetadata('table');
+            if (metadata) {
+              basePayload.metadata = metadata;
+            }
+          }
+          if (entry.id) {
+            updatePayloads.push({ id: entry.id, values: basePayload });
+          } else {
+            insertPayload.push(basePayload);
+          }
+        }
+        if (!insertPayload.length && !updatePayloads.length) {
+          toast.error('אין התאמות לשמירה.', { duration: 15000 });
+          return;
+        }
+        if (insertPayload.length) {
+          const { error } = await supabase.from('WorkSessions').insert(insertPayload);
+          if (error) throw new Error(error.message);
+        }
+        if (updatePayloads.length) {
+          const results = await Promise.all(
+            updatePayloads.map(({ id, values }) => supabase.from('WorkSessions').update(values).eq('id', id)),
+          );
+          for (const { error } of results) {
+            if (error) throw new Error(error.message);
+          }
+        }
+        toast.success('התאמות נשמרו בהצלחה.');
+        await loadInitialData({ silent: true });
+        return;
+      }
+
       const toInsert = [];
       const toUpdate = [];
-      const dateStr = format(day, 'yyyy-MM-dd');
       const existingLedgerEntries = leaveBalances.filter(entry => {
         if (entry.employee_id !== employee.id) return false;
         const entryDate = getLeaveLedgerEntryDate(entry);
@@ -656,28 +717,19 @@ export default function TimeEntry() {
 
           {nonTrashTabs.map(tab => (
             <TabsContent key={tab.value} value={tab.value} className="mt-6 space-y-6">
-              {tab.value === 'adjustments' ? (
-                <AdjustmentsTab
-                  sessions={tabbedSessions.adjustments || []}
-                  employees={employees}
-                  onSaved={() => loadInitialData({ silent: true })}
-                  onDeleted={handleSessionsDeleted}
-                  isLoading={isLoading}
-                />
-              ) : (
-                <TimeEntryTable
-                  employees={employees}
-                  workSessions={tabbedSessions[tab.value] || []}
-                  allWorkSessions={workSessions}
-                  services={services}
-                  getRateForDate={getRateForDate}
-                  onTableSubmit={handleTableSubmit}
-                  onImported={() => loadInitialData()}
-                  onDeleted={handleSessionsDeleted}
-                  leavePolicy={leavePolicy}
-                  leavePayPolicy={leavePayPolicy}
-                />
-              )}
+              <TimeEntryTable
+                activeTab={tab.value}
+                employees={employees}
+                workSessions={tabbedSessions[tab.value] || []}
+                allWorkSessions={workSessions}
+                services={services}
+                getRateForDate={getRateForDate}
+                onTableSubmit={handleTableSubmit}
+                onImported={() => loadInitialData()}
+                onDeleted={handleSessionsDeleted}
+                leavePolicy={leavePolicy}
+                leavePayPolicy={leavePayPolicy}
+              />
               <RecentActivity
                 title="רישומים אחרונים"
                 sessions={(tabbedSessions[tab.value] || []).slice(0, 5)}

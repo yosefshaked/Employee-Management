@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import SingleDayEntryShell from './shared/SingleDayEntryShell.jsx';
 import GlobalSegment from './segments/GlobalSegment.jsx';
 import HourlySegment from './segments/HourlySegment.jsx';
@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { InfoTooltip } from '@/components/InfoTooltip.jsx';
+import { Input } from '@/components/ui/input';
 import { selectLeaveDayValue } from '@/selectors.js';
 import {
   DEFAULT_LEAVE_PAY_POLICY,
@@ -43,6 +44,7 @@ export default function TimeEntryForm({
   onSubmit,
   getRateForDate,
   initialRows = null,
+  initialAdjustments = [],
   selectedDate,
   onDeleted,
   initialDayType = 'regular',
@@ -66,6 +68,38 @@ export default function TimeEntryForm({
       ? initialRows.map(r => ({ ...r, id: r.id || crypto.randomUUID(), _status: 'existing' }))
       : [createSeg()];
   });
+  const createAdjustment = useCallback(() => ({
+    id: crypto.randomUUID(),
+    workSessionId: null,
+    type: 'credit',
+    amount: '',
+    notes: '',
+    _status: 'new',
+  }), []);
+  const mapInitialAdjustments = useCallback((items = []) => {
+    if (!Array.isArray(items) || items.length === 0) {
+      return [createAdjustment()];
+    }
+    const mapped = items.map(item => {
+      const rawAmount = Math.abs(Number(item?.total_payment ?? 0));
+      return {
+        id: String(item?.id ?? crypto.randomUUID()),
+        workSessionId: item?.id || null,
+        type: Number(item?.total_payment ?? 0) < 0 ? 'debit' : 'credit',
+        amount: Number.isFinite(rawAmount) && rawAmount !== 0 ? String(rawAmount) : '',
+        notes: item?.notes || '',
+        _status: item?.id ? 'existing' : 'new',
+      };
+    });
+    return mapped.length > 0 ? mapped : [createAdjustment()];
+  }, [createAdjustment]);
+  const [adjustments, setAdjustments] = useState(() => mapInitialAdjustments(initialAdjustments));
+  const [adjustmentErrors, setAdjustmentErrors] = useState({});
+
+  useEffect(() => {
+    setAdjustments(mapInitialAdjustments(initialAdjustments));
+    setAdjustmentErrors({});
+  }, [initialAdjustments, mapInitialAdjustments]);
   const [dayType, setDayType] = useState(initialDayType);
   const [paidLeaveNotes, setPaidLeaveNotes] = useState(initialPaidLeaveNotes);
   const [leaveType, setLeaveType] = useState(initialLeaveType || '');
@@ -233,6 +267,50 @@ export default function TimeEntryForm({
     };
     setPendingDelete({ id, summary, kind: 'segment' });
   };
+  const addAdjustment = () => setAdjustments(prev => [...prev, createAdjustment()]);
+  const updateAdjustment = (id, patch) => {
+    setAdjustments(prev => prev.map(item => (item.id === id ? { ...item, ...patch } : item)));
+    setAdjustmentErrors(prev => {
+      if (!prev[id]) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+  const removeAdjustment = (id) => {
+    const target = adjustments.find(item => item.id === id);
+    if (!target) return;
+    if (target._status === 'existing' && target.workSessionId) {
+      const amountValue = parseFloat(target.amount);
+      const formattedDate = format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy');
+      const summary = {
+        employeeName: employee.name,
+        date: formattedDate,
+        entryTypeLabel: 'התאמה',
+      };
+      const summaryText = Number.isFinite(amountValue) && amountValue > 0
+        ? `התאמה ${target.type === 'debit' ? 'ניכוי' : 'זיכוי'} על סך ₪${Math.abs(amountValue).toLocaleString()}`
+        : 'התאמה';
+      setPendingDelete({
+        id: target.workSessionId,
+        summary,
+        summaryText,
+        kind: 'adjustment',
+        localId: target.id,
+      });
+      return;
+    }
+    setAdjustments(prev => {
+      const next = prev.filter(item => item.id !== id);
+      return next.length > 0 ? next : [createAdjustment()];
+    });
+    setAdjustmentErrors(prev => {
+      if (!prev[id]) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
   const requestDeleteLeave = () => {
     if (!currentPaidLeaveId) return;
     const summary = {
@@ -247,6 +325,7 @@ export default function TimeEntryForm({
     const target = pendingDelete;
     try {
       const deletedRow = await softDeleteWorkSession(target.id);
+      let payload = deletedRow ? [deletedRow] : [];
       if (target.kind === 'segment') {
         setSegments(prev => prev.filter(s => s.id !== target.id));
       }
@@ -260,7 +339,18 @@ export default function TimeEntryForm({
         setPaidLeaveNotes('');
         setSegments(prev => (prev.length > 0 ? prev : [createSeg()]));
       }
-      const payload = deletedRow ? [deletedRow] : [];
+      if (target.kind === 'adjustment') {
+        setAdjustments(prev => {
+          const next = prev.filter(item => item.id !== target.localId);
+          return next.length > 0 ? next : [createAdjustment()];
+        });
+        setAdjustmentErrors(prev => {
+          if (!target.localId || !prev[target.localId]) return prev;
+          const next = { ...prev };
+          delete next[target.localId];
+          return next;
+        });
+      }
       onDeleted?.([target.id], payload);
       toast.success(he['toast.delete.success']);
       setPendingDelete(null);
@@ -290,6 +380,12 @@ export default function TimeEntryForm({
 
   const handleDayTypeChange = (value) => {
     setDayType(value);
+    if (value === 'adjustment' && adjustments.length === 0) {
+      setAdjustments([createAdjustment()]);
+    }
+    if (value !== 'adjustment') {
+      setAdjustmentErrors({});
+    }
     if (value !== 'paid_leave') {
       setLeaveType('');
       setMixedPaid(true);
@@ -301,6 +397,39 @@ export default function TimeEntryForm({
 
   const handleSave = (e) => {
     e.preventDefault();
+    if (dayType === 'adjustment') {
+      const normalized = [];
+      const errs = {};
+      adjustments.forEach(row => {
+        const amountValue = parseFloat(row.amount);
+        if (!row.amount || Number.isNaN(amountValue) || amountValue <= 0) {
+          errs[row.id] = 'סכום גדול מ-0 נדרש';
+          return;
+        }
+        normalized.push({
+          id: row.workSessionId || null,
+          type: row.type === 'debit' ? 'debit' : 'credit',
+          amount: Math.abs(amountValue),
+          notes: row.notes || '',
+        });
+      });
+      if (Object.keys(errs).length > 0) {
+        setAdjustmentErrors(errs);
+        toast.error('נא למלא סכום עבור כל התאמה.', { duration: 15000 });
+        return;
+      }
+      if (!normalized.length) {
+        toast.error('יש להזין לפחות התאמה אחת.', { duration: 15000 });
+        return;
+      }
+      setAdjustmentErrors({});
+      onSubmit({
+        rows: [],
+        dayType,
+        adjustments: normalized,
+      });
+      return;
+    }
     if (dayType === 'paid_leave') {
       if (!leaveType) {
         toast.error('יש לבחור סוג חופשה.', { duration: 15000 });
@@ -366,6 +495,25 @@ export default function TimeEntryForm({
     }, 0);
     return `שכר יומי: ₪${total.toFixed(2)}`;
   }, [segments, isGlobal, isHourly, dailyRate, employee, selectedDate, getRateForDate]);
+
+  const adjustmentSummary = useMemo(() => {
+    if (!Array.isArray(adjustments) || adjustments.length === 0) {
+      return 'לא הוזנו התאמות ליום זה.';
+    }
+    const total = adjustments.reduce((sum, item) => {
+      const amountValue = parseFloat(item.amount);
+      if (!item.amount || Number.isNaN(amountValue) || amountValue <= 0) {
+        return sum;
+      }
+      const normalized = item.type === 'debit' ? -Math.abs(amountValue) : Math.abs(amountValue);
+      return sum + normalized;
+    }, 0);
+    if (total === 0) {
+      return 'לא הוזנו התאמות ליום זה.';
+    }
+    const prefix = total > 0 ? '+' : '-';
+    return `סה"כ התאמות ליום: ${prefix}₪${Math.abs(total).toLocaleString()}`;
+  }, [adjustments]);
 
   const leaveSummary = useMemo(() => {
     if (!isLeaveDay) return null;
@@ -450,7 +598,9 @@ export default function TimeEntryForm({
     showPreStartWarning,
   ]);
 
-  const summary = isLeaveDay ? leaveSummary : baseSummary;
+  const summary = dayType === 'adjustment'
+    ? adjustmentSummary
+    : (isLeaveDay ? leaveSummary : baseSummary);
 
   const renderSegment = (seg, idx) => {
     if (isGlobal) {
@@ -498,6 +648,76 @@ export default function TimeEntryForm({
       />
     );
   };
+
+  const renderAdjustmentSegment = (row, idx) => (
+    <div key={row.id} className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium text-slate-700">התאמה #{idx + 1}</div>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-red-500 hover:bg-red-50"
+              onClick={() => removeAdjustment(row.id)}
+              aria-label="מחק התאמה"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>מחק התאמה</TooltipContent>
+        </Tooltip>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="space-y-1">
+          <Label className="text-sm font-medium text-slate-700">סוג התאמה</Label>
+          <div className="flex gap-2" role="radiogroup" aria-label="סוג התאמה">
+            <Button
+              type="button"
+              variant={row.type === 'credit' ? 'default' : 'ghost'}
+              className="flex-1 h-10"
+              onClick={() => updateAdjustment(row.id, { type: 'credit' })}
+            >
+              זיכוי
+            </Button>
+            <Button
+              type="button"
+              variant={row.type === 'debit' ? 'default' : 'ghost'}
+              className="flex-1 h-10"
+              onClick={() => updateAdjustment(row.id, { type: 'debit' })}
+            >
+              ניכוי
+            </Button>
+          </div>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-sm font-medium text-slate-700">סכום (₪)</Label>
+          <Input
+            type="number"
+            min="0"
+            step="0.01"
+            value={row.amount}
+            onChange={event => updateAdjustment(row.id, { amount: event.target.value })}
+            className="bg-white h-10 text-base"
+          />
+          {adjustmentErrors[row.id] ? (
+            <p className="text-xs text-red-600 text-right">{adjustmentErrors[row.id]}</p>
+          ) : null}
+        </div>
+        <div className="space-y-1 sm:col-span-2">
+          <Label className="text-sm font-medium text-slate-700">הערות</Label>
+          <Textarea
+            value={row.notes}
+            onChange={event => updateAdjustment(row.id, { notes: event.target.value })}
+            rows={2}
+            className="bg-white text-base leading-6"
+            placeholder="הסבר קצר (לא חובה)"
+          />
+        </div>
+      </div>
+    </div>
+  );
 
   const addLabel = isHourly || isGlobal ? 'הוסף מקטע שעות' : 'הוסף רישום';
 
@@ -616,6 +836,28 @@ export default function TimeEntryForm({
     </div>
   );
 
+  const visibleSegments = dayType === 'paid_leave'
+    ? [{ id: 'paid_leave_notes' }]
+    : dayType === 'adjustment'
+      ? adjustments
+      : segments.filter(s => s._status !== 'deleted');
+
+  const segmentRenderer = dayType === 'paid_leave'
+    ? renderPaidLeaveSegment
+    : dayType === 'adjustment'
+      ? renderAdjustmentSegment
+      : renderSegment;
+
+  const addHandler = dayType === 'paid_leave'
+    ? null
+    : dayType === 'adjustment'
+      ? addAdjustment
+      : addSeg;
+
+  const addButtonLabel = dayType === 'adjustment'
+    ? 'הוסף התאמה'
+    : addLabel;
+
   return (
     <form onSubmit={handleSave} className="flex flex-col w-[min(98vw,1100px)] max-w-[98vw] h-[min(92vh,calc(100dvh-2rem))]">
       <SingleDayEntryShell
@@ -624,10 +866,10 @@ export default function TimeEntryForm({
         showDayType={allowDayTypeSelection ? true : isGlobal}
         dayType={dayType}
         onDayTypeChange={handleDayTypeChange}
-        segments={dayType === 'paid_leave' ? [{ id: 'paid_leave_notes' }] : segments.filter(s => s._status !== 'deleted')}
-        renderSegment={dayType === 'paid_leave' ? renderPaidLeaveSegment : renderSegment}
-        onAddSegment={dayType === 'paid_leave' ? null : addSeg}
-        addLabel={addLabel}
+        segments={visibleSegments}
+        renderSegment={segmentRenderer}
+        onAddSegment={addHandler}
+        addLabel={addButtonLabel}
         summary={summary}
         onCancel={() => onSubmit(null)}
       />
