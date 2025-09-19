@@ -42,10 +42,10 @@ export async function loadRuntimeConfig() {
     return existing;
   }
 
-  let config = await loadFromFunction();
+  let config = loadFromEnv();
 
   if (!config) {
-    config = loadFromEnv();
+    config = await loadFromFunction();
   }
 
   if (!config) {
