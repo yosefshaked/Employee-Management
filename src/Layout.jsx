@@ -1,9 +1,16 @@
 import React, { useState } from "react";
-import ChangelogModal from "./components/ChangelogModal";
-import { Link, useLocation } from "react-router-dom";
-import { Toaster } from "sonner";
-
-import { Calendar, Users, Clock, BarChart3, Settings, SlidersHorizontal } from "lucide-react";
+import { Link, useLocation, Outlet } from "react-router-dom";
+import { Toaster, toast } from "sonner";
+import {
+  Calendar,
+  Users,
+  Clock,
+  BarChart3,
+  Settings,
+  SlidersHorizontal,
+  LogOut,
+  UserRound,
+} from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -18,16 +25,19 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import ChangelogModal from "./components/ChangelogModal";
+import OrgConfigBanner from "@/components/OrgConfigBanner.jsx";
+import { useAuth } from "@/auth/AuthContext.jsx";
 
 const navigationItems = [
   {
     title: "לוח בקרה",
-    url: "Dashboard",
+    url: "/Dashboard",
     icon: Calendar,
   },
   {
     title: "עובדים",
-    url: "Employees",
+    url: "/Employees",
     icon: Users,
   },
   {
@@ -37,17 +47,17 @@ const navigationItems = [
   },
   {
     title: "רישום זמנים",
-    url: "TimeEntry",
+    url: "/TimeEntry",
     icon: Clock,
   },
   {
     title: "דוחות",
-    url: "Reports",
+    url: "/Reports",
     icon: BarChart3,
   },
   {
     title: "הגדרות",
-    url: "Settings",
+    url: "/Settings",
     icon: SlidersHorizontal,
   },
 ];
@@ -55,6 +65,17 @@ const navigationItems = [
 export default function Layout({ children }) {
   const location = useLocation();
   const [showChangelog, setShowChangelog] = useState(false);
+  const { user, signOut } = useAuth();
+
+  const handleSignOut = async () => {
+    try {
+      await signOut();
+      toast.success("התנתקת בהצלחה");
+    } catch (error) {
+      console.error("Sign-out failed", error);
+      toast.error("אירעה שגיאה בהתנתקות. נסה שוב.");
+    }
+  };
 
   return (
     <SidebarProvider>
@@ -110,12 +131,11 @@ export default function Layout({ children }) {
             </SidebarGroup>
           </SidebarContent>
 
-          <SidebarFooter className="border-t border-slate-200 p-6">
+          <SidebarFooter className="border-t border-slate-200 p-6 space-y-4">
             <button
               onClick={() => setShowChangelog(true)}
               style={{
                 width: '100%',
-                marginBottom: 12,
                 background: 'linear-gradient(90deg, #6366f1 0%, #60a5fa 100%)',
                 color: '#fff',
                 border: 'none',
@@ -131,12 +151,20 @@ export default function Layout({ children }) {
             >עדכונים</button>
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-gradient-to-r from-green-400 to-blue-500 rounded-full flex items-center justify-center">
-                <span className="text-white font-semibold">מ</span>
+                <UserRound className="w-5 h-5 text-white" aria-hidden="true" />
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-slate-900 text-sm">מנהל המערכת</p>
-                <p className="text-xs text-slate-500">ניהול זמני עבודה</p>
+              <div className="flex-1 min-w-0 text-right">
+                <p className="font-semibold text-slate-900 text-sm truncate">{user?.name || user?.email || 'משתמש מחובר'}</p>
+                {user?.email && <p className="text-xs text-slate-500 truncate">{user.email}</p>}
               </div>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="p-2 rounded-full hover:bg-slate-100 transition-colors"
+                aria-label="התנתק"
+              >
+                <LogOut className="w-4 h-4 text-slate-600" />
+              </button>
             </div>
           </SidebarFooter>
         </Sidebar>
@@ -149,8 +177,10 @@ export default function Layout({ children }) {
             </div>
           </header>
 
+          <OrgConfigBanner />
+
           <div className="flex-1 overflow-auto">
-            {children}
+            {children ?? <Outlet />}
           </div>
         </main>
       </div>
