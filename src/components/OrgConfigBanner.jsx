@@ -12,6 +12,7 @@ export default function OrgConfigBanner() {
 
   useEffect(() => {
     let isActive = true;
+
     if (!session) {
       setShouldShow(false);
       setIsChecking(false);
@@ -44,10 +45,22 @@ export default function OrgConfigBanner() {
       }
     };
 
+    const handleVerified = () => {
+      if (!isActive) return;
+      checkSettings();
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('setup-assistant:verified', handleVerified);
+    }
+
     checkSettings();
 
     return () => {
       isActive = false;
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('setup-assistant:verified', handleVerified);
+      }
     };
   }, [session]);
 
