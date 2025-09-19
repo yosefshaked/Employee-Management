@@ -19,10 +19,57 @@ function maskForLog(value) {
 }
 
 function readOrgId(req) {
-  const headerId = req.headers?.['x-org-id'] || req.headers?.['X-Org-Id'];
-  if (headerId) return String(headerId);
-  const query = req.query || {};
-  return query.org_id || query.orgId || null;
+  const headers = req.headers || {};
+  if (typeof headers.get === 'function') {
+    const viaGetter = headers.get('x-org-id');
+    if (viaGetter) {
+      return String(viaGetter);
+    }
+  }
+
+  const headerId = headers['x-org-id'] || headers['X-Org-Id'];
+  return headerId ? String(headerId) : null;
+}
+
+const MEMBERSHIP_TABLES = ['org_memberships', 'app_org_memberships'];
+
+async function verifyMembership(supabase, orgId, userId) {
+  const missingTables = new Set();
+
+  for (const table of MEMBERSHIP_TABLES) {
+    const response = await supabase
+      .from(table)
+      .select('id')
+      .eq('org_id', orgId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (response.error) {
+      const { code } = response.error;
+      if (code === '42P01') {
+        missingTables.add(table);
+        continue;
+      }
+      throw Object.assign(new Error('membership-query-failed'), {
+        cause: response.error,
+        table,
+      });
+    }
+
+    if (response.data) {
+      return {
+        allowed: true,
+        table,
+        missingTables,
+      };
+    }
+  }
+
+  return {
+    allowed: false,
+    table: null,
+    missingTables,
+  };
 }
 
 export default async function (context, req) {
@@ -82,29 +129,38 @@ export default async function (context, req) {
     return;
   }
 
+  let membershipInfo;
   try {
-    const membershipResponse = await supabase
-      .from('app_org_memberships')
-      .select('id')
-      .eq('org_id', orgId)
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (membershipResponse.error) {
-      throw membershipResponse.error;
-    }
-
-    if (!membershipResponse.data) {
-      jsonResponse(context, 403, { error: 'אין לך הרשאה לארגון שנבחר.' });
-      return;
-    }
+    membershipInfo = await verifyMembership(supabase, orgId, userId);
   } catch (membershipError) {
     context.log.error('Failed to verify membership', {
       orgId,
-      userId,
-      message: membershipError?.message,
+      userId: maskForLog(userId),
+      table: membershipError?.table || null,
+      message: membershipError?.cause?.message || membershipError?.message,
     });
     jsonResponse(context, 500, { error: 'שגיאת שרת בבדיקת ההרשאות.' });
+    return;
+  }
+
+  if (membershipInfo.missingTables?.size === MEMBERSHIP_TABLES.length) {
+    context.log.error('Membership tables are missing in the database', {
+      orgId,
+      userId: maskForLog(userId),
+      tried: Array.from(membershipInfo.missingTables),
+    });
+    jsonResponse(context, 500, { error: 'שגיאת שרת בבדיקת ההרשאות.' });
+    return;
+  }
+
+  if (!membershipInfo.allowed) {
+    context.log.warn('User is not a member of requested organization', {
+      orgId,
+      userId: maskForLog(userId),
+      table: membershipInfo.table,
+      checkedTables: MEMBERSHIP_TABLES.filter(table => !membershipInfo.missingTables?.has(table)),
+    });
+    jsonResponse(context, 403, { error: 'אין לך הרשאה לארגון שנבחר.' });
     return;
   }
 

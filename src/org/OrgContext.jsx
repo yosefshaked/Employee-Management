@@ -281,7 +281,7 @@ export function OrgProvider({ children }) {
       setConfigStatus('loading');
 
       try {
-        const response = await fetch(`/api/config?org_id=${encodeURIComponent(orgId)}`, {
+        const response = await fetch('/api/config', {
           method: 'GET',
           headers: {
             Accept: 'application/json',

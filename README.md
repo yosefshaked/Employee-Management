@@ -56,9 +56,9 @@ The command outputs static assets to the `dist/` directory. Configure Azure Stat
 At bootstrap the SPA reads `public/runtime-config.json` (or an injected `window.__EMPLOYEE_MANAGEMENT_PUBLIC_CONFIG__`) to create the **core** Supabase client used for authentication and organization management. After the user signs in and selects an organization the client calls `/api/config` with:
 
 - `Authorization: Bearer <supabase_access_token>`
-- `x-org-id: <selected org id>` (may also be provided as a `org_id` query string)
+- `x-org-id: <selected org id>` (header is required)
 
-The Azure Function validates membership using the service role (`APP_SUPABASE_SERVICE_ROLE`) and returns the per-organization Supabase `supabase_url` and `anon_key`. Switching organizations re-requests this configuration and rebuilds the runtime client on the fly.
+The Azure Function validates membership using the service role (`APP_SUPABASE_SERVICE_ROLE`) and returns the per-organization Supabase `supabase_url` and `anon_key`. A missing token yields `401`, while a user outside the organization receives `403`. Switching organizations re-requests this configuration and rebuilds the runtime client on the fly.
 
 Visit `/#/diagnostics` to verify which configuration source is loaded for the core client. Secrets are masked except for the last four characters.
 
