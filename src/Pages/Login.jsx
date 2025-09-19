@@ -13,6 +13,7 @@ export default function Login() {
   const location = useLocation();
 
   const redirectPath = location.state?.from?.pathname || '/Dashboard';
+  const redirectMessage = location.state?.message || null;
 
   if (status === 'ready' && session) {
     return <Navigate to={redirectPath} replace />;
@@ -57,6 +58,15 @@ export default function Login() {
         </div>
 
         <div className="p-8 space-y-6">
+          {redirectMessage ? (
+            <div
+              className="bg-blue-50 border border-blue-100 text-blue-900 text-right rounded-2xl px-4 py-3 shadow-sm"
+              role="alert"
+            >
+              {redirectMessage}
+            </div>
+          ) : null}
+
           <p className="text-sm text-slate-600 text-right leading-relaxed">
             התחבר כדי להמשיך למערכת. ניתן להשתמש בחשבון גוגל, מיקרוסופט או בדוא"ל וסיסמה שסופקו לך על ידי הארגון.
           </p>
