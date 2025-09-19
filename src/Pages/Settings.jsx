@@ -4,6 +4,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -110,7 +111,6 @@ export default function Settings() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingLeavePayPolicy, setIsSavingLeavePayPolicy] = useState(false);
-
   useEffect(() => {
     const loadPolicy = async () => {
       setIsLoading(true);
@@ -141,6 +141,7 @@ export default function Settings() {
         } else {
           setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicyResponse.data?.settings_value));
         }
+
       } catch (error) {
         console.error('Error loading leave policy', error);
         toast.error('שגיאה בטעינת הגדרות החופשה');
@@ -292,6 +293,8 @@ export default function Settings() {
           <h1 className="text-3xl font-bold text-slate-900 mb-2">חגים וימי חופשה</h1>
           <p className="text-slate-600">נהל את מדיניות החופשות והחגים הארגונית במקום מרכזי אחד</p>
         </div>
+
+        {/* Storage Usage widget temporarily disabled; flip features.storageUsage=true to re-enable (requires RPCs). */}
 
         <Card className="border-0 shadow-lg bg-white/80">
           <CardHeader className="border-b">

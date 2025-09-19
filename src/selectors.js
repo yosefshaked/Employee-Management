@@ -84,7 +84,8 @@ function aggregateEmployeeHistory({
   }
 
   for (const row of workSessions) {
-    if (!row || row.employee_id !== employeeId) continue;
+    if (!row || row.deleted) continue;
+    if (row.employee_id !== employeeId) continue;
     const entryDate = toDate(row.date);
     if (!entryDate) continue;
     if (entryDate < start || entryDate > end) continue;
@@ -195,6 +196,7 @@ function logInsufficientData(method, employeeId, details) {
 }
 
 function entryMatchesFilters(row, emp, filters = {}) {
+  if (!row || row.deleted) return false;
   const { dateFrom, dateTo, selectedEmployee, employeeType = 'all', serviceId = 'all' } = filters;
   if (dateFrom && new Date(row.date) < new Date(dateFrom)) return false;
   if (dateTo && new Date(row.date) > new Date(dateTo)) return false;
@@ -212,6 +214,7 @@ export function selectMeetingHours(entries = [], services = [], employees = [], 
   const byId = Object.fromEntries(employees.map(e => [e.id, e]));
   const serviceMap = Object.fromEntries(services.map(s => [s.id, s]));
   return entries.reduce((sum, row) => {
+    if (!row || row.deleted) return sum;
     const emp = byId[row.employee_id];
     if (!emp || emp.employee_type !== 'instructor') return sum;
     if (!entryMatchesFilters(row, emp, filters)) return sum;
@@ -237,6 +240,7 @@ export function selectMeetingHours(entries = [], services = [], employees = [], 
 export function selectGlobalHours(entries = [], employees = [], filters = {}) {
   const byId = Object.fromEntries(employees.map(e => [e.id, e]));
   return entries.reduce((sum, row) => {
+    if (!row || row.deleted) return sum;
     const emp = byId[row.employee_id];
     if (!emp || emp.employee_type !== 'global') return sum;
     if (!entryMatchesFilters(row, emp, filters)) return sum;
@@ -350,13 +354,14 @@ export function selectLeaveDayValue(
   }
 
   const sessions = Array.isArray(workSessions) ? workSessions : (Array.isArray(settings?.workSessions) ? settings.workSessions : []);
+  const activeSessions = sessions.filter(item => item && !item.deleted);
   const months = policy.lookback_months || DEFAULT_LEAVE_PAY_POLICY.lookback_months;
   const base = computeDailyValue({
     method,
     months,
     employeeId,
     targetDate,
-    workSessions: sessions,
+    workSessions: activeSessions,
     services,
   });
 

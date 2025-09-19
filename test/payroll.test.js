@@ -153,7 +153,7 @@ describe('resolveLeaveSessionValue', () => {
   it('skips resolver when session is unpaid', () => {
     let called = 0;
     const result = resolveLeaveSessionValue(
-      { entry_type: 'leave_unpaid', payable: false, employee_id: 'e1', date: '2024-02-05' },
+      { entry_type: 'leave', payable: false, employee_id: 'e1', date: '2024-02-05' },
       () => {
         called += 1;
         return 999;

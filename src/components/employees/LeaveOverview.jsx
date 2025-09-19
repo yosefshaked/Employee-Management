@@ -9,6 +9,15 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { Loader2, ShieldCheck, Info } from 'lucide-react';
 import { supabase } from '@/supabaseClient';
@@ -21,6 +30,7 @@ import {
   LEAVE_PAY_METHOD_OPTIONS,
   LEAVE_PAY_METHOD_DESCRIPTIONS,
   LEAVE_PAY_METHOD_LABELS,
+  getLeaveBaseKind,
   getNegativeBalanceFloor,
   resolveLeavePayMethodContext,
 } from '@/lib/leave.js';
@@ -34,8 +44,9 @@ const ENTRY_KINDS = [
 ];
 
 function determineUsageAmount(type) {
-  if (type === 'half_day') return 0.5;
-  if (type === 'system_paid' || type === 'unpaid') return 0;
+  const baseKind = getLeaveBaseKind(type) || type;
+  if (baseKind === 'half_day') return 0.5;
+  if (baseKind === 'system_paid' || baseKind === 'unpaid') return 0;
   return 1;
 }
 
@@ -60,10 +71,11 @@ export default function LeaveOverview({
     allocationAmount: 1,
     notes: '',
   }));
-  const [overrideEmployeeId, setOverrideEmployeeId] = useState(initialEmployeeId);
+  const [overrideEmployeeId, setOverrideEmployeeId] = useState(null);
   const [overrideMethod, setOverrideMethod] = useState(OVERRIDE_METHOD_PLACEHOLDER_VALUE);
   const [overrideRate, setOverrideRate] = useState('');
   const [isSavingOverride, setIsSavingOverride] = useState(false);
+  const [isOverrideDialogOpen, setIsOverrideDialogOpen] = useState(false);
 
   const usageOptions = useMemo(() => {
     return LEAVE_TYPE_OPTIONS.filter(option => leavePolicy.allow_half_day || option.value !== 'half_day');
@@ -86,40 +98,15 @@ export default function LeaveOverview({
   }, [employees, formState.employeeId]);
 
   useEffect(() => {
-    if (employees.length === 0) {
-      if (overrideEmployeeId !== EMPLOYEE_PLACEHOLDER_VALUE) {
-        setOverrideEmployeeId(EMPLOYEE_PLACEHOLDER_VALUE);
-      }
-      return;
-    }
+    if (!isOverrideDialogOpen) return;
     const exists = employees.some(emp => emp.id === overrideEmployeeId);
     if (!exists) {
-      const nextId = employees[0].id;
-      if (overrideEmployeeId !== nextId) {
-        setOverrideEmployeeId(nextId);
-      }
-    }
-  }, [employees, overrideEmployeeId]);
-
-  useEffect(() => {
-    if (employees.length === 0 || overrideEmployeeId === EMPLOYEE_PLACEHOLDER_VALUE) {
+      setOverrideEmployeeId(null);
       setOverrideMethod(OVERRIDE_METHOD_PLACEHOLDER_VALUE);
       setOverrideRate('');
-      return;
+      setIsOverrideDialogOpen(false);
     }
-    const employee = employees.find(emp => emp.id === overrideEmployeeId);
-    if (!employee) {
-      setOverrideMethod(OVERRIDE_METHOD_PLACEHOLDER_VALUE);
-      setOverrideRate('');
-      return;
-    }
-    const nextMethod = employee.leave_pay_method && employee.leave_pay_method.length > 0
-      ? employee.leave_pay_method
-      : OVERRIDE_METHOD_PLACEHOLDER_VALUE;
-    const nextRate = employee.leave_fixed_day_rate;
-    setOverrideMethod(nextMethod);
-    setOverrideRate(nextRate === null || nextRate === undefined ? '' : String(nextRate));
-  }, [employees, overrideEmployeeId]);
+  }, [employees, isOverrideDialogOpen, overrideEmployeeId]);
 
   useEffect(() => {
     if (formState.entryKind !== 'usage') return;
@@ -245,12 +232,12 @@ export default function LeaveOverview({
   const lockedUsageTypes = new Set(['half_day', 'system_paid', 'unpaid']);
   const isUsageLocked = lockedUsageTypes.has(formState.holidayType);
 
-  const hasOverrideEmployeeSelection = overrideEmployeeId && overrideEmployeeId !== EMPLOYEE_PLACEHOLDER_VALUE;
-
   const selectedEmployee = useMemo(() => {
-    if (!hasOverrideEmployeeSelection) return null;
+    if (!overrideEmployeeId) return null;
     return employees.find(emp => emp.id === overrideEmployeeId) || null;
-  }, [employees, hasOverrideEmployeeSelection, overrideEmployeeId]);
+  }, [employees, overrideEmployeeId]);
+
+  const hasOverrideEmployeeSelection = Boolean(selectedEmployee);
 
   const parseRateValue = (value) => {
     if (value === '' || value === null || value === undefined) return null;
@@ -270,6 +257,26 @@ export default function LeaveOverview({
   const selectedMethodDescription = normalizedOverrideMethod
     ? LEAVE_PAY_METHOD_DESCRIPTIONS[normalizedOverrideMethod] || ''
     : '';
+
+  const handleOverrideDialogClose = () => {
+    setIsOverrideDialogOpen(false);
+    setOverrideEmployeeId(null);
+    setOverrideMethod(OVERRIDE_METHOD_PLACEHOLDER_VALUE);
+    setOverrideRate('');
+    setIsSavingOverride(false);
+  };
+
+  const handleOpenOverrideDialog = (employee) => {
+    if (!employee) return;
+    const nextMethod = employee.leave_pay_method && employee.leave_pay_method.length > 0
+      ? employee.leave_pay_method
+      : OVERRIDE_METHOD_PLACEHOLDER_VALUE;
+    const nextRate = employee.leave_fixed_day_rate;
+    setOverrideEmployeeId(employee.id);
+    setOverrideMethod(nextMethod);
+    setOverrideRate(nextMethod === 'fixed_rate' && nextRate !== null && nextRate !== undefined ? String(nextRate) : '');
+    setIsOverrideDialogOpen(true);
+  };
 
   const handleOverrideMethodChange = (value) => {
     setOverrideMethod(value);
@@ -313,6 +320,7 @@ export default function LeaveOverview({
       if (onRefresh) {
         await onRefresh();
       }
+      handleOverrideDialogClose();
     } catch (error) {
       console.error('Error saving leave pay override', error);
       toast.error('שמירת העקיפה נכשלה');
@@ -322,104 +330,6 @@ export default function LeaveOverview({
 
   return (
     <div className="space-y-6">
-      <Card className="border-0 shadow-lg bg-white/80">
-        <CardHeader className="border-b">
-          <CardTitle className="text-xl font-semibold text-slate-900">עקיפת שיטת חישוב</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {employees.length === 0 ? (
-            <p className="text-sm text-slate-500 text-right">אין עובדים זמינים לעדכון עקיפות.</p>
-          ) : (
-            <form className="grid grid-cols-1 md:grid-cols-2 gap-4" onSubmit={handleOverrideSubmit}>
-              <div className="space-y-1 md:col-span-2">
-                <p className="text-sm text-slate-600 text-right">
-                  השיטה הארגונית ({defaultMethodLabel}) תחול כאשר אין עקיפה אישית.
-                </p>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-sm font-semibold text-slate-700">עובד</Label>
-                <Select
-                  value={overrideEmployeeId}
-                  onValueChange={setOverrideEmployeeId}
-                  disabled={isLoading || isSavingOverride || employees.length === 0}
-                >
-                  <SelectTrigger className="bg-white">
-                    <SelectValue placeholder="בחר עובד" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {overrideEmployeeId === EMPLOYEE_PLACEHOLDER_VALUE && (
-                      <SelectItem value={EMPLOYEE_PLACEHOLDER_VALUE} disabled>
-                        בחר עובד
-                      </SelectItem>
-                    )}
-                    {employees.map(emp => (
-                      <SelectItem key={emp.id} value={emp.id}>{emp.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <Label className="text-sm font-semibold text-slate-700">עקיפת שיטת חישוב</Label>
-                  {normalizedOverrideMethod && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleOverrideMethodChange(OVERRIDE_METHOD_PLACEHOLDER_VALUE)}
-                      disabled={isLoading || isSavingOverride}
-                    >
-                      אפס
-                    </Button>
-                  )}
-                </div>
-                <Select
-                  value={overrideMethod}
-                  onValueChange={handleOverrideMethodChange}
-                  disabled={isLoading || isSavingOverride || !hasOverrideEmployeeSelection}
-                >
-                  <SelectTrigger className="bg-white">
-                    <SelectValue placeholder="ללא עקיפה (ברירת מחדל)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={OVERRIDE_METHOD_PLACEHOLDER_VALUE}>ללא עקיפה (ברירת מחדל)</SelectItem>
-                    {LEAVE_PAY_METHOD_OPTIONS.map(option => (
-                      <SelectItem key={option.value} value={option.value}>{option.title}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedMethodDescription && (
-                  <p className="text-xs text-slate-500 text-right mt-1">{selectedMethodDescription}</p>
-                )}
-              </div>
-              {isFixedSelected && (
-                <div className="space-y-1">
-                  <Label className="text-sm font-semibold text-slate-700">תעריף יומי לעובד (₪)</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={overrideRate}
-                    onChange={(event) => setOverrideRate(event.target.value)}
-                    disabled={isLoading || isSavingOverride}
-                  />
-                </div>
-              )}
-              <div className="md:col-span-2 flex justify-end">
-                <Button
-                  type="submit"
-                  className="gap-2"
-                  disabled={isSavingOverride || isLoading || !hasOverrideEmployeeSelection || !hasOverrideChanges}
-                >
-                  {isSavingOverride ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
-                  {isSavingOverride ? 'שומר...' : 'שמור עקיפה'}
-                </Button>
-              </div>
-            </form>
-          )}
-        </CardContent>
-      </Card>
-
       <Card className="border-0 shadow-lg bg-white/80">
         <CardHeader className="border-b">
           <CardTitle className="text-xl font-semibold text-slate-900">פעולה מהירה</CardTitle>
@@ -602,8 +512,35 @@ export default function LeaveOverview({
                     <TableRow key={employee.id}>
                       <TableCell className="font-medium">{employee.name}</TableCell>
                       <TableCell>
-                        <div className="flex flex-col items-end gap-1">
-                          <span className="text-sm font-medium text-slate-700">{methodLabel}</span>
+                        <div className="flex flex-col items-end gap-2">
+                          <div className="flex flex-row-reverse items-center gap-2">
+                            <span className="text-sm font-medium text-slate-700">{methodLabel}</span>
+                            <div className="flex flex-row-reverse items-center gap-1">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleOpenOverrideDialog(employee)}
+                                disabled={isLoading}
+                              >
+                                עקיפת שיטת חישוב
+                              </Button>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                                    aria-label="מידע על עקיפת שיטת החישוב"
+                                  >
+                                    <Info className="h-4 w-4" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" align="end" className="max-w-xs text-right leading-relaxed">
+                                  שינוי השיטה משפיע על חישוב חופשות חדשות או עריכות שתשמרו מהיום והלאה. רישומים קיימים שומרים את הסכום שנקבע בזמן הקליטה, ולכן אם צריך לעדכן אותם יש לערוך אותם ידנית.
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
+                          </div>
                           {hasOverride ? (
                             <Badge variant="outline" className="text-xs text-amber-700 border-amber-200 bg-amber-50">
                               עקיפת שיטת חישוב
@@ -632,6 +569,96 @@ export default function LeaveOverview({
           </Table>
         </CardContent>
       </Card>
+      <Dialog open={isOverrideDialogOpen} onOpenChange={(open) => (!open ? handleOverrideDialogClose() : null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader className="text-right">
+            <DialogTitle>עקיפת שיטת חישוב</DialogTitle>
+            <DialogDescription className="text-sm text-slate-500 space-y-1">
+              <p>בחר שיטה חלופית לתשלום חופשה עבור העובד הנוכחי.</p>
+              <p>השיטה הארגונית ({defaultMethodLabel}) תחול כאשר אין עקיפה אישית.</p>
+            </DialogDescription>
+          </DialogHeader>
+          <Alert className="bg-sky-50 border-sky-200 text-sky-900 text-right">
+            <AlertTitle className="flex flex-row-reverse items-center gap-2 text-base">
+              <Info className="h-4 w-4" />חשוב לדעת
+            </AlertTitle>
+            <AlertDescription className="text-sm leading-relaxed">
+              שינוי שיטת החישוב משפיע על כל חופשה שתקליטו או תעדכנו מרגע השמירה ואילך. רישומים שנשמרו בעבר אינם משתנים אוטומטית, ולכן אם ביצעתם שינוי באמצע השנה חשוב לבדוק האם יש צורך לעדכן ידנית ימים שנרשמו כבר.
+            </AlertDescription>
+          </Alert>
+          <form className="space-y-4" onSubmit={handleOverrideSubmit}>
+            <div className="space-y-1 text-right">
+              <Label className="text-sm font-semibold text-slate-700">עובד</Label>
+              <p className="text-base font-medium text-slate-900">{selectedEmployee?.name || '—'}</p>
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-sm font-semibold text-slate-700">עקיפת שיטת חישוב</Label>
+                {normalizedOverrideMethod && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleOverrideMethodChange(OVERRIDE_METHOD_PLACEHOLDER_VALUE)}
+                    disabled={isSavingOverride}
+                  >
+                    אפס
+                  </Button>
+                )}
+              </div>
+              <Select
+                value={overrideMethod}
+                onValueChange={handleOverrideMethodChange}
+                disabled={!hasOverrideEmployeeSelection || isSavingOverride}
+              >
+                <SelectTrigger className="bg-white">
+                  <SelectValue placeholder="ללא עקיפה (ברירת מחדל)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={OVERRIDE_METHOD_PLACEHOLDER_VALUE}>ללא עקיפה (ברירת מחדל)</SelectItem>
+                  {LEAVE_PAY_METHOD_OPTIONS.map(option => (
+                    <SelectItem key={option.value} value={option.value}>{option.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedMethodDescription && (
+                <p className="text-xs text-slate-500 text-right mt-1">{selectedMethodDescription}</p>
+              )}
+            </div>
+            {isFixedSelected && (
+              <div className="space-y-1">
+                <Label className="text-sm font-semibold text-slate-700">תעריף יומי לעובד (₪)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={overrideRate}
+                  onChange={(event) => setOverrideRate(event.target.value)}
+                  disabled={isSavingOverride}
+                />
+              </div>
+            )}
+            <DialogFooter className="flex flex-row-reverse gap-2">
+              <Button
+                type="submit"
+                className="gap-2"
+                disabled={isSavingOverride || !hasOverrideEmployeeSelection || !hasOverrideChanges}
+              >
+                {isSavingOverride ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+                {isSavingOverride ? 'שומר...' : 'שמור עקיפה'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={handleOverrideDialogClose}
+                disabled={isSavingOverride}
+              >
+                ביטול
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

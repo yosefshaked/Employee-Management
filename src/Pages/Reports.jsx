@@ -175,7 +175,7 @@ export default function Reports() {
         leaveData,
       ] = await Promise.all([
         supabase.from('Employees').select('*').order('name'),
-        supabase.from('WorkSessions').select('*'),
+        supabase.from('WorkSessions').select('*').eq('deleted', false),
         supabase.from('Services').select('*'),
         supabase.from('RateHistory').select('*'),
         supabase.from('Settings').select('settings_value').eq('key', 'leave_policy').single(),
@@ -190,7 +190,8 @@ export default function Reports() {
       if (leaveData.error) throw leaveData.error;
 
       setEmployees(employeesData.data || []);
-      setWorkSessions(sessionsData.data || []);
+      const safeSessions = (sessionsData.data || []).filter(session => !session?.deleted);
+      setWorkSessions(safeSessions);
       const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
       setServices(filteredServices);
       setRateHistories(ratesData.data || []);

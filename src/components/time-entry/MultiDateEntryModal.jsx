@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { Separator } from '@/components/ui/separator';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import EntryRow, { computeRowPayment } from './EntryRow.jsx';
 import { copyFromPrevious, formatDatesCount, isRowCompleteForProgress } from './multiDateUtils.js';
@@ -13,7 +15,14 @@ import { ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import he from '@/i18n/he.json';
 import { calculateGlobalDailyRate, aggregateGlobalDays, createLeaveDayValueResolver } from '@/lib/payroll.js';
-import { isLeaveEntryType, LEAVE_TYPE_OPTIONS } from '@/lib/leave.js';
+import {
+  isLeaveEntryType,
+  LEAVE_TYPE_OPTIONS,
+  MIXED_SUBTYPE_OPTIONS,
+  DEFAULT_MIXED_SUBTYPE,
+  normalizeMixedSubtype,
+} from '@/lib/leave.js';
+import { Switch } from '@/components/ui/switch';
 import { selectLeaveDayValue } from '@/selectors.js';
 
 function validateRow(row, employee, services, getRateForDate) {
@@ -54,6 +63,8 @@ export default function MultiDateEntryModal({
   onSaved,
   workSessions = [],
   leavePayPolicy = null,
+  allowHalfDay = false,
+  defaultMode = 'regular',
 }) {
   const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees]);
   const initialRows = useMemo(() => {
@@ -83,7 +94,7 @@ export default function MultiDateEntryModal({
 
   const [rows, setRows] = useState(initialRows);
   useEffect(() => { setRows(initialRows); }, [initialRows]);
-  const { saveRows, saveMixedLeave } = useTimeEntry({
+  const { saveRows, saveMixedLeave, saveAdjustments } = useTimeEntry({
     employees,
     services,
     getRateForDate,
@@ -101,10 +112,28 @@ export default function MultiDateEntryModal({
     });
   }, [employees, workSessions, services, leavePayPolicy]);
 
-  const [mode, setMode] = useState('regular');
+  const normalizedDefaultMode = useMemo(() => {
+    return defaultMode === 'leave' || defaultMode === 'adjustment' ? defaultMode : 'regular';
+  }, [defaultMode]);
+  const [mode, setMode] = useState(normalizedDefaultMode);
+  useEffect(() => {
+    if (open) {
+      setMode(normalizedDefaultMode);
+    }
+  }, [open, normalizedDefaultMode]);
   const handleModeChange = useCallback((nextMode) => {
     setMode(nextMode);
+    if (nextMode !== 'adjustment') {
+      setAdjustmentErrors({});
+    }
   }, []);
+  const defaultMixedSubtype = DEFAULT_MIXED_SUBTYPE;
+  const ensureMixedSelection = useCallback((value = {}) => {
+    const paid = value && value.paid !== false;
+    const subtype = normalizeMixedSubtype(value?.subtype) || defaultMixedSubtype;
+    const halfDay = allowHalfDay && paid ? Boolean(value?.halfDay) : false;
+    return { paid, subtype, halfDay };
+  }, [allowHalfDay, defaultMixedSubtype]);
   const leaveTypeOptions = useMemo(
     () => LEAVE_TYPE_OPTIONS.filter(option => option.value === 'mixed'),
     []
@@ -120,19 +149,99 @@ export default function MultiDateEntryModal({
     () => [...selectedDates].sort((a, b) => a - b),
     [selectedDates]
   );
+  const [globalMixedSubtype, setGlobalMixedSubtype] = useState(DEFAULT_MIXED_SUBTYPE);
   const defaultMixedSelections = useMemo(() => {
     const base = {};
     selectedEmployees.forEach(empId => {
       const inner = {};
       sortedDates.forEach(d => {
-        inner[format(d, 'yyyy-MM-dd')] = true;
+        inner[format(d, 'yyyy-MM-dd')] = ensureMixedSelection();
+      });
+      base[empId] = inner;
+    });
+    return base;
+  }, [selectedEmployees, sortedDates, ensureMixedSelection]);
+  const [mixedSelections, setMixedSelections] = useState(defaultMixedSelections);
+  useEffect(() => {
+    setMixedSelections(defaultMixedSelections);
+    setGlobalMixedSubtype(DEFAULT_MIXED_SUBTYPE);
+  }, [defaultMixedSelections]);
+
+  const defaultAdjustmentValues = useMemo(() => {
+    const base = {};
+    selectedEmployees.forEach(empId => {
+      const inner = {};
+      sortedDates.forEach(d => {
+        const dateStr = format(d, 'yyyy-MM-dd');
+        inner[dateStr] = { type: 'credit', amount: '', notes: '' };
       });
       base[empId] = inner;
     });
     return base;
   }, [selectedEmployees, sortedDates]);
-  const [mixedSelections, setMixedSelections] = useState(defaultMixedSelections);
-  useEffect(() => { setMixedSelections(defaultMixedSelections); }, [defaultMixedSelections]);
+
+  const [adjustmentValues, setAdjustmentValues] = useState(defaultAdjustmentValues);
+  const [adjustmentErrors, setAdjustmentErrors] = useState({});
+
+  useEffect(() => {
+    if (open && normalizedDefaultMode !== 'adjustment') {
+      setAdjustmentErrors({});
+    }
+  }, [open, normalizedDefaultMode, setAdjustmentErrors]);
+
+  useEffect(() => {
+    setAdjustmentValues(defaultAdjustmentValues);
+    setAdjustmentErrors({});
+  }, [defaultAdjustmentValues]);
+
+  useEffect(() => {
+    setAdjustmentErrors({});
+  }, [selectedEmployees, sortedDates]);
+
+  const updateAdjustmentValue = useCallback((empId, dateStr, patch) => {
+    setAdjustmentValues(prev => {
+      const next = { ...prev };
+      const inner = { ...(next[empId] || {}) };
+      const current = inner[dateStr] || { type: 'credit', amount: '', notes: '' };
+      inner[dateStr] = { ...current, ...patch };
+      next[empId] = inner;
+      return next;
+    });
+    setAdjustmentErrors(prev => {
+      const next = { ...prev };
+      if (!next[empId]) return next;
+      const inner = { ...next[empId] };
+      if (!inner[dateStr]) return next;
+      delete inner[dateStr];
+      if (Object.keys(inner).length === 0) {
+        delete next[empId];
+      } else {
+        next[empId] = inner;
+      }
+      return next;
+    });
+  }, []);
+
+  const adjustmentStats = useMemo(() => {
+    let filled = 0;
+    let total = 0;
+    let sum = 0;
+    selectedEmployees.forEach(empId => {
+      const inner = adjustmentValues[empId] || {};
+      sortedDates.forEach(d => {
+        total += 1;
+        const dateStr = format(d, 'yyyy-MM-dd');
+        const entry = inner[dateStr];
+        if (!entry) return;
+        const amountValue = parseFloat(entry.amount);
+        if (!entry.amount || Number.isNaN(amountValue) || amountValue <= 0) return;
+        filled += 1;
+        const normalized = entry.type === 'debit' ? -Math.abs(amountValue) : Math.abs(amountValue);
+        sum += normalized;
+      });
+    });
+    return { filled, total, sum };
+  }, [adjustmentValues, selectedEmployees, sortedDates]);
 
   const validation = useMemo(
     () => rows.map(r => validateRow(r, employeesById[r.employee_id], services, getRateForDate)),
@@ -234,29 +343,81 @@ export default function MultiDateEntryModal({
   }, [employeesById]);
 
   useEffect(() => {
-    if (mode === 'leave') {
+    if (mode !== 'regular') {
       setShowBanner(false);
       setShowErrors(false);
     }
   }, [mode]);
 
-  const toggleMixedSelection = (empId, dateStr, paid) => {
+  const updateMixedSelection = useCallback((empId, dateStr, updater) => {
     setMixedSelections(prev => {
       const next = { ...prev };
       const current = { ...(next[empId] || {}) };
-      current[dateStr] = paid;
+      const existing = ensureMixedSelection(current[dateStr]);
+      const updated = typeof updater === 'function'
+        ? ensureMixedSelection(updater(existing))
+        : ensureMixedSelection({ ...existing, ...updater });
+      current[dateStr] = updated;
       next[empId] = current;
+      return next;
+    });
+  }, [ensureMixedSelection]);
+
+  const toggleMixedSelection = (empId, dateStr, paid) => {
+    updateMixedSelection(empId, dateStr, current => ({
+      ...current,
+      paid,
+      halfDay: paid ? current.halfDay : false,
+    }));
+  };
+
+  const markAllMixed = (paid) => {
+    setMixedSelections(prev => {
+      const next = {};
+      selectedEmployees.forEach(empId => {
+        const inner = { ...(prev[empId] || {}) };
+        sortedDates.forEach(d => {
+          const dateStr = format(d, 'yyyy-MM-dd');
+          const current = ensureMixedSelection(inner[dateStr]);
+          inner[dateStr] = ensureMixedSelection({
+            ...current,
+            paid,
+            halfDay: paid ? current.halfDay : false,
+          });
+        });
+        next[empId] = inner;
+      });
       return next;
     });
   };
 
-  const markAllMixed = (paid) => {
-    setMixedSelections(() => {
+  const applySubtypeToAll = (subtype) => {
+    const normalized = normalizeMixedSubtype(subtype) || DEFAULT_MIXED_SUBTYPE;
+    setMixedSelections(prev => {
       const next = {};
       selectedEmployees.forEach(empId => {
-        const inner = {};
+        const inner = { ...(prev[empId] || {}) };
         sortedDates.forEach(d => {
-          inner[format(d, 'yyyy-MM-dd')] = paid;
+          const dateStr = format(d, 'yyyy-MM-dd');
+          const current = ensureMixedSelection(inner[dateStr]);
+          inner[dateStr] = { ...current, subtype: normalized };
+        });
+        next[empId] = inner;
+      });
+      return next;
+    });
+  };
+
+  const applyHalfDayToPaid = () => {
+    if (!allowHalfDay) return;
+    setMixedSelections(prev => {
+      const next = {};
+      selectedEmployees.forEach(empId => {
+        const inner = { ...(prev[empId] || {}) };
+        sortedDates.forEach(d => {
+          const dateStr = format(d, 'yyyy-MM-dd');
+          const current = ensureMixedSelection(inner[dateStr]);
+          inner[dateStr] = current.paid ? { ...current, halfDay: true } : current;
         });
         next[empId] = inner;
       });
@@ -364,8 +525,14 @@ export default function MultiDateEntryModal({
       const map = mixedSelections[empId] || {};
       sortedDates.forEach(d => {
         const dateStr = format(d, 'yyyy-MM-dd');
-        const paid = map[dateStr] !== false;
-        selections.push({ employee_id: empId, date: dateStr, paid });
+        const entry = ensureMixedSelection(map[dateStr]);
+        selections.push({
+          employee_id: empId,
+          date: dateStr,
+          paid: entry.paid,
+          subtype: entry.subtype,
+          half_day: entry.paid ? entry.halfDay : false,
+        });
       });
     });
     if (!selections.length) {
@@ -417,6 +584,67 @@ export default function MultiDateEntryModal({
 
   const regularSaveDisabled = mode === 'regular' && rows.length === 0;
   const leaveSaveDisabled = mode === 'leave' && (!selectedEmployees.length || !sortedDates.length);
+  const handleAdjustmentSave = async () => {
+    const entries = [];
+    const errors = {};
+    let hasError = false;
+    selectedEmployees.forEach(empId => {
+      const inner = adjustmentValues[empId] || {};
+      sortedDates.forEach(d => {
+        const dateStr = format(d, 'yyyy-MM-dd');
+        const entry = inner[dateStr];
+        if (!entry) return;
+        const amountValue = parseFloat(entry.amount);
+        const rowErrors = {};
+        if (!entry.amount || Number.isNaN(amountValue) || amountValue <= 0) {
+          rowErrors.amount = 'סכום גדול מ-0 נדרש';
+        }
+        const notesValue = typeof entry.notes === 'string' ? entry.notes.trim() : '';
+        if (!notesValue) {
+          rowErrors.notes = 'יש להוסיף הערה להתאמה';
+        }
+        if (rowErrors.amount || rowErrors.notes) {
+          hasError = true;
+          if (!errors[empId]) errors[empId] = {};
+          errors[empId][dateStr] = rowErrors;
+          return;
+        }
+        entries.push({
+          employee_id: empId,
+          date: dateStr,
+          type: entry.type === 'debit' ? 'debit' : 'credit',
+          amount: amountValue,
+          notes: notesValue,
+        });
+      });
+    });
+    if (hasError) {
+      setAdjustmentErrors(errors);
+      toast.error('נא למלא סכום והערה עבור כל התאמה.', { duration: 15000 });
+      return;
+    }
+    if (!entries.length) {
+      toast.error('נא להזין סכום לפחות להתאמה אחת.', { duration: 15000 });
+      return;
+    }
+    try {
+      const result = await saveAdjustments(entries);
+      const insertedCount = Array.isArray(result?.inserted) ? result.inserted.length : entries.length;
+      toast.success(`נשמרו ${insertedCount} התאמות`);
+      setAdjustmentErrors({});
+      onSaved();
+      onClose();
+    } catch (error) {
+      toast.error(error.message);
+    }
+  };
+  const adjustmentSaveDisabled = mode === 'adjustment' && adjustmentStats.filled === 0;
+  const primaryDisabled = mode === 'leave'
+    ? leaveSaveDisabled
+    : (mode === 'adjustment' ? adjustmentSaveDisabled : regularSaveDisabled);
+  const handlePrimarySave = mode === 'leave'
+    ? handleSaveMixed
+    : (mode === 'adjustment' ? handleAdjustmentSave : handleRegularSave);
 
   return (
       <Dialog open={open} onOpenChange={onClose}>
@@ -451,7 +679,7 @@ export default function MultiDateEntryModal({
               className="flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-24 space-y-3 relative"
               data-testid="md-body"
             >
-              <div className="flex items-center justify-between bg-slate-100 rounded-lg ring-1 ring-slate-200 p-1">
+              <div className="flex items-center bg-slate-100 rounded-lg ring-1 ring-slate-200 p-1 gap-1">
                 <Button
                   type="button"
                   variant={mode === 'regular' ? 'default' : 'ghost'}
@@ -467,6 +695,14 @@ export default function MultiDateEntryModal({
                   onClick={() => handleModeChange('leave')}
                 >
                   חופשה
+                </Button>
+                <Button
+                  type="button"
+                  variant={mode === 'adjustment' ? 'default' : 'ghost'}
+                  className="flex-1 h-9"
+                  onClick={() => handleModeChange('adjustment')}
+                >
+                  התאמות
                 </Button>
               </div>
 
@@ -487,53 +723,53 @@ export default function MultiDateEntryModal({
                     </div>
                   )}
                   {groupedRows.map(([empId, items], idx) => {
-                const emp = employeesById[empId];
-                const isCollapsed = collapsed[empId];
-                return (
-                  <div key={empId} className="space-y-3">
-                    <div
-                      className="flex items-center bg-slate-100 px-3 py-2 rounded-xl ring-1 ring-slate-200 cursor-pointer"
-                      onClick={() => toggleEmp(empId)}
-                    >
-                      <span className="truncate max-w-[60%] text-[17px] font-semibold">{emp.name}</span>
-                      <span className="ml-auto text-sm text-slate-600">{formatDatesCount(items.length)}</span>
-                      <ChevronUp className={`h-4 w-4 mr-1 transition-transform ${isCollapsed ? 'rotate-180' : ''}`} />
-                    </div>
-                    {!isCollapsed && (
-                      <div className="space-y-3 mt-2 relative">
-                        <div className="flex flex-col gap-3 mt-2">
-                          {items.map(({ row, index }) => (
-                            <EntryRow
-                              key={`${row.employee_id}-${row.date}-${index}`}
-                              value={row}
-                              employee={emp}
-                              services={services}
-                              getRateForDate={getRateForDate}
-                              leaveValueResolver={leaveValueResolver}
-                              onChange={(patch) => updateRow(index, patch)}
-                              onCopyField={(field) => handleCopy(index, field)}
-                              showSummary={true}
-                              readOnlyDate
-                              rowId={`row-${index}`}
-                              flashField={flash && flash.index === index ? flash.field : null}
-                              errors={showErrors ? validation[index].errors : {}}
-                              isDuplicate={!!duplicateMap[index]}
-                              hideDayType={emp.employee_type === 'global'}
-                              allowRemove
-                              onRemove={() => removeRow(index)}
-                            />
-                          ))}
+                    const emp = employeesById[empId];
+                    const isCollapsed = collapsed[empId];
+                    return (
+                      <div key={empId} className="space-y-3">
+                        <div
+                          className="flex items-center bg-slate-100 px-3 py-2 rounded-xl ring-1 ring-slate-200 cursor-pointer"
+                          onClick={() => toggleEmp(empId)}
+                        >
+                          <span className="truncate max-w-[60%] text-[17px] font-semibold">{emp.name}</span>
+                          <span className="ml-auto text-sm text-slate-600">{formatDatesCount(items.length)}</span>
+                          <ChevronUp className={`h-4 w-4 mr-1 transition-transform ${isCollapsed ? 'rotate-180' : ''}`} />
                         </div>
+                        {!isCollapsed && (
+                          <div className="space-y-3 mt-2 relative">
+                            <div className="flex flex-col gap-3 mt-2">
+                              {items.map(({ row, index }) => (
+                                <EntryRow
+                                  key={`${row.employee_id}-${row.date}-${index}`}
+                                  value={row}
+                                  employee={emp}
+                                  services={services}
+                                  getRateForDate={getRateForDate}
+                                  leaveValueResolver={leaveValueResolver}
+                                  onChange={(patch) => updateRow(index, patch)}
+                                  onCopyField={(field) => handleCopy(index, field)}
+                                  showSummary={true}
+                                  readOnlyDate
+                                  rowId={`row-${index}`}
+                                  flashField={flash && flash.index === index ? flash.field : null}
+                                  errors={showErrors ? validation[index].errors : {}}
+                                  isDuplicate={!!duplicateMap[index]}
+                                  hideDayType={emp.employee_type === 'global'}
+                                  allowRemove
+                                  onRemove={() => removeRow(index)}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {idx !== groupedRows.length - 1 && <Separator className="my-4" />}
                       </div>
-                    )}
-                    {idx !== groupedRows.length - 1 && <Separator className="my-4" />}
-                  </div>
-                );
-              })}
+                    );
+                  })}
                 </>
-              ) : (
+              ) : mode === 'leave' ? (
                 <div className="space-y-4">
-                  <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
+                  <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:items-end">
                     <div className="space-y-1">
                       <Label className="text-sm font-medium text-slate-700">סוג חופשה</Label>
                       <Select value={selectedLeaveType} onValueChange={setSelectedLeaveType}>
@@ -547,9 +783,49 @@ export default function MultiDateEntryModal({
                         </SelectContent>
                       </Select>
                     </div>
-                    <div className="flex gap-2">
-                      <Button type="button" className="flex-1" onClick={() => markAllMixed(true)}>סמן הכל כבתשלום</Button>
-                      <Button type="button" variant="outline" className="flex-1" onClick={() => markAllMixed(false)}>סמן הכל כלא בתשלום</Button>
+                    <div className="flex flex-wrap gap-2 justify-end">
+                      <Button type="button" onClick={() => markAllMixed(true)}>סמן הכל כבתשלום</Button>
+                      <Button type="button" variant="outline" onClick={() => markAllMixed(false)}>סמן הכל כלא בתשלום</Button>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:items-end">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">סוג חופשה (ברירת מחדל)</Label>
+                      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="סוג חופשה מעורבת">
+                        {MIXED_SUBTYPE_OPTIONS.map(option => {
+                          const active = globalMixedSubtype === option.value;
+                          return (
+                            <Button
+                              key={option.value}
+                              type="button"
+                              variant={active ? 'default' : 'ghost'}
+                              className="h-10"
+                              onClick={() => {
+                                setGlobalMixedSubtype(option.value);
+                                applySubtypeToAll(option.value);
+                              }}
+                            >
+                              {option.label}
+                            </Button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-slate-500">ניתן לשנות לכל יום בנפרד ברשימה למטה.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 justify-end">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={applyHalfDayToPaid}
+                        disabled={!allowHalfDay}
+                      >
+                        סמן חצי יום לכל הימים בתשלום
+                      </Button>
+                      {!allowHalfDay ? (
+                        <p className="text-xs text-slate-500">
+                          חצי יום מושבת במדיניות החופשות.
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                   <div className="space-y-4">
@@ -573,30 +849,62 @@ export default function MultiDateEntryModal({
                               )}
                               {sortedDates.map(d => {
                                 const dateStr = format(d, 'yyyy-MM-dd');
-                                const paid = map[dateStr] !== false;
+                                const entry = ensureMixedSelection(map[dateStr]);
+                                const paid = entry.paid;
+                                const subtypeValue = entry.subtype;
+                                const halfDay = entry.halfDay;
                                 return (
                                   <div
                                     key={`${empId}-${dateStr}`}
-                                    className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200"
+                                    className="space-y-2 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200"
                                   >
-                                    <span className="text-sm font-medium text-slate-700">{format(d, 'dd/MM/yyyy')}</span>
-                                    <div className="flex gap-2" role="radiogroup" aria-label={`האם ${format(d, 'dd/MM/yyyy')} בתשלום?`}>
-                                      <Button
-                                        type="button"
-                                        variant={paid ? 'default' : 'ghost'}
-                                        className="h-9"
-                                        onClick={() => toggleMixedSelection(empId, dateStr, true)}
-                                      >
-                                        בתשלום
-                                      </Button>
-                                      <Button
-                                        type="button"
-                                        variant={!paid ? 'default' : 'ghost'}
-                                        className="h-9"
-                                        onClick={() => toggleMixedSelection(empId, dateStr, false)}
-                                      >
-                                        לא בתשלום
-                                      </Button>
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                      <span className="text-sm font-medium text-slate-700">{format(d, 'dd/MM/yyyy')}</span>
+                                      <div className="flex gap-2" role="radiogroup" aria-label={`האם ${format(d, 'dd/MM/yyyy')} בתשלום?`}>
+                                        <Button
+                                          type="button"
+                                          variant={paid ? 'default' : 'ghost'}
+                                          className="h-9"
+                                          onClick={() => toggleMixedSelection(empId, dateStr, true)}
+                                        >
+                                          בתשלום
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          variant={!paid ? 'default' : 'ghost'}
+                                          className="h-9"
+                                          onClick={() => toggleMixedSelection(empId, dateStr, false)}
+                                        >
+                                          ללא תשלום
+                                        </Button>
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs font-medium text-slate-600">סוג חופשה</span>
+                                        <Select
+                                          value={subtypeValue}
+                                          onValueChange={value => updateMixedSelection(empId, dateStr, { subtype: value })}
+                                        >
+                                          <SelectTrigger className="h-9 w-[120px] bg-white text-sm">
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                          <SelectContent>
+                                            {MIXED_SUBTYPE_OPTIONS.map(option => (
+                                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                            ))}
+                                          </SelectContent>
+                                        </Select>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <span className={`text-xs font-medium ${paid ? 'text-slate-600' : 'text-slate-400'}`}>חצי יום</span>
+                                        <Switch
+                                          checked={allowHalfDay && paid ? halfDay : false}
+                                          disabled={!paid || !allowHalfDay}
+                                          onCheckedChange={checked => updateMixedSelection(empId, dateStr, { halfDay: checked })}
+                                          aria-label="חצי יום"
+                                        />
+                                      </div>
                                     </div>
                                   </div>
                                 );
@@ -608,20 +916,120 @@ export default function MultiDateEntryModal({
                     })}
                   </div>
                 </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="text-sm text-slate-600">
+                    מלאו סכום לכל התאמות שתרצו לשמור. שורות ללא סכום יידלגו אוטומטית.
+                  </div>
+                  {selectedEmployees.length === 0 ? (
+                    <div className="text-sm text-slate-600">בחרו לפחות עובד אחד להזנת התאמות.</div>
+                  ) : null}
+                  {selectedEmployees.map(empId => {
+                    const emp = employeesById[empId];
+                    const map = adjustmentValues[empId] || {};
+                    return (
+                      <div key={empId} className="space-y-3 rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[17px] font-semibold truncate max-w-[60%]">{emp?.name || 'עובד'}</span>
+                          <span className="text-sm text-slate-600">{formatDatesCount(sortedDates.length)}</span>
+                        </div>
+                        <div className="space-y-2">
+                          {sortedDates.length === 0 ? (
+                            <div className="text-sm text-slate-600">בחרו תאריכים להזנת התאמות.</div>
+                          ) : null}
+                          {sortedDates.map(d => {
+                            const dateStr = format(d, 'yyyy-MM-dd');
+                            const entry = map[dateStr] || { type: 'credit', amount: '', notes: '' };
+                            const rowErrors = (adjustmentErrors[empId] && adjustmentErrors[empId][dateStr]) || {};
+                            const isDebit = entry.type === 'debit';
+                            return (
+                              <div
+                                key={`${empId}-${dateStr}`}
+                                className="space-y-3 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200"
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                  <span className="text-sm font-medium text-slate-700">{format(d, 'dd/MM/yyyy')}</span>
+                                  <div className="flex gap-2" role="radiogroup" aria-label={`סוג התאמה עבור ${format(d, 'dd/MM/yyyy')}`}>
+                                    <Button
+                                      type="button"
+                                      variant={!isDebit ? 'default' : 'ghost'}
+                                      className="h-9"
+                                      onClick={() => updateAdjustmentValue(empId, dateStr, { type: 'credit' })}
+                                    >
+                                      זיכוי
+                                    </Button>
+                                    <Button
+                                      type="button"
+                                      variant={isDebit ? 'default' : 'ghost'}
+                                      className="h-9"
+                                      onClick={() => updateAdjustmentValue(empId, dateStr, { type: 'debit' })}
+                                    >
+                                      ניכוי
+                                    </Button>
+                                  </div>
+                                </div>
+                                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                                  <div className="space-y-1">
+                                    <Label className="text-sm font-medium text-slate-700">סכום (₪)</Label>
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={entry.amount}
+                                      onChange={event => updateAdjustmentValue(empId, dateStr, { amount: event.target.value })}
+                                      className="bg-white h-10 text-base"
+                                    />
+                                    {rowErrors.amount ? (
+                                      <p className="text-xs text-red-600 text-right">{rowErrors.amount}</p>
+                                    ) : null}
+                                  </div>
+                                  <div className="space-y-1">
+                                    <Label className="text-sm font-medium text-slate-700">הערות</Label>
+                                    <Textarea
+                                      value={entry.notes}
+                                      onChange={event => updateAdjustmentValue(empId, dateStr, { notes: event.target.value })}
+                                      rows={2}
+                                      className="bg-white text-base leading-6"
+                                      placeholder="הוסיפו הסבר קצר (חובה)"
+                                    />
+                                    {rowErrors.notes ? (
+                                      <p className="text-xs text-red-600 text-right">{rowErrors.notes}</p>
+                                    ) : null}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
 
             <div
               data-testid="md-footer"
-              className="shrink-0 bg-background border-t px-4 py-3 flex justify-end gap-2"
+              className="shrink-0 bg-background border-t px-4 py-3"
             >
-              <Button variant="outline" onClick={onClose}>בטל</Button>
-              <Button
-                onClick={mode === 'leave' ? handleSaveMixed : handleRegularSave}
-                disabled={regularSaveDisabled || leaveSaveDisabled}
-              >
-                שמור רישומים
-              </Button>
+              <div className="flex flex-wrap items-center justify-end gap-3 sm:flex-row-reverse">
+                {mode === 'adjustment' ? (
+                  <div className="text-sm font-medium text-slate-700 text-right">
+                    {adjustmentStats.total > 0
+                      ? `סה"כ התאמות: ${adjustmentStats.sum > 0 ? '+' : adjustmentStats.sum < 0 ? '-' : ''}₪${Math.abs(adjustmentStats.sum).toLocaleString()} (${adjustmentStats.filled}/${adjustmentStats.total})`
+                      : 'סה"כ התאמות: ₪0'}
+                  </div>
+                ) : null}
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={onClose}>בטל</Button>
+                  <Button
+                    onClick={handlePrimarySave}
+                    disabled={primaryDisabled}
+                  >
+                    שמור רישומים
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
         </DialogContent>

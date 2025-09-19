@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import SingleDayEntryShell from './shared/SingleDayEntryShell.jsx';
 import GlobalSegment from './segments/GlobalSegment.jsx';
 import HourlySegment from './segments/HourlySegment.jsx';
@@ -6,7 +6,7 @@ import InstructorSegment from './segments/InstructorSegment.jsx';
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { sumHours, removeSegment } from './dayUtils.js';
 import ConfirmPermanentDeleteModal from './ConfirmPermanentDeleteModal.jsx';
-import { deleteWorkSession } from '@/api/workSessions.js';
+import { softDeleteWorkSession } from '@/api/workSessions.js';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import he from '@/i18n/he.json';
@@ -15,15 +15,24 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { InfoTooltip } from '@/components/InfoTooltip.jsx';
+import { Input } from '@/components/ui/input';
 import { selectLeaveDayValue } from '@/selectors.js';
 import {
   DEFAULT_LEAVE_PAY_POLICY,
   LEAVE_PAY_METHOD_DESCRIPTIONS,
   LEAVE_PAY_METHOD_LABELS,
   LEAVE_TYPE_OPTIONS,
+  MIXED_SUBTYPE_OPTIONS,
+  MIXED_SUBTYPE_LABELS,
+  DEFAULT_MIXED_SUBTYPE,
+  getLeaveBaseKind,
   isPayableLeaveKind,
   normalizeLeavePayPolicy,
+  normalizeMixedSubtype,
 } from '@/lib/leave.js';
+import { Switch } from '@/components/ui/switch';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Trash2 } from 'lucide-react';
 
 const VALID_LEAVE_PAY_METHODS = new Set(Object.keys(LEAVE_PAY_METHOD_LABELS));
 
@@ -35,6 +44,7 @@ export default function TimeEntryForm({
   onSubmit,
   getRateForDate,
   initialRows = null,
+  initialAdjustments = [],
   selectedDate,
   onDeleted,
   initialDayType = 'regular',
@@ -44,6 +54,8 @@ export default function TimeEntryForm({
   initialLeaveType = null,
   allowHalfDay = false,
   initialMixedPaid = true,
+  initialMixedSubtype = DEFAULT_MIXED_SUBTYPE,
+  initialMixedHalfDay = false,
   leavePayPolicy = DEFAULT_LEAVE_PAY_POLICY,
 }) {
   const isGlobal = employee.employee_type === 'global';
@@ -56,14 +68,76 @@ export default function TimeEntryForm({
       ? initialRows.map(r => ({ ...r, id: r.id || crypto.randomUUID(), _status: 'existing' }))
       : [createSeg()];
   });
+  const createAdjustment = useCallback(() => ({
+    id: crypto.randomUUID(),
+    workSessionId: null,
+    type: 'credit',
+    amount: '',
+    notes: '',
+    _status: 'new',
+  }), []);
+  const mapInitialAdjustments = useCallback((items = []) => {
+    if (!Array.isArray(items) || items.length === 0) {
+      return [createAdjustment()];
+    }
+    const mapped = items.map(item => {
+      const rawAmount = Math.abs(Number(item?.total_payment ?? 0));
+      return {
+        id: String(item?.id ?? crypto.randomUUID()),
+        workSessionId: item?.id || null,
+        type: Number(item?.total_payment ?? 0) < 0 ? 'debit' : 'credit',
+        amount: Number.isFinite(rawAmount) && rawAmount !== 0 ? String(rawAmount) : '',
+        notes: item?.notes || '',
+        _status: item?.id ? 'existing' : 'new',
+      };
+    });
+    return mapped.length > 0 ? mapped : [createAdjustment()];
+  }, [createAdjustment]);
+  const [adjustments, setAdjustments] = useState(() => mapInitialAdjustments(initialAdjustments));
+  const [adjustmentErrors, setAdjustmentErrors] = useState({});
+
+  const validateAdjustmentRow = useCallback((row) => {
+    if (!row) return {};
+    const errors = {};
+    const amountValue = parseFloat(row.amount);
+    if (!row.amount || Number.isNaN(amountValue) || amountValue <= 0) {
+      errors.amount = 'סכום גדול מ-0 נדרש';
+    }
+    const notesValue = typeof row.notes === 'string' ? row.notes.trim() : '';
+    if (!notesValue) {
+      errors.notes = 'יש להוסיף הערה להתאמה';
+    }
+    return errors;
+  }, []);
+
+  useEffect(() => {
+    setAdjustments(mapInitialAdjustments(initialAdjustments));
+    setAdjustmentErrors({});
+  }, [initialAdjustments, mapInitialAdjustments]);
   const [dayType, setDayType] = useState(initialDayType);
   const [paidLeaveNotes, setPaidLeaveNotes] = useState(initialPaidLeaveNotes);
   const [leaveType, setLeaveType] = useState(initialLeaveType || '');
   const [mixedPaid, setMixedPaid] = useState(
     initialLeaveType === 'mixed' ? (initialMixedPaid !== false) : true
   );
+  const [mixedSubtype, setMixedSubtype] = useState(() => {
+    if (initialLeaveType === 'mixed') {
+      return normalizeMixedSubtype(initialMixedSubtype) || DEFAULT_MIXED_SUBTYPE;
+    }
+    return DEFAULT_MIXED_SUBTYPE;
+  });
+  const [mixedHalfDay, setMixedHalfDay] = useState(() => (
+    initialLeaveType === 'mixed' && initialMixedPaid !== false
+      ? Boolean(initialMixedHalfDay)
+      : false
+  ));
   const [errors, setErrors] = useState({});
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [currentPaidLeaveId, setCurrentPaidLeaveId] = useState(paidLeaveId);
+
+  useEffect(() => {
+    setCurrentPaidLeaveId(paidLeaveId);
+  }, [paidLeaveId]);
 
   const leaveTypeOptions = useMemo(() => {
     return LEAVE_TYPE_OPTIONS
@@ -79,10 +153,28 @@ export default function TimeEntryForm({
   }, [allowHalfDay, leaveType, leaveTypeOptions]);
 
   useEffect(() => {
+    if (!allowHalfDay && mixedHalfDay) {
+      setMixedHalfDay(false);
+    }
+  }, [allowHalfDay, mixedHalfDay]);
+
+  useEffect(() => {
     if (initialLeaveType === 'mixed') {
       setMixedPaid(initialMixedPaid !== false);
+      setMixedSubtype(normalizeMixedSubtype(initialMixedSubtype) || DEFAULT_MIXED_SUBTYPE);
+      setMixedHalfDay(initialMixedPaid !== false ? Boolean(initialMixedHalfDay) : false);
     }
-  }, [initialLeaveType, initialMixedPaid]);
+  }, [initialLeaveType, initialMixedPaid, initialMixedSubtype, initialMixedHalfDay]);
+
+  useEffect(() => {
+    if (leaveType !== 'mixed') return;
+    if (!normalizeMixedSubtype(mixedSubtype)) {
+      setMixedSubtype(DEFAULT_MIXED_SUBTYPE);
+    }
+    if (!mixedPaid && mixedHalfDay) {
+      setMixedHalfDay(false);
+    }
+  }, [leaveType, mixedSubtype, mixedPaid, mixedHalfDay]);
 
   const dailyRate = useMemo(() => {
     if (!isGlobal) return 0;
@@ -108,7 +200,7 @@ export default function TimeEntryForm({
     if (leaveType === 'mixed') {
       return mixedPaid ? 'employee_paid' : null;
     }
-    return leaveType;
+    return getLeaveBaseKind(leaveType);
   }, [isLeaveDay, leaveType, mixedPaid]);
 
   const isPaidLeavePreview = useMemo(() => {
@@ -161,7 +253,8 @@ export default function TimeEntryForm({
   const showInsufficientHistoryHint = leaveDayValueInfo.insufficientData;
   const showPreStartWarning = leaveDayValueInfo.preStartDate;
 
-  const isHalfDaySelection = leaveKindForPay === 'half_day';
+  const isMixedHalfDay = leaveType === 'mixed' && mixedPaid && mixedHalfDay && allowHalfDay;
+  const isHalfDaySelection = leaveType === 'half_day' || isMixedHalfDay;
 
   const addSeg = () => setSegments(prev => [...prev, createSeg()]);
   const duplicateSeg = (id) => {
@@ -179,8 +272,6 @@ export default function TimeEntryForm({
       if (res.removed) setSegments(res.rows);
       return;
     }
-    const active = segments.filter(s => s._status !== 'deleted');
-    if (active.length <= 1) return;
     const summary = {
       employeeName: employee.name,
       date: format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy'),
@@ -188,17 +279,98 @@ export default function TimeEntryForm({
       hours: isHourly || isGlobal ? target.hours : null,
       meetings: isHourly || isGlobal ? null : target.sessions_count
     };
-    setPendingDelete({ id, summary });
+    setPendingDelete({ id, summary, kind: 'segment' });
+  };
+  const addAdjustment = () => setAdjustments(prev => [...prev, createAdjustment()]);
+  const updateAdjustment = (id, patch) => {
+    setAdjustments(prev => prev.map(item => (item.id === id ? { ...item, ...patch } : item)));
+    setAdjustmentErrors(prev => {
+      if (!prev[id]) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+  const removeAdjustment = (id) => {
+    const target = adjustments.find(item => item.id === id);
+    if (!target) return;
+    if (target._status === 'existing' && target.workSessionId) {
+      const amountValue = parseFloat(target.amount);
+      const formattedDate = format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy');
+      const summary = {
+        employeeName: employee.name,
+        date: formattedDate,
+        entryTypeLabel: 'התאמה',
+      };
+      const summaryText = Number.isFinite(amountValue) && amountValue > 0
+        ? `התאמה ${target.type === 'debit' ? 'ניכוי' : 'זיכוי'} על סך ₪${Math.abs(amountValue).toLocaleString()}`
+        : 'התאמה';
+      setPendingDelete({
+        id: target.workSessionId,
+        summary,
+        summaryText,
+        kind: 'adjustment',
+        localId: target.id,
+      });
+      return;
+    }
+    setAdjustments(prev => {
+      const next = prev.filter(item => item.id !== id);
+      return next.length > 0 ? next : [createAdjustment()];
+    });
+    setAdjustmentErrors(prev => {
+      if (!prev[id]) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+  const requestDeleteLeave = () => {
+    if (!currentPaidLeaveId) return;
+    const summary = {
+      employeeName: employee.name,
+      date: format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy'),
+      entryTypeLabel: 'חופשה',
+    };
+    setPendingDelete({ id: currentPaidLeaveId, summary, kind: 'leave' });
   };
   const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    const target = pendingDelete;
     try {
-      await deleteWorkSession(pendingDelete.id);
-      setSegments(prev => prev.filter(s => s.id !== pendingDelete.id));
-      onDeleted?.(pendingDelete.id);
+      const deletedRow = await softDeleteWorkSession(target.id);
+      let payload = deletedRow ? [deletedRow] : [];
+      if (target.kind === 'segment') {
+        setSegments(prev => prev.filter(s => s.id !== target.id));
+      }
+      if (target.kind === 'leave') {
+        setCurrentPaidLeaveId(null);
+        setDayType('regular');
+        setLeaveType('');
+        setMixedPaid(true);
+        setMixedSubtype(DEFAULT_MIXED_SUBTYPE);
+        setMixedHalfDay(false);
+        setPaidLeaveNotes('');
+        setSegments(prev => (prev.length > 0 ? prev : [createSeg()]));
+      }
+      if (target.kind === 'adjustment') {
+        setAdjustments(prev => {
+          const next = prev.filter(item => item.id !== target.localId);
+          return next.length > 0 ? next : [createAdjustment()];
+        });
+        setAdjustmentErrors(prev => {
+          if (!target.localId || !prev[target.localId]) return prev;
+          const next = { ...prev };
+          delete next[target.localId];
+          return next;
+        });
+      }
+      onDeleted?.([target.id], payload);
       toast.success(he['toast.delete.success']);
       setPendingDelete(null);
     } catch (err) {
       toast.error(he['toast.delete.error']);
+      setPendingDelete(null);
       throw err;
     }
   };
@@ -222,6 +394,12 @@ export default function TimeEntryForm({
 
   const handleDayTypeChange = (value) => {
     setDayType(value);
+    if (value === 'adjustment' && adjustments.length === 0) {
+      setAdjustments([createAdjustment()]);
+    }
+    if (value !== 'adjustment') {
+      setAdjustmentErrors({});
+    }
     if (value !== 'paid_leave') {
       setLeaveType('');
       setMixedPaid(true);
@@ -233,6 +411,41 @@ export default function TimeEntryForm({
 
   const handleSave = (e) => {
     e.preventDefault();
+    if (dayType === 'adjustment') {
+      const normalized = [];
+      const errs = {};
+      adjustments.forEach(row => {
+        const rowErrors = validateAdjustmentRow(row);
+        if (rowErrors.amount || rowErrors.notes) {
+          errs[row.id] = rowErrors;
+          return;
+        }
+        const amountValue = Math.abs(parseFloat(row.amount));
+        const notesValue = typeof row.notes === 'string' ? row.notes.trim() : '';
+        normalized.push({
+          id: row.workSessionId || null,
+          type: row.type === 'debit' ? 'debit' : 'credit',
+          amount: amountValue,
+          notes: notesValue,
+        });
+      });
+      if (Object.keys(errs).length > 0) {
+        setAdjustmentErrors(errs);
+        toast.error('נא למלא סכום והערה עבור כל התאמה.', { duration: 15000 });
+        return;
+      }
+      if (!normalized.length) {
+        toast.error('יש להזין לפחות התאמה אחת.', { duration: 15000 });
+        return;
+      }
+      setAdjustmentErrors({});
+      onSubmit({
+        rows: [],
+        dayType,
+        adjustments: normalized,
+      });
+      return;
+    }
     if (dayType === 'paid_leave') {
       if (!leaveType) {
         toast.error('יש לבחור סוג חופשה.', { duration: 15000 });
@@ -257,18 +470,31 @@ export default function TimeEntryForm({
         toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 10000 });
         return;
       }
+      if (leaveType === 'mixed') {
+        const normalizedSubtype = normalizeMixedSubtype(mixedSubtype);
+        if (!normalizedSubtype) {
+          toast.error('יש לבחור סוג חופשה מעורבת.', { duration: 15000 });
+          return;
+        }
+      }
       onSubmit({
         rows: [],
         dayType,
-        paidLeaveId,
+        paidLeaveId: currentPaidLeaveId,
         paidLeaveNotes,
         leaveType,
-        mixedPaid: leaveType === 'mixed' ? mixedPaid : null
+        mixedPaid: leaveType === 'mixed' ? mixedPaid : null,
+        mixedSubtype: leaveType === 'mixed'
+          ? (normalizeMixedSubtype(mixedSubtype) || DEFAULT_MIXED_SUBTYPE)
+          : null,
+        mixedHalfDay: leaveType === 'mixed'
+          ? (mixedPaid && allowHalfDay ? Boolean(mixedHalfDay) : false)
+          : null,
       });
       return;
     }
     if (!validate()) return;
-    onSubmit({ rows: segments, dayType, paidLeaveId, leaveType: null });
+    onSubmit({ rows: segments, dayType, paidLeaveId: currentPaidLeaveId, leaveType: null });
   };
 
   const baseSummary = useMemo(() => {
@@ -286,24 +512,76 @@ export default function TimeEntryForm({
     return `שכר יומי: ₪${total.toFixed(2)}`;
   }, [segments, isGlobal, isHourly, dailyRate, employee, selectedDate, getRateForDate]);
 
+  const adjustmentSummary = useMemo(() => {
+    if (!Array.isArray(adjustments) || adjustments.length === 0) {
+      return 'לא הוזנו התאמות ליום זה.';
+    }
+    const total = adjustments.reduce((sum, item) => {
+      const amountValue = parseFloat(item.amount);
+      if (!item.amount || Number.isNaN(amountValue) || amountValue <= 0) {
+        return sum;
+      }
+      const normalized = item.type === 'debit' ? -Math.abs(amountValue) : Math.abs(amountValue);
+      return sum + normalized;
+    }, 0);
+    if (total === 0) {
+      return 'לא הוזנו התאמות ליום זה.';
+    }
+    const prefix = total > 0 ? '+' : '-';
+    return `סה"כ התאמות ליום: ${prefix}₪${Math.abs(total).toLocaleString()}`;
+  }, [adjustments]);
+
   const leaveSummary = useMemo(() => {
     if (!isLeaveDay) return null;
     if (!leaveType) {
       return 'בחרו סוג חופשה כדי לחשב שווי.';
     }
+    const resolvedMixedSubtype = normalizeMixedSubtype(mixedSubtype) || DEFAULT_MIXED_SUBTYPE;
+    const mixedSubtypeLabel = MIXED_SUBTYPE_LABELS[resolvedMixedSubtype] || null;
     if (leaveType === 'mixed' && !mixedPaid) {
-      return 'היום המעורב סומן כלא משולם.';
+      const details = ['מעורב', mixedSubtypeLabel, 'ללא תשלום'].filter(Boolean).join(' · ');
+      return (
+        <>
+          <div className="text-base font-medium text-slate-900">היום המעורב סומן כחופשה ללא תשלום.</div>
+          {details ? (
+            <div className="text-xs text-slate-600 text-right">{details}</div>
+          ) : null}
+        </>
+      );
     }
     if (!isPaidLeavePreview) {
-      return 'היום סומן כחופשה ללא תשלום.';
+      const details = leaveType === 'mixed'
+        ? ['מעורב', mixedSubtypeLabel, 'ללא תשלום'].filter(Boolean).join(' · ')
+        : null;
+      return (
+        <>
+          <div className="text-base font-medium text-slate-900">היום סומן כחופשה ללא תשלום.</div>
+          {details ? (
+            <div className="text-xs text-slate-600 text-right">{details}</div>
+          ) : null}
+        </>
+      );
     }
     const value = Number.isFinite(leaveDayValue) ? leaveDayValue : 0;
     const baseAmount = isHalfDaySelection ? value / 2 : value;
     const amount = showPreStartWarning ? 0 : baseAmount;
-    const headline = isHalfDaySelection ? 'שווי חצי יום חופשה' : 'שווי יום חופשה';
+    const headline = leaveType === 'mixed'
+      ? (isMixedHalfDay ? 'שווי חצי יום חופשה מעורבת' : 'שווי יום חופשה מעורבת')
+      : (isHalfDaySelection ? 'שווי חצי יום חופשה' : 'שווי יום חופשה');
+    const detailParts = leaveType === 'mixed'
+      ? [
+        'מעורב',
+        mixedSubtypeLabel,
+        mixedPaid ? 'בתשלום' : null,
+        mixedPaid && mixedHalfDay ? 'חצי יום' : null,
+      ].filter(Boolean)
+      : null;
     return (
       <>
         <div className="text-base font-medium text-slate-900">{`${headline}: ₪${amount.toFixed(2)}`}</div>
+        {detailParts?.length ? (
+          <div className="text-xs text-slate-600 text-right">{detailParts.join(' · ')}</div>
+        ) : null}
         <div className="flex items-center justify-end gap-2 text-xs text-slate-600">
           <span>{`שיטה: ${leaveMethodLabel}`}</span>
           {leaveMethodDescription ? <InfoTooltip text={leaveMethodDescription} /> : null}
@@ -324,16 +602,21 @@ export default function TimeEntryForm({
     isLeaveDay,
     leaveType,
     mixedPaid,
+    mixedHalfDay,
+    mixedSubtype,
     isPaidLeavePreview,
     leaveDayValue,
     isHalfDaySelection,
+    isMixedHalfDay,
     leaveMethodLabel,
     leaveMethodDescription,
     showInsufficientHistoryHint,
     showPreStartWarning,
   ]);
 
-  const summary = isLeaveDay ? leaveSummary : baseSummary;
+  const summary = dayType === 'adjustment'
+    ? adjustmentSummary
+    : (isLeaveDay ? leaveSummary : baseSummary);
 
   const renderSegment = (seg, idx) => {
     if (isGlobal) {
@@ -382,10 +665,105 @@ export default function TimeEntryForm({
     );
   };
 
+  const renderAdjustmentSegment = (row, idx) => {
+    const rowErrors = adjustmentErrors[row.id] || {};
+    return (
+      <div key={row.id} className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium text-slate-700">התאמה #{idx + 1}</div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-red-500 hover:bg-red-50"
+                onClick={() => removeAdjustment(row.id)}
+                aria-label="מחק התאמה"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>מחק התאמה</TooltipContent>
+          </Tooltip>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="space-y-1">
+            <Label className="text-sm font-medium text-slate-700">סוג התאמה</Label>
+            <div className="flex gap-2" role="radiogroup" aria-label="סוג התאמה">
+              <Button
+                type="button"
+                variant={row.type === 'credit' ? 'default' : 'ghost'}
+                className="flex-1 h-10"
+                onClick={() => updateAdjustment(row.id, { type: 'credit' })}
+              >
+                זיכוי
+              </Button>
+              <Button
+                type="button"
+                variant={row.type === 'debit' ? 'default' : 'ghost'}
+                className="flex-1 h-10"
+                onClick={() => updateAdjustment(row.id, { type: 'debit' })}
+              >
+                ניכוי
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-sm font-medium text-slate-700">סכום (₪)</Label>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={row.amount}
+              onChange={event => updateAdjustment(row.id, { amount: event.target.value })}
+              className="bg-white h-10 text-base"
+            />
+            {rowErrors.amount ? (
+              <p className="text-xs text-red-600 text-right">{rowErrors.amount}</p>
+            ) : null}
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <Label className="text-sm font-medium text-slate-700">הערות</Label>
+            <Textarea
+              value={row.notes}
+              onChange={event => updateAdjustment(row.id, { notes: event.target.value })}
+              rows={2}
+              className="bg-white text-base leading-6"
+              placeholder="הוסיפו הסבר קצר (חובה)"
+            />
+            {rowErrors.notes ? (
+              <p className="text-xs text-red-600 text-right">{rowErrors.notes}</p>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const addLabel = isHourly || isGlobal ? 'הוסף מקטע שעות' : 'הוסף רישום';
 
   const renderPaidLeaveSegment = () => (
     <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5 space-y-4">
+      {currentPaidLeaveId ? (
+        <div className="flex justify-end mb-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={requestDeleteLeave}
+                aria-label="מחק רישום חופשה"
+                className="h-7 w-7 text-red-500 hover:bg-red-50"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>מחק רישום חופשה</TooltipContent>
+          </Tooltip>
+        </div>
+      ) : null}
       <div className="space-y-1">
         <Label className="text-sm font-medium text-slate-700">סוג חופשה</Label>
         <Select value={leaveType || ''} onValueChange={setLeaveType}>
@@ -411,30 +789,96 @@ export default function TimeEntryForm({
         />
       </div>
       {leaveType === 'mixed' && (
-        <div className="space-y-1">
-          <Label className="text-sm font-medium text-slate-700">האם היום המעורב בתשלום?</Label>
-          <div className="flex gap-2" role="radiogroup" aria-label="האם היום המעורב בתשלום?">
-            <Button
-              type="button"
-              variant={mixedPaid ? 'default' : 'ghost'}
-              className="flex-1 h-10"
-              onClick={() => setMixedPaid(true)}
-            >
-              כן
-            </Button>
-            <Button
-              type="button"
-              variant={!mixedPaid ? 'default' : 'ghost'}
-              className="flex-1 h-10"
-              onClick={() => setMixedPaid(false)}
-            >
-              לא
-            </Button>
+        <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <div className="text-sm font-semibold text-slate-800">הגדרות חופשה מעורבת</div>
+          <div className="space-y-1">
+            <Label className="text-sm font-medium text-slate-700">סוג חופשה</Label>
+            <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="סוג חופשה">
+              {MIXED_SUBTYPE_OPTIONS.map(option => {
+                const isActive = normalizeMixedSubtype(mixedSubtype) === option.value;
+                return (
+                  <Button
+                    key={option.value}
+                    type="button"
+                    variant={isActive ? 'default' : 'ghost'}
+                    className="h-10 w-full"
+                    onClick={() => setMixedSubtype(option.value)}
+                  >
+                    {option.label}
+                  </Button>
+                );
+              })}
+            </div>
           </div>
+          <div className="space-y-1">
+            <Label className="text-sm font-medium text-slate-700">תשלום</Label>
+            <div className="flex gap-2" role="radiogroup" aria-label="תשלום">
+              <Button
+                type="button"
+                variant={mixedPaid ? 'default' : 'ghost'}
+                className="flex-1 h-10"
+                onClick={() => setMixedPaid(true)}
+              >
+                בתשלום
+              </Button>
+              <Button
+                type="button"
+                variant={!mixedPaid ? 'default' : 'ghost'}
+                className="flex-1 h-10"
+                onClick={() => {
+                  setMixedPaid(false);
+                  setMixedHalfDay(false);
+                }}
+              >
+                ללא תשלום
+              </Button>
+            </div>
+          </div>
+          <div className="flex items-center justify-between rounded-xl bg-white px-3 py-2 ring-1 ring-slate-200">
+            <div>
+              <div className="text-sm font-medium text-slate-700">חצי יום</div>
+              <div className="text-xs text-slate-500">
+                {allowHalfDay ? 'זמין רק לחופשה בתשלום' : 'חצי יום מושבת במדיניות החופשות'}
+              </div>
+            </div>
+            <Switch
+              checked={mixedHalfDay}
+              onCheckedChange={checked => setMixedHalfDay(checked)}
+              disabled={!mixedPaid || !allowHalfDay}
+              aria-label="חצי יום"
+            />
+          </div>
+          {!allowHalfDay ? (
+            <div className="text-xs text-slate-500">
+              להפעלת חצי יום, עדכנו את הגדרת המדיניות במסך ההגדרות.
+            </div>
+          ) : null}
         </div>
       )}
     </div>
   );
+
+  const visibleSegments = dayType === 'paid_leave'
+    ? [{ id: 'paid_leave_notes' }]
+    : dayType === 'adjustment'
+      ? adjustments
+      : segments.filter(s => s._status !== 'deleted');
+
+  const segmentRenderer = dayType === 'paid_leave'
+    ? renderPaidLeaveSegment
+    : dayType === 'adjustment'
+      ? renderAdjustmentSegment
+      : renderSegment;
+
+  const addHandler = dayType === 'paid_leave'
+    ? null
+    : dayType === 'adjustment'
+      ? addAdjustment
+      : addSeg;
+
+  const addButtonLabel = dayType === 'adjustment'
+    ? 'הוסף התאמה'
+    : addLabel;
 
   return (
     <form onSubmit={handleSave} className="flex flex-col w-[min(98vw,1100px)] max-w-[98vw] h-[min(92vh,calc(100dvh-2rem))]">
@@ -444,10 +888,10 @@ export default function TimeEntryForm({
         showDayType={allowDayTypeSelection ? true : isGlobal}
         dayType={dayType}
         onDayTypeChange={handleDayTypeChange}
-        segments={dayType === 'paid_leave' ? [{ id: 'paid_leave_notes' }] : segments.filter(s => s._status !== 'deleted')}
-        renderSegment={dayType === 'paid_leave' ? renderPaidLeaveSegment : renderSegment}
-        onAddSegment={dayType === 'paid_leave' ? null : addSeg}
-        addLabel={addLabel}
+        segments={visibleSegments}
+        renderSegment={segmentRenderer}
+        onAddSegment={addHandler}
+        addLabel={addButtonLabel}
         summary={summary}
         onCancel={() => onSubmit(null)}
       />
@@ -456,6 +900,7 @@ export default function TimeEntryForm({
         onClose={() => setPendingDelete(null)}
         onConfirm={confirmDelete}
         summary={pendingDelete ? pendingDelete.summary : null}
+        summaryText={pendingDelete?.summaryText || ''}
       />
     </form>
   );

@@ -2,9 +2,14 @@ import { calculateGlobalDailyRate } from '../../lib/payroll.js';
 import {
   getEntryTypeForLeaveKind,
   getLeaveKindFromEntryType,
+  getLeaveBaseKind,
+  getLeaveSubtypeFromValue,
+  inferLeaveType,
   getLeaveValueMultiplier,
   isLeaveEntryType,
   resolveLeavePayMethodContext,
+  normalizeMixedSubtype,
+  DEFAULT_MIXED_SUBTYPE,
 } from '../../lib/leave.js';
 import {
   buildLeaveMetadata,
@@ -113,6 +118,8 @@ export function useTimeEntry({
           }
           totalPayment = value;
         }
+      } else if (entryType === 'leave') {
+        totalPayment = 0;
       } else if (employee.employee_type === 'hourly') {
         totalPayment = (parseFloat(row.hours) || 0) * rateUsed;
       } else if (employee.employee_type === 'global') {
@@ -154,6 +161,28 @@ export function useTimeEntry({
             legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
             dailyValueSnapshot: snapshot,
             overrideApplied: payContext.override_applied,
+          });
+          if (metadata) {
+            payload.metadata = metadata;
+          }
+        }
+      } else if (entryType === 'leave') {
+        payload.payable = false;
+        payload.hours = 0;
+        payload.total_payment = 0;
+        payload.rate_used = null;
+        leaveOccupied.add(key);
+        if (canWriteMetadata) {
+          const inferred = inferLeaveType(row) || 'unpaid';
+          const subtype = getLeaveSubtypeFromValue(inferred) || getLeaveSubtypeFromValue(row.leave_type || row.leaveType);
+          const metadata = buildLeaveMetadata({
+            source: 'multi_date',
+            leaveType: getLeaveBaseKind(inferred) || 'unpaid',
+            leaveKind: getLeaveBaseKind(inferred) || 'unpaid',
+            subtype,
+            payable: false,
+            fraction: 1,
+            halfDay: false,
           });
           if (metadata) {
             payload.metadata = metadata;
@@ -215,7 +244,14 @@ export function useTimeEntry({
         continue;
       }
       const isPaid = item.paid !== false;
-      const leaveFraction = leaveType === 'half_day' ? 0.5 : 1;
+      const mixedSubtype = leaveType === 'mixed'
+        ? (normalizeMixedSubtype(item.subtype) || DEFAULT_MIXED_SUBTYPE)
+        : null;
+      const leaveFraction = leaveType === 'half_day'
+        ? 0.5
+        : (leaveType === 'mixed'
+          ? (isPaid && item.half_day === true ? 0.5 : 1)
+          : 1);
       let rateUsed = null;
       let totalPayment = 0;
       if (isPaid) {
@@ -261,9 +297,10 @@ export function useTimeEntry({
           source: 'multi_date_leave',
           leaveType,
           leaveKind: leaveType,
+          subtype: leaveType === 'mixed' ? mixedSubtype : getLeaveSubtypeFromValue(leaveType),
           payable: isPaid,
-          fraction: leaveFraction,
-          halfDay: leaveType === 'half_day',
+          fraction: isPaid ? leaveFraction : null,
+          halfDay: leaveType === 'half_day' || (leaveType === 'mixed' && isPaid && item.half_day === true),
           mixedPaid: leaveType === 'mixed' ? Boolean(isPaid) : null,
           method: payContext.method,
           lookbackMonths: payContext.lookback_months,
@@ -294,5 +331,56 @@ export function useTimeEntry({
     return { inserted: inserts, conflicts, invalidStartDates };
   };
 
-  return { saveRows, saveMixedLeave };
+  const saveAdjustments = async (items = []) => {
+    const client = supabaseClient || (await import('../../supabaseClient.js')).supabase;
+    const canWriteMetadata = await canUseWorkSessionMetadata(client);
+    const inserts = [];
+    const invalidNotes = [];
+    for (const item of items) {
+      const employee = employees.find(e => e.id === item.employee_id);
+      if (!employee) continue;
+      if (!item.date) continue;
+      const amountValue = parseFloat(item.amount);
+      if (!item.amount || Number.isNaN(amountValue) || amountValue <= 0) continue;
+      const notesValue = typeof item.notes === 'string' ? item.notes.trim() : '';
+      if (!notesValue) {
+        invalidNotes.push({ employee_id: employee.id, date: item.date });
+        continue;
+      }
+      const normalizedAmount = item.type === 'debit' ? -Math.abs(amountValue) : Math.abs(amountValue);
+      const payload = {
+        employee_id: employee.id,
+        date: item.date,
+        entry_type: 'adjustment',
+        notes: notesValue,
+        total_payment: normalizedAmount,
+        rate_used: normalizedAmount,
+        hours: null,
+        service_id: null,
+        sessions_count: null,
+        students_count: null,
+      };
+      if (canWriteMetadata) {
+        const metadata = buildSourceMetadata('multi_date');
+        if (metadata) {
+          payload.metadata = metadata;
+        }
+      }
+      inserts.push(payload);
+    }
+    if (invalidNotes.length > 0) {
+      const error = new Error('כל התאמה חייבת לכלול הערה.');
+      error.code = 'TIME_ENTRY_ADJUSTMENT_NOTE_REQUIRED';
+      error.invalidEntries = invalidNotes;
+      throw error;
+    }
+    if (!inserts.length) {
+      throw new Error('לא נמצאו התאמות לשמירה');
+    }
+    const { error } = await client.from('WorkSessions').insert(inserts);
+    if (error) throw error;
+    return { inserted: inserts };
+  };
+
+  return { saveRows, saveMixedLeave, saveAdjustments };
 }

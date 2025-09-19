@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import he from '@/i18n/he.json';
 
-export default function ConfirmPermanentDeleteModal({ isOpen, onClose, onConfirm, summary = null }) {
+export default function ConfirmPermanentDeleteModal({ isOpen, onClose, onConfirm, summary = null, summaryText = '' }) {
   const [value, setValue] = useState('');
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -37,8 +37,8 @@ export default function ConfirmPermanentDeleteModal({ isOpen, onClose, onConfirm
     }
   };
 
-  let summaryLine = '';
-  if (summary) {
+  let summaryLine = summaryText || '';
+  if (!summaryLine && summary) {
     if (summary.segmentsCount != null) {
       summaryLine = he['delete.summary.day'].replace('{{count}}', String(summary.segmentsCount));
     } else {

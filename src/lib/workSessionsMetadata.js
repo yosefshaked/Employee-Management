@@ -128,6 +128,7 @@ export function buildLeaveMetadata({
   payable = null,
   halfDay = false,
   mixedPaid = null,
+  subtype = null,
   method = null,
   lookbackMonths = null,
   legalAllow12mIfBetter = null,
@@ -140,6 +141,9 @@ export function buildLeaveMetadata({
   const resolvedKind = leaveKind || leaveType || null;
   const resolvedType = leaveType || leaveKind || null;
   const numericFraction = typeof fraction === 'number' && Number.isFinite(fraction) ? fraction : null;
+  const resolvedSubtype = typeof subtype === 'string' && subtype.trim().length > 0
+    ? subtype.trim().slice(0, 120)
+    : null;
   const leaveSection = {
     kind: resolvedKind || undefined,
     type: resolvedType || undefined,
@@ -147,6 +151,7 @@ export function buildLeaveMetadata({
     mixed_paid: typeof mixedPaid === 'boolean' ? mixedPaid : undefined,
     half_day: halfDay ? true : undefined,
     fraction: numericFraction !== null ? numericFraction : undefined,
+    subtype: resolvedSubtype || undefined,
   };
   const calcSection = {
     method: method || undefined,
@@ -167,6 +172,9 @@ export function buildLeaveMetadata({
   }
   if (resolvedType) {
     topLevel.leave_type = resolvedType;
+  }
+  if (resolvedSubtype) {
+    topLevel.leave_subtype = resolvedSubtype;
   }
   if (numericFraction !== null) {
     topLevel.leave_fraction = numericFraction;
