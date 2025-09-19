@@ -1,11 +1,16 @@
-import React, { useState } from 'react';
-import { format, parseISO } from "date-fns";
+import React, { useMemo, useState } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import { selectLeaveRemaining } from '@/selectors.js';
+import {
+  DEFAULT_LEAVE_POLICY,
+  getLeaveLedgerEntryDelta,
+  getLeaveLedgerEntryType,
+} from '@/lib/leave.js';
 
 const EMPLOYEE_TYPES = {
   hourly: 'שעתי',
@@ -38,16 +43,17 @@ const InstructorDetailsRow = ({ details }) => (
   </TableRow>
 );
 
-export default function PayrollSummary({ sessions, employees, services, rateHistories, isLoading, workSessions = [] }) {
+export default function PayrollSummary({
+  sessions,
+  employees,
+  services,
+  isLoading,
+  getRateForDate,
+  employeeTotals = [],
+  leaveBalances = [],
+  leavePolicy = DEFAULT_LEAVE_POLICY,
+}) {
   const [expandedRows, setExpandedRows] = useState({});
-  const getBaseSalary = (employeeId) => {
-  if (!rateHistories) return 0;
-  const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
-  const relevantRates = rateHistories
-    .filter(r => r.employee_id === employeeId && r.service_id === GENERIC_RATE_SERVICE_ID)
-    .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
-  return relevantRates.length > 0 ? relevantRates[0].rate : 0;
-};
 
   const EMPLOYEE_TYPE_CONFIG = {
     hourly: {
@@ -67,111 +73,94 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
     }
   };
 
-  if (isLoading) { 
+  const toggleRow = (employeeId) => {
+    setExpandedRows(prev => ({...prev, [employeeId]: !prev[employeeId]}));
+  };
+
+  const totalsMap = Object.fromEntries(employeeTotals.map(t => [t.employee_id, t]));
+  const leaveByEmployee = useMemo(() => {
+    const map = new Map();
+    (leaveBalances || []).forEach(entry => {
+      if (!entry || !entry.employee_id) return;
+      if (!map.has(entry.employee_id)) map.set(entry.employee_id, []);
+      map.get(entry.employee_id).push(entry);
+    });
+    return map;
+  }, [leaveBalances]);
+
+  if (isLoading) {
     return (
       <div className="space-y-2">
         {Array(5).fill(0).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
       </div>
     );
   }
-
-  const toggleRow = (employeeId) => {
-    setExpandedRows(prev => ({...prev, [employeeId]: !prev[employeeId]}));
-  };
-
-      const employeesSummary = employees.map(employee => {
-        const employeeSessions = sessions.filter(s => s.employee_id === employee.id);
-        
-        // Calculate totals based on session data first
-        const sessionTotals = employeeSessions.reduce((acc, session) => {
-        // Always add the payment part from the session itself
-        acc.sessionPayment += session.total_payment || 0;
-        
-        // Handle activity totals based on employee type and entry type
-        if (employee.employee_type === 'instructor') {
-          acc.totalSessions += session.sessions_count || 0;
-        } else if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
-          if (session.entry_type === 'adjustment') {
-            acc.totalAdjustments += session.total_payment || 0;
-          } else { // It's an 'hours' entry, or an old entry without a type
-            acc.totalHours += session.hours || 0;
+  const employeesSummary = employees.map(employee => {
+    const employeeSessions = sessions.filter(
+      s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
+    );
+    let serviceDetails = {};
+    if (employee.employee_type === 'instructor') {
+      employeeSessions.forEach(session => {
+        if (session.service_id) {
+          if (!serviceDetails[session.service_id]) {
+            const service = services.find(s => s.id === session.service_id);
+            serviceDetails[session.service_id] = {
+              serviceName: service ? service.name : 'שירות לא ידוע',
+              sessionsCount: 0,
+              totalPayment: 0
+            };
           }
+          serviceDetails[session.service_id].sessionsCount += session.sessions_count || 0;
+          serviceDetails[session.service_id].totalPayment += session.total_payment || 0;
         }
-        
-        return acc;
-      }, { sessionPayment: 0, totalHours: 0, totalSessions: 0, totalAdjustments: 0 });
+      });
+      Object.values(serviceDetails).forEach(detail => {
+        detail.avgRate = detail.totalPayment / (detail.sessionsCount || 1);
+      });
+    }
+    const totals = totalsMap[employee.id] || { pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
+    const baseSalary = employee.employee_type === 'global' ? getRateForDate(employee.id, new Date()).rate : null;
+    const leaveEntries = leaveByEmployee.get(employee.id) || [];
+    const systemPaidCount = leaveEntries.filter(entry => {
+      const type = getLeaveLedgerEntryType(entry) || '';
+      return type.includes('system_paid');
+    }).length;
+    const employeePaidDays = leaveEntries.reduce((sum, entry) => {
+      const delta = getLeaveLedgerEntryDelta(entry);
+      const type = getLeaveLedgerEntryType(entry) || '';
+      if (type.includes('system_paid')) return sum;
+      if (type.includes('employee_paid')) return sum + Math.abs(delta);
+      if (delta < 0) return sum + Math.abs(delta);
+      return sum;
+    }, 0);
+    const leaveSummary = selectLeaveRemaining(employee.id, new Date(), {
+      employees,
+      leaveBalances,
+      policy: leavePolicy,
+    });
+    return {
+      id: employee.id,
+      name: employee.name,
+      employeeType: employee.employee_type,
+      baseSalary,
+      totalAdjustments: totals.adjustments,
+      isActive: employee.is_active,
+      totalPayment: totals.pay,
+      totalHours: Math.round(totals.hours * 10) / 10,
+      totalSessions: totals.sessions,
+      details: Object.values(serviceDetails),
+      systemPaidCount,
+      employeePaidDays,
+      leaveRemaining: leaveSummary.remaining,
+    };
+  }).filter(emp => {
+    const hasActivity = emp.totalPayment !== 0 || emp.totalHours > 0 || emp.totalSessions > 0;
+    if (hasActivity) return true;
+    const original = employees.find(e => e.id === emp.id);
+    return original && original.is_active && original.start_date;
+  }).sort((a, b) => (b.totalPayment || 0) - (a.totalPayment || 0));
 
-        let finalPayment = 0;
-        let baseSalary = null;
-
-        // Build month set covered by the current filtered sessions range
-        const monthsSet = new Set(sessions.map(s => format(parseISO(s.date), 'yyyy-MM')));
-
-        // Month-aware extra adjustments (outside exact range but within same months)
-        const filteredIds = new Set(employeeSessions.map(s => s.id));
-        const extraAdjustments = (workSessions || [])
-          .filter(s => s.employee_id === employee.id && s.entry_type === 'adjustment')
-          .filter(s => monthsSet.has(format(parseISO(s.date), 'yyyy-MM'))) 
-          .filter(s => !filteredIds.has(s.id))
-          .reduce((sum, s) => sum + (s.total_payment || 0), 0);
-
-        if (employee.employee_type === 'global') {
-          baseSalary = getBaseSalary(employee.id);
-          // Count months in range where this employee has any entry (use all sessions)
-          const employeeMonthsAll = new Set(
-            (workSessions || [])
-              .filter(s => s.employee_id === employee.id)
-              .map(s => format(parseISO(s.date), 'yyyy-MM'))
-          );
-          let monthsCount = 0;
-          monthsSet.forEach(m => { if (employeeMonthsAll.has(m)) monthsCount++; });
-          finalPayment = (baseSalary * monthsCount) + sessionTotals.totalAdjustments + extraAdjustments;
-        } else {
-          // For hourly and instructors, final pay is sessions + adjustments (including month-aware extra)
-          finalPayment = sessionTotals.sessionPayment + sessionTotals.totalAdjustments + extraAdjustments;
-        }
-        
-        // Instructor service details logic (remains the same)
-        let serviceDetails = {};
-        if (employee.employee_type === 'instructor') {
-          employeeSessions.forEach(session => {
-            if (session.service_id) {
-              if (!serviceDetails[session.service_id]) {
-                const service = services.find(s => s.id === session.service_id);
-                serviceDetails[session.service_id] = { 
-                  serviceName: service ? service.name : 'שירות לא ידוע',
-                  sessionsCount: 0, 
-                  totalPayment: 0 
-                };
-              }
-              serviceDetails[session.service_id].sessionsCount += session.sessions_count || 0;
-              serviceDetails[session.service_id].totalPayment += session.total_payment || 0;
-            }
-          });
-          Object.values(serviceDetails).forEach(detail => {
-            detail.avgRate = detail.totalPayment / (detail.sessionsCount || 1);
-          });
-        }
-
-        return {
-          id: employee.id, name: employee.name, employeeType: employee.employee_type,
-          baseSalary,
-          totalAdjustments: sessionTotals.totalAdjustments,
-          isActive: employee.is_active,
-          totalPayment: finalPayment, 
-          totalHours: Math.round(sessionTotals.totalHours * 10) / 10, 
-          totalSessions: sessionTotals.totalSessions,
-          details: Object.values(serviceDetails)
-        };
-      }).filter(emp => {
-          // Show active employees, OR employees with any kind of payment/activity in the filtered period
-          if (emp.isActive) return true;
-          if (emp.totalPayment !== 0) return true;
-          if (emp.totalHours > 0) return true;
-          if (emp.totalSessions > 0) return true;
-          return false;
-      }).sort((a, b) => (b.totalPayment || 0) - (a.totalPayment || 0));
-    
   return (
     <Card className="border-0 shadow-lg">
       <Table>
@@ -182,6 +171,9 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
             <TableHead className="text-right">סוג</TableHead>
             <TableHead className="text-right">שכר בסיס</TableHead>
             <TableHead className="text-right">סה"כ פעילות</TableHead>
+            <TableHead className="text-right">חגים (מערכת)</TableHead>
+            <TableHead className="text-right">חגים (מכסה)</TableHead>
+            <TableHead className="text-right">יתרת חופשה</TableHead>
             <TableHead className="text-right">התאמות</TableHead>
             <TableHead className="text-right">סה״כ לתשלום</TableHead>
             <TableHead className="text-right">סטטוס</TableHead>
@@ -209,6 +201,11 @@ export default function PayrollSummary({ sessions, employees, services, rateHist
                 </TableCell>
                 <TableCell className="font-semibold">
                   {EMPLOYEE_TYPE_CONFIG[employee.employeeType]?.activity(employee) || '-'}
+                </TableCell>
+                <TableCell className="font-semibold text-slate-600 text-right">{employee.systemPaidCount}</TableCell>
+                <TableCell className="font-semibold text-slate-600 text-right">{employee.employeePaidDays.toFixed(1)}</TableCell>
+                <TableCell className={employee.leaveRemaining < 0 ? 'text-right text-red-600 font-semibold' : 'text-right font-semibold text-slate-700'}>
+                  {employee.leaveRemaining.toFixed(1)}
                 </TableCell>
                 <TableCell className={`font-semibold ${employee.totalAdjustments >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
                   {employee.totalAdjustments !== null && employee.totalAdjustments !== 0 ? `₪${employee.totalAdjustments.toLocaleString()}` : '-'}

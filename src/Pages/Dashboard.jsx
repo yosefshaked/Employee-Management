@@ -4,35 +4,44 @@ import QuickStats from '../components/dashboard/QuickStats';
 import MonthlyCalendar from '../components/dashboard/MonthlyCalendar';
 import RecentActivity from '../components/dashboard/RecentActivity';
 import { toast } from "sonner";
+import { DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePayPolicy } from '@/lib/leave.js';
+
+const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
 export default function Dashboard() {
   const [employees, setEmployees] = useState([]);
   const [workSessions, setWorkSessions] = useState([]);
   const [services, setServices] = useState([]);
-  const [rateHistories, setRateHistories] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [employeesData, sessionsData, servicesData, ratesData] = await Promise.all([
+      const [employeesData, sessionsData, servicesData, leavePayPolicySettings] = await Promise.all([
         supabase.from('Employees').select('*').eq('is_active', true),
         // === התיקון הסופי והנכון באמת: מיון לפי created_at ===
-        supabase.from('WorkSessions').select('*').order('created_at', { ascending: false }),
+        supabase.from('WorkSessions').select('*').eq('deleted', false).order('created_at', { ascending: false }),
         supabase.from('Services').select('*'),
-        supabase.from('RateHistory').select('*')
+        supabase.from('Settings').select('settings_value').eq('key', 'leave_pay_policy').single(),
       ]);
 
       if (employeesData.error) throw employeesData.error;
       if (sessionsData.error) throw sessionsData.error;
       if (servicesData.error) throw servicesData.error;
-      if (ratesData.error) throw ratesData.error;
+      if (leavePayPolicySettings.error && leavePayPolicySettings.error.code !== 'PGRST116') throw leavePayPolicySettings.error;
 
       setEmployees(employeesData.data || []);
-      setWorkSessions(sessionsData.data || []);
-      setServices(servicesData.data || []);
-      setRateHistories(ratesData.data || []);
+      const safeSessions = (sessionsData.data || []).filter(session => !session?.deleted);
+      setWorkSessions(safeSessions);
+      const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
+      setServices(filteredServices);
+      if (!leavePayPolicySettings.error) {
+        setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicySettings.data?.settings_value));
+      } else {
+        setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
+      }
 
     } catch (error) {
       console.error("Error loading dashboard data:", error);
@@ -54,15 +63,15 @@ export default function Dashboard() {
           <p className="text-slate-600">סקירה כללית של הפעילות במערכת</p>
         </div>
         
-        <QuickStats 
-          employees={employees} 
+        <QuickStats
+          employees={employees}
           workSessions={workSessions}
           services={services}
           currentDate={currentDate}
-          isLoading={isLoading} 
-          rateHistories={rateHistories}
+          leavePayPolicy={leavePayPolicy}
+          isLoading={isLoading}
         />
-        
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2">
             <MonthlyCalendar 
@@ -74,10 +83,12 @@ export default function Dashboard() {
             />
           </div>
           <div className="lg:col-span-1">
-            <RecentActivity 
+            <RecentActivity
               sessions={recentSessions} // מעבירים את הרשימה החתוכה
               employees={employees}
               services={services}
+              workSessions={workSessions}
+              leavePayPolicy={leavePayPolicy}
               isLoading={isLoading}
             />
           </div>

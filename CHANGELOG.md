@@ -14,6 +14,22 @@ All notable changes to this project will be documented in this file.
   - **Deployment in Web Hosting:** Deploying under thepcrunners.com domain, think of an option of showing the domain portal.havat-tut.co.il for Havat Tut's portal.
   - **Vacation Days and Bonuses (UI & Logic):** Implementing the user interface and logic for managing vacation days and bonuses for all employee types (the database table `LeaveBalances` is ready).
   - **Check Possible Future Clash:** In TimeEntryForm.jsx there's   id: Math.random(), - does it mean that it randomly generate the ID? Does it make sure the ID doesn't already exist? What will happen if the ID exist? Will it fail or will it reroll?
+  - **Time Entry Table:** Salary adjustments are no longer included when editing sessions from the table view.
+  - **Time Entry Table:** Monthly totals use current rate history so same-day rate changes are reflected immediately.
+  - **Time Entry Table:** Clicking a cell that contains only salary adjustments now opens a fresh hours entry instead of editing the adjustment.
+  - **Initial Rate Start Date:** New employee rates now default to the employee's start date instead of today's date.
+  - **Rate History Duplication:** Editing an employee only adds a new rate entry when the rate value changes.
+    - **Same-Day Rate Update:** Fixed an issue where updating an employee's rate twice on the same day showed success but kept the old rate.
+    - **Simultaneous Rate Edits:** Adjusted current-rate detection so editing historical rates and the current rate together creates a new entry.
+    - **Duplicate Day Warning:** Prevented adding multiple rate changes for the same day and guided users to edit the existing entry instead.
+
+
+## [2025-09-10]
+- Fixed ChartsOverview to include hours and salary adjustments for hourly and instructor employees.
+- Corrected PayrollSummary and ChartsOverview to derive session payments from rate history so non-global employees show accurate totals.
+- Applied month-aware logic in ChartsOverview and PayrollSummary so global salaries are added only when non-adjustment work exists and extra adjustments within the same months are included.
+- Resolved report calculations that ignored salary adjustments by counting adjustments separately from regular sessions.
+- Unified report calculations with time-entry table logic so expected payroll totals for all employee types include adjustments and month-aware global salaries.
 
 ## [1.3.0] - 2025-09-09
  ## Added

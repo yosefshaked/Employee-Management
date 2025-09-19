@@ -7,9 +7,21 @@ import { he } from "date-fns/locale";
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getColorForService } from '@/lib/colorUtils';
+import { isLeaveEntryType, getLeaveKindFromEntryType, HOLIDAY_TYPE_LABELS } from '@/lib/leave.js';
+import { createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
+import { selectLeaveDayValue } from '@/selectors.js';
 
-export default function DetailedEntriesReport({ sessions, employees, services, isLoading }) {
-  const [groupBy, setGroupBy] = useState('none');
+export default function DetailedEntriesReport({ sessions, employees, services, leavePayPolicy, workSessions = [], isLoading, initialGroupBy = 'none' }) {
+  const [groupBy, setGroupBy] = useState(initialGroupBy);
+  const EMPLOYEE_TYPE_LABELS = { global: 'גלובלי', hourly: 'שעתי', instructor: 'מדריך' };
+
+  const resolveLeaveValue = React.useMemo(() => createLeaveDayValueResolver({
+    employees,
+    workSessions,
+    services,
+    leavePayPolicy,
+    leaveDayValueSelector: selectLeaveDayValue,
+  }), [employees, workSessions, services, leavePayPolicy]);
 
   if (isLoading) {
     return <Skeleton className="h-60 w-full" />;
@@ -19,6 +31,10 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
   
   const getServiceName = (session) => {
     const employee = getEmployee(session.employee_id);
+    if (isLeaveEntryType(session.entry_type)) {
+      const kind = getLeaveKindFromEntryType(session.entry_type);
+      return HOLIDAY_TYPE_LABELS[kind] || 'חופשה';
+    }
     if (employee?.employee_type === 'hourly' || employee?.employee_type === 'global') return 'שעות עבודה';
     const service = services.find(s => s.id === session.service_id);
     return service ? service.name : 'שירות לא ידוע';
@@ -26,12 +42,25 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
   
   const sortedSessions = [...sessions].sort((a, b) => new Date(b.date) - new Date(a.date));
 
+  const sessionHours = (session) => {
+    const emp = getEmployee(session.employee_id);
+    if (!emp) return 0;
+    if (session.entry_type === 'hours') return parseFloat(session.hours) || 0;
+    if (session.entry_type === 'session') {
+      if (session.hours != null) return parseFloat(session.hours) || 0;
+      const service = services.find(s => s.id === session.service_id);
+      if (service?.duration_minutes) return (service.duration_minutes / 60) * (session.sessions_count || 0);
+    }
+    return 0;
+  };
+
   // --- לוגיקת הקיבוץ ---
   const groupedSessions = sortedSessions.reduce((acc, session) => {
     let key;
     if (groupBy === 'date') key = session.date;
     else if (groupBy === 'service') key = getServiceName(session);
     else if (groupBy === 'employee') key = getEmployee(session.employee_id)?.name || 'לא ידוע';
+    else if (groupBy === 'employeeType') key = EMPLOYEE_TYPE_LABELS[getEmployee(session.employee_id)?.employee_type] || 'לא ידוע';
     
     if (key && groupBy !== 'none') {
       if (!acc[key]) acc[key] = [];
@@ -41,32 +70,45 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
   }, {});
   const sortedGroupEntries = Object.entries(groupedSessions);
 
-  const renderSessionRow = (session) => (
-    <TableRow key={session.id} className="hover:bg-slate-50">
-      <TableCell className="font-medium">{getEmployee(session.employee_id)?.name || 'לא ידוע'}</TableCell>
-      <TableCell>{format(parseISO(session.date), 'dd/MM/yyyy', { locale: he })}</TableCell>
-      <TableCell>
-        <Badge
-          variant="outline"
-          className="font-medium"
-          style={{
-            backgroundColor: `${getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id)}20`,
-            color: getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id),
-            borderColor: getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id),
-          }}
-        >
-          {getServiceName(session)}
-        </Badge>
-      </TableCell>
+  const resolvePayment = (session) => {
+    const employee = getEmployee(session.employee_id);
+    if (!employee || employee.employee_type === 'global') return Number(session.total_payment) || 0;
+    if (!isLeaveEntryType(session.entry_type) || session.payable === false) return Number(session.total_payment) || 0;
+    const { amount, preStartDate } = resolveLeaveSessionValue(session, resolveLeaveValue, { employee });
+    if (preStartDate) return 0;
+    if (typeof amount === 'number' && Number.isFinite(amount)) return amount;
+    return Number(session.total_payment) || 0;
+  };
+
+  const renderSessionRow = (session) => {
+    const payment = resolvePayment(session);
+    return (
+      <TableRow key={session.id} className="hover:bg-slate-50">
+        <TableCell className="font-medium">{getEmployee(session.employee_id)?.name || 'לא ידוע'}</TableCell>
+        <TableCell>{format(parseISO(session.date), 'dd/MM/yyyy', { locale: he })}</TableCell>
         <TableCell>
-          {(getEmployee(session.employee_id)?.employee_type === 'hourly' || getEmployee(session.employee_id)?.employee_type === 'global') ? `${session.hours || 0} שעות` : `${session.sessions_count || 0} מפגשים`}
+          <Badge
+            variant="outline"
+            className="font-medium"
+            style={{
+              backgroundColor: `${getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id)}20`,
+              color: getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id),
+              borderColor: getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id),
+            }}
+          >
+            {getServiceName(session)}
+          </Badge>
         </TableCell>
-      <TableCell>{session.students_count || '-'}</TableCell>
-      <TableCell>₪{session.rate_used?.toFixed(2) || '0.00'}</TableCell>
-      <TableCell className="font-semibold">₪{session.total_payment?.toFixed(2) || '0.00'}</TableCell>
-      <TableCell className="text-sm text-slate-600">{session.notes || '-'}</TableCell>
-    </TableRow>
-  );
+          <TableCell>
+            {(getEmployee(session.employee_id)?.employee_type === 'hourly' || getEmployee(session.employee_id)?.employee_type === 'global') ? `${session.hours || 0} שעות` : `${session.sessions_count || 0} מפגשים`}
+          </TableCell>
+        <TableCell>{session.students_count || '-'}</TableCell>
+        <TableCell>₪{session.rate_used?.toFixed(2) || '0.00'}</TableCell>
+        <TableCell className="font-semibold">₪{payment.toFixed(2)}</TableCell>
+        <TableCell className="text-sm text-slate-600">{session.notes || '-'}</TableCell>
+      </TableRow>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -74,13 +116,14 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
         <h3 className="text-lg font-semibold">רישומי עבודה מפורטים</h3>
         <div className="flex gap-2 items-center">
           <Label className="text-sm font-medium text-slate-600">קבץ לפי:</Label>
-          <Select onValueChange={setGroupBy} defaultValue="none">
+          <Select onValueChange={setGroupBy} defaultValue={initialGroupBy}>
             <SelectTrigger className="w-[180px] bg-white border-slate-300"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="none">ללא קיבוץ</SelectItem>
               <SelectItem value="date">תאריך</SelectItem>
               <SelectItem value="service">סוג רישום</SelectItem>
               <SelectItem value="employee">שם עובד</SelectItem>
+              <SelectItem value="employeeType">סוג עובד</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -98,7 +141,9 @@ export default function DetailedEntriesReport({ sessions, employees, services, i
           ) : (
             sortedGroupEntries.map(([group, groupSessions]) => (
               <div key={group} className="mb-2">
-                <h4 className="font-bold text-base p-2 bg-slate-100 border-b border-t">{group} ({groupSessions.length} רישומים)</h4>
+                <h4 className="sticky top-0 z-10 font-bold text-base p-2 bg-slate-100 border-b border-t">
+                  {group} – ₪{groupSessions.reduce((s, r) => s + resolvePayment(r), 0).toFixed(2)} • {groupSessions.reduce((s, r) => s + sessionHours(r), 0).toFixed(1)} שעות
+                </h4>
                 <Table>
                   <TableBody>{groupSessions.map(session => renderSessionRow(session))}</TableBody>
                 </Table>

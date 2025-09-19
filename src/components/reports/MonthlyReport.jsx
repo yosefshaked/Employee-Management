@@ -1,21 +1,32 @@
 import React from 'react';
+import { aggregateGlobalDays, createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, TrendingUp } from "lucide-react";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { he } from "date-fns/locale";
+import { isLeaveEntryType } from '@/lib/leave.js';
+import { selectLeaveDayValue } from '@/selectors.js';
 
-// Helper function to get base salary, now inside the component
-const getBaseSalary = (employeeId, rateHistories) => {
-  if (!rateHistories) return 0;
-  const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
-  const relevantRates = rateHistories
-    .filter(r => r.employee_id === employeeId && r.service_id === GENERIC_RATE_SERVICE_ID)
-    .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
-  return relevantRates.length > 0 ? relevantRates[0].rate : 0;
-};
+export default function MonthlyReport({ sessions, employees, services, workSessions = [], leavePayPolicy, isLoading }) {
+  const resolveLeaveValue = React.useMemo(() => createLeaveDayValueResolver({
+    employees,
+    workSessions,
+    services,
+    leavePayPolicy,
+    leaveDayValueSelector: selectLeaveDayValue,
+  }), [employees, workSessions, services, leavePayPolicy]);
 
-export default function MonthlyReport({ sessions, employees, services, rateHistories, isLoading }) {
+  const resolvePayment = (session) => {
+    const employee = employees.find(emp => emp.id === session.employee_id);
+    if (!employee || employee.employee_type === 'global') return Number(session.total_payment) || 0;
+    if (!isLeaveEntryType(session.entry_type) || session.payable === false) return Number(session.total_payment) || 0;
+    const { amount, preStartDate } = resolveLeaveSessionValue(session, resolveLeaveValue, { employee });
+    if (preStartDate) return 0;
+    if (typeof amount === 'number' && Number.isFinite(amount)) return amount;
+    return Number(session.total_payment) || 0;
+  };
+
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -41,7 +52,7 @@ export default function MonthlyReport({ sessions, employees, services, rateHisto
   const monthlyData = months.map(month => {
     const monthStart = startOfMonth(month);
     const monthEnd = endOfMonth(month);
-    const monthSessions = sessions.filter(session => {
+    const monthSessions = (workSessions.length ? workSessions : sessions).filter(session => {
       const sessionDate = parseISO(session.date);
       return sessionDate >= monthStart && sessionDate <= monthEnd;
     });
@@ -50,51 +61,35 @@ export default function MonthlyReport({ sessions, employees, services, rateHisto
     let totalHours = 0;
     let totalSessions = 0;
     let totalStudents = 0;
-
+    const employeePayments = {};
+    const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
+    const agg = aggregateGlobalDays(monthSessions, employeesById);
     monthSessions.forEach(session => {
-      const employee = employees.find(e => e.id === session.employee_id);
-      if (!employee) return;
-
-      // Always add the payment
-      totalPayment += session.total_payment || 0;
-
-      // Handle activity based on employee type
-      if (employee.employee_type === 'instructor') {
+      const emp = employeesById[session.employee_id];
+      if (!emp || (emp.start_date && session.date < emp.start_date)) return;
+      const isLeave = isLeaveEntryType(session.entry_type);
+      const isGlobalDay = emp.employee_type === 'global' && (session.entry_type === 'hours' || isLeave);
+      if (!isGlobalDay) totalPayment += resolvePayment(session);
+      if (session.entry_type === 'session') {
         totalSessions += session.sessions_count || 0;
         totalStudents += (session.students_count || 0) * (session.sessions_count || 0);
-        
-        // Calculate estimated hours for instructors
         const service = services.find(s => s.id === session.service_id);
         if (service && service.duration_minutes) {
           totalHours += (service.duration_minutes / 60) * (session.sessions_count || 0);
         }
-      } else { // This covers 'hourly' and 'global'
-        // Only count hours if it's an 'hours' entry type, not an 'adjustment'
-        if (session.entry_type !== 'adjustment') {
-          totalHours += session.hours || 0;
-        }
+      } else if (session.entry_type === 'hours') {
+        totalHours += session.hours || 0;
       }
+      const val = isGlobalDay ? 0 : resolvePayment(session);
+      employeePayments[session.employee_id] = (employeePayments[session.employee_id] || 0) + val;
+    });
+    agg.forEach((v, key) => {
+      const [empId] = key.split('|');
+      totalPayment += v.dailyAmount;
+      employeePayments[empId] = (employeePayments[empId] || 0) + v.dailyAmount;
     });
 
-    const activeGlobalEmployeeIdsInMonth = [...new Set(
-      monthSessions
-        .map(s => employees.find(e => e.id === s.employee_id))
-        .filter(e => e && e.employee_type === 'global')
-        .map(e => e.id)
-    )];
-    
-    activeGlobalEmployeeIdsInMonth.forEach(employeeId => {
-      totalPayment += getBaseSalary(employeeId, rateHistories);
-    });
-
-    const employeePayments = {};
-    monthSessions.forEach(session => {
-      employeePayments[session.employee_id] = (employeePayments[session.employee_id] || 0) + session.total_payment;
-    });
-    activeGlobalEmployeeIdsInMonth.forEach(employeeId => {
-      employeePayments[employeeId] = (employeePayments[employeeId] || 0) + getBaseSalary(employeeId, rateHistories);
-    });
-    const topEmployeeId = Object.keys(employeePayments).reduce((a, b) => 
+    const topEmployeeId = Object.keys(employeePayments).reduce((a, b) =>
       employeePayments[a] > employeePayments[b] ? a : b, null
     );
 
@@ -107,7 +102,7 @@ export default function MonthlyReport({ sessions, employees, services, rateHisto
       topEmployee: topEmployeeId ? getEmployeeName(topEmployeeId) : '-',
       topEmployeePayment: topEmployeeId ? employeePayments[topEmployeeId] : 0
     };
-  }).reverse(); // Show most recent month first
+  }).reverse();
 
   return (
     <div className="space-y-6">

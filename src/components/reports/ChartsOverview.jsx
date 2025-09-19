@@ -1,24 +1,35 @@
 import React from 'react';
+import { aggregateGlobalDays, createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { he } from "date-fns/locale";
+import { isLeaveEntryType } from '@/lib/leave.js';
+import { selectLeaveDayValue } from '@/selectors.js';
 
 const COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#06B6D4'];
 
-export default function ChartsOverview({ sessions, employees, isLoading, services, rateHistories, workSessions = [], dateFrom, dateTo }) {
+export default function ChartsOverview({ sessions, employees, isLoading, services, workSessions = [], leavePayPolicy }) {
   const [pieType, setPieType] = React.useState('count');
-
-  const getBaseSalary = (employeeId) => {
-  if (!rateHistories) return 0;
-  const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
-  const relevantRates = rateHistories
-    .filter(r => r.employee_id === employeeId && r.service_id === GENERIC_RATE_SERVICE_ID)
-    .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
-  return relevantRates.length > 0 ? relevantRates[0].rate : 0;
-};
-
   const [trendType, setTrendType] = React.useState('payment');
+
+  const resolveLeaveValue = React.useMemo(() => createLeaveDayValueResolver({
+    employees,
+    workSessions,
+    services,
+    leavePayPolicy,
+    leaveDayValueSelector: selectLeaveDayValue,
+  }), [employees, workSessions, services, leavePayPolicy]);
+
+  const resolvePayment = React.useCallback((session) => {
+    const employee = employees.find(emp => emp.id === session.employee_id);
+    if (!employee || employee.employee_type === 'global') return Number(session.total_payment) || 0;
+    if (!isLeaveEntryType(session.entry_type) || session.payable === false) return Number(session.total_payment) || 0;
+    const { amount, preStartDate } = resolveLeaveSessionValue(session, resolveLeaveValue, { employee });
+    if (preStartDate) return 0;
+    if (typeof amount === 'number' && Number.isFinite(amount)) return amount;
+    return Number(session.total_payment) || 0;
+  }, [employees, resolveLeaveValue]);
   
   // Aggregate sessions by type for the pie chart (count vs time)
   // Must be declared before any early returns to preserve hook order
@@ -76,52 +87,30 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     );
   }
 
-  const getEmployeeName = (employeeId) => {
-    const employee = employees.find(emp => emp.id === employeeId);
-    return employee ? employee.name : 'לא ידוע';
-  };
+  // No rate calculations needed for chart totals; rely on stored session payments
 
   // Payment by employee (active employees only)
   const paymentByEmployee = employees.filter(e => e.is_active).map(employee => {
-    const employeeSessions = sessions.filter(s => s.employee_id === employee.id);
-    
-    let totalPayment = employeeSessions.reduce((sum, s) => sum + s.total_payment, 0);
-
-    // Add base salary for global employees
-    if (employee.employee_type === 'global') {
-      // Month-aware rule across the filter's full months:
-      // Count base once for each calendar month covered by [dateFrom, dateTo]
-      // if this employee has any entry anywhere in that same month (using all workSessions).
-      let start = dateFrom ? startOfMonth(new Date(dateFrom)) : undefined;
-      let end = dateTo ? endOfMonth(new Date(dateTo)) : undefined;
-      if (!start || !end) {
-        // Fallback to months derived from filtered sessions
-        if (sessions.length > 0) {
-          const dates = sessions.map(s => parseISO(s.date));
-          start = startOfMonth(new Date(Math.min(...dates)));
-          end = endOfMonth(new Date(Math.max(...dates)));
-        } else {
-          const now = new Date();
-          start = startOfMonth(new Date(now.getFullYear(), now.getMonth(), 1));
-          end = endOfMonth(now);
-        }
+    const employeeSessions = sessions.filter(
+      s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
+    );
+    const agg = aggregateGlobalDays(employeeSessions, { [employee.id]: employee });
+    const totals = employeeSessions.reduce((acc, session) => {
+      const isLeave = isLeaveEntryType(session.entry_type);
+      const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || isLeave);
+      if (!isGlobalDay) acc.payment += resolvePayment(session);
+      if (session.entry_type === 'session') {
+        acc.totalSessions += session.sessions_count || 0;
       }
-      const monthsInRange = eachMonthOfInterval({ start, end });
-      const monthsKeysInRange = new Set(monthsInRange.map(m => format(m, 'yyyy-MM')));
-      const employeeMonthsAll = new Set((workSessions.length ? workSessions : sessions)
-        .filter(s => s.employee_id === employee.id)
-        .map(s => format(parseISO(s.date), 'yyyy-MM')));
-      let monthsCount = 0;
-      monthsKeysInRange.forEach(k => { if (employeeMonthsAll.has(k)) monthsCount++; });
-      if (monthsCount > 0) totalPayment += getBaseSalary(employee.id) * monthsCount;
-    }
-    
+      return acc;
+    }, { payment: 0, totalSessions: 0 });
+    agg.forEach(v => { totals.payment += v.dailyAmount; });
     return {
       name: employee.name,
-      payment: totalPayment,
+      payment: totals.payment,
       sessions: employeeSessions.length
     };
-  }).filter(item => item.payment > 0);
+  }).filter(item => item.payment !== 0);
 
   // Monthly trend based on filtered range (fallback to last 6 months)
   let startDate, endDate;
@@ -138,63 +127,32 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
   const monthlyData = months.map(month => {
     const monthStart = startOfMonth(month);
     const monthEnd = endOfMonth(month);
-    const monthSessions = sessions.filter(session => {
+    const monthSessions = (workSessions.length ? workSessions : sessions).filter(session => {
       const sessionDate = parseISO(session.date);
       return sessionDate >= monthStart && sessionDate <= monthEnd;
     });
     let payment = 0, hours = 0, sessionsCount = 0;
-    const countedSessions = [];
+    const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
+    const agg = aggregateGlobalDays(monthSessions, employeesById);
     monthSessions.forEach(session => {
-      const employee = employees.find(e => e.id === session.employee_id);
+      const employee = employeesById[session.employee_id];
       if (!employee || !employee.is_active) return;
-
-      // Sum payment for all employees (hourly, instructor, global). Adjustments included.
-      payment += session.total_payment || 0;
-
-      // Hours: for hours entries (not adjustments) or estimate for instructor sessions
-      if (session.hours != null) {
-        if (session.entry_type !== 'adjustment') {
-          hours += session.hours;
-          // Count hourly/global activity into the "sessions" metric as hours
-          sessionsCount += session.hours || 0;
+      if (employee.start_date && session.date < employee.start_date) return;
+      const isLeave = isLeaveEntryType(session.entry_type);
+      const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || isLeave);
+      if (!isGlobalDay) payment += resolvePayment(session);
+      if (session.entry_type === 'hours') {
+        hours += session.hours || 0;
+        sessionsCount += session.hours || 0;
+      } else if (session.entry_type === 'session') {
+        const service = services.find(s => s.id === session.service_id);
+        if (service && service.duration_minutes) {
+          hours += (service.duration_minutes / 60) * (session.sessions_count || 0);
         }
-      } else {
-        if (session.session_type === 'session_30') {
-          const inc = 0.5 * (session.sessions_count || 0);
-          hours += inc;
-          sessionsCount += (session.sessions_count || 0);
-        } else if (session.session_type === 'session_45') {
-          const inc = 0.75 * (session.sessions_count || 0);
-          hours += inc;
-          sessionsCount += (session.sessions_count || 0);
-        } else if (session.session_type === 'session_150') {
-          const inc = 2.5 * (session.sessions_count || 0);
-          hours += inc;
-          sessionsCount += (session.sessions_count || 0);
-        }
-        countedSessions.push({
-          id: session.id,
-          employee_id: session.employee_id,
-          date: session.date,
-          sessions_count: session.sessions_count,
-          service_id: session.service_id
-        });
+        sessionsCount += session.sessions_count || 0;
       }
     });
-    
-    // Add base salary for active global employees who had activity this month
-    const activeGlobalEmployeeIdsInMonth = [...new Set(
-      monthSessions
-        .map(s => employees.find(e => e.id === s.employee_id))
-        .filter(e => e && e.is_active && e.employee_type === 'global')
-        .map(e => e.id)
-    )];
-    activeGlobalEmployeeIdsInMonth.forEach(employeeId => {
-      payment += getBaseSalary(employeeId);
-    });
-    if (typeof window !== 'undefined') {
-      console.log('ChartsOverview - Counted instructor sessions for month', format(month, 'MMM yyyy', { locale: he }), countedSessions);
-    }
+    agg.forEach(v => { payment += v.dailyAmount; });
     return {
       month: format(month, 'MMM', { locale: he }),
       payment,
