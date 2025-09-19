@@ -96,6 +96,20 @@ export default function TimeEntryForm({
   const [adjustments, setAdjustments] = useState(() => mapInitialAdjustments(initialAdjustments));
   const [adjustmentErrors, setAdjustmentErrors] = useState({});
 
+  const validateAdjustmentRow = useCallback((row) => {
+    if (!row) return {};
+    const errors = {};
+    const amountValue = parseFloat(row.amount);
+    if (!row.amount || Number.isNaN(amountValue) || amountValue <= 0) {
+      errors.amount = 'סכום גדול מ-0 נדרש';
+    }
+    const notesValue = typeof row.notes === 'string' ? row.notes.trim() : '';
+    if (!notesValue) {
+      errors.notes = 'יש להוסיף הערה להתאמה';
+    }
+    return errors;
+  }, []);
+
   useEffect(() => {
     setAdjustments(mapInitialAdjustments(initialAdjustments));
     setAdjustmentErrors({});
@@ -401,21 +415,23 @@ export default function TimeEntryForm({
       const normalized = [];
       const errs = {};
       adjustments.forEach(row => {
-        const amountValue = parseFloat(row.amount);
-        if (!row.amount || Number.isNaN(amountValue) || amountValue <= 0) {
-          errs[row.id] = 'סכום גדול מ-0 נדרש';
+        const rowErrors = validateAdjustmentRow(row);
+        if (rowErrors.amount || rowErrors.notes) {
+          errs[row.id] = rowErrors;
           return;
         }
+        const amountValue = Math.abs(parseFloat(row.amount));
+        const notesValue = typeof row.notes === 'string' ? row.notes.trim() : '';
         normalized.push({
           id: row.workSessionId || null,
           type: row.type === 'debit' ? 'debit' : 'credit',
-          amount: Math.abs(amountValue),
-          notes: row.notes || '',
+          amount: amountValue,
+          notes: notesValue,
         });
       });
       if (Object.keys(errs).length > 0) {
         setAdjustmentErrors(errs);
-        toast.error('נא למלא סכום עבור כל התאמה.', { duration: 15000 });
+        toast.error('נא למלא סכום והערה עבור כל התאמה.', { duration: 15000 });
         return;
       }
       if (!normalized.length) {
@@ -649,75 +665,81 @@ export default function TimeEntryForm({
     );
   };
 
-  const renderAdjustmentSegment = (row, idx) => (
-    <div key={row.id} className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-medium text-slate-700">התאמה #{idx + 1}</div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-red-500 hover:bg-red-50"
-              onClick={() => removeAdjustment(row.id)}
-              aria-label="מחק התאמה"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>מחק התאמה</TooltipContent>
-        </Tooltip>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="space-y-1">
-          <Label className="text-sm font-medium text-slate-700">סוג התאמה</Label>
-          <div className="flex gap-2" role="radiogroup" aria-label="סוג התאמה">
-            <Button
-              type="button"
-              variant={row.type === 'credit' ? 'default' : 'ghost'}
-              className="flex-1 h-10"
-              onClick={() => updateAdjustment(row.id, { type: 'credit' })}
-            >
-              זיכוי
-            </Button>
-            <Button
-              type="button"
-              variant={row.type === 'debit' ? 'default' : 'ghost'}
-              className="flex-1 h-10"
-              onClick={() => updateAdjustment(row.id, { type: 'debit' })}
-            >
-              ניכוי
-            </Button>
+  const renderAdjustmentSegment = (row, idx) => {
+    const rowErrors = adjustmentErrors[row.id] || {};
+    return (
+      <div key={row.id} className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium text-slate-700">התאמה #{idx + 1}</div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 text-red-500 hover:bg-red-50"
+                onClick={() => removeAdjustment(row.id)}
+                aria-label="מחק התאמה"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>מחק התאמה</TooltipContent>
+          </Tooltip>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <div className="space-y-1">
+            <Label className="text-sm font-medium text-slate-700">סוג התאמה</Label>
+            <div className="flex gap-2" role="radiogroup" aria-label="סוג התאמה">
+              <Button
+                type="button"
+                variant={row.type === 'credit' ? 'default' : 'ghost'}
+                className="flex-1 h-10"
+                onClick={() => updateAdjustment(row.id, { type: 'credit' })}
+              >
+                זיכוי
+              </Button>
+              <Button
+                type="button"
+                variant={row.type === 'debit' ? 'default' : 'ghost'}
+                className="flex-1 h-10"
+                onClick={() => updateAdjustment(row.id, { type: 'debit' })}
+              >
+                ניכוי
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-sm font-medium text-slate-700">סכום (₪)</Label>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={row.amount}
+              onChange={event => updateAdjustment(row.id, { amount: event.target.value })}
+              className="bg-white h-10 text-base"
+            />
+            {rowErrors.amount ? (
+              <p className="text-xs text-red-600 text-right">{rowErrors.amount}</p>
+            ) : null}
+          </div>
+          <div className="space-y-1 sm:col-span-2">
+            <Label className="text-sm font-medium text-slate-700">הערות</Label>
+            <Textarea
+              value={row.notes}
+              onChange={event => updateAdjustment(row.id, { notes: event.target.value })}
+              rows={2}
+              className="bg-white text-base leading-6"
+              placeholder="הוסיפו הסבר קצר (חובה)"
+            />
+            {rowErrors.notes ? (
+              <p className="text-xs text-red-600 text-right">{rowErrors.notes}</p>
+            ) : null}
           </div>
         </div>
-        <div className="space-y-1">
-          <Label className="text-sm font-medium text-slate-700">סכום (₪)</Label>
-          <Input
-            type="number"
-            min="0"
-            step="0.01"
-            value={row.amount}
-            onChange={event => updateAdjustment(row.id, { amount: event.target.value })}
-            className="bg-white h-10 text-base"
-          />
-          {adjustmentErrors[row.id] ? (
-            <p className="text-xs text-red-600 text-right">{adjustmentErrors[row.id]}</p>
-          ) : null}
-        </div>
-        <div className="space-y-1 sm:col-span-2">
-          <Label className="text-sm font-medium text-slate-700">הערות</Label>
-          <Textarea
-            value={row.notes}
-            onChange={event => updateAdjustment(row.id, { notes: event.target.value })}
-            rows={2}
-            className="bg-white text-base leading-6"
-            placeholder="הסבר קצר (לא חובה)"
-          />
-        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const addLabel = isHourly || isGlobal ? 'הוסף מקטע שעות' : 'הוסף רישום';
 

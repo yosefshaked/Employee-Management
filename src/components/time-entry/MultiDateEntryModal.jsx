@@ -114,6 +114,9 @@ export default function MultiDateEntryModal({
   const [mode, setMode] = useState('regular');
   const handleModeChange = useCallback((nextMode) => {
     setMode(nextMode);
+    if (nextMode !== 'adjustment') {
+      setAdjustmentErrors({});
+    }
   }, []);
   const defaultMixedSubtype = DEFAULT_MIXED_SUBTYPE;
   const ensureMixedSelection = useCallback((value = {}) => {
@@ -169,10 +172,16 @@ export default function MultiDateEntryModal({
   }, [selectedEmployees, sortedDates]);
 
   const [adjustmentValues, setAdjustmentValues] = useState(defaultAdjustmentValues);
+  const [adjustmentErrors, setAdjustmentErrors] = useState({});
 
   useEffect(() => {
     setAdjustmentValues(defaultAdjustmentValues);
+    setAdjustmentErrors({});
   }, [defaultAdjustmentValues]);
+
+  useEffect(() => {
+    setAdjustmentErrors({});
+  }, [selectedEmployees, sortedDates]);
 
   const updateAdjustmentValue = useCallback((empId, dateStr, patch) => {
     setAdjustmentValues(prev => {
@@ -181,6 +190,19 @@ export default function MultiDateEntryModal({
       const current = inner[dateStr] || { type: 'credit', amount: '', notes: '' };
       inner[dateStr] = { ...current, ...patch };
       next[empId] = inner;
+      return next;
+    });
+    setAdjustmentErrors(prev => {
+      const next = { ...prev };
+      if (!next[empId]) return next;
+      const inner = { ...next[empId] };
+      if (!inner[dateStr]) return next;
+      delete inner[dateStr];
+      if (Object.keys(inner).length === 0) {
+        delete next[empId];
+      } else {
+        next[empId] = inner;
+      }
       return next;
     });
   }, []);
@@ -549,6 +571,8 @@ export default function MultiDateEntryModal({
   const leaveSaveDisabled = mode === 'leave' && (!selectedEmployees.length || !sortedDates.length);
   const handleAdjustmentSave = async () => {
     const entries = [];
+    const errors = {};
+    let hasError = false;
     selectedEmployees.forEach(empId => {
       const inner = adjustmentValues[empId] || {};
       sortedDates.forEach(d => {
@@ -556,16 +580,34 @@ export default function MultiDateEntryModal({
         const entry = inner[dateStr];
         if (!entry) return;
         const amountValue = parseFloat(entry.amount);
-        if (!entry.amount || Number.isNaN(amountValue) || amountValue <= 0) return;
+        const rowErrors = {};
+        if (!entry.amount || Number.isNaN(amountValue) || amountValue <= 0) {
+          rowErrors.amount = 'סכום גדול מ-0 נדרש';
+        }
+        const notesValue = typeof entry.notes === 'string' ? entry.notes.trim() : '';
+        if (!notesValue) {
+          rowErrors.notes = 'יש להוסיף הערה להתאמה';
+        }
+        if (rowErrors.amount || rowErrors.notes) {
+          hasError = true;
+          if (!errors[empId]) errors[empId] = {};
+          errors[empId][dateStr] = rowErrors;
+          return;
+        }
         entries.push({
           employee_id: empId,
           date: dateStr,
           type: entry.type === 'debit' ? 'debit' : 'credit',
           amount: amountValue,
-          notes: entry.notes || '',
+          notes: notesValue,
         });
       });
     });
+    if (hasError) {
+      setAdjustmentErrors(errors);
+      toast.error('נא למלא סכום והערה עבור כל התאמה.', { duration: 15000 });
+      return;
+    }
     if (!entries.length) {
       toast.error('נא להזין סכום לפחות להתאמה אחת.', { duration: 15000 });
       return;
@@ -574,6 +616,7 @@ export default function MultiDateEntryModal({
       const result = await saveAdjustments(entries);
       const insertedCount = Array.isArray(result?.inserted) ? result.inserted.length : entries.length;
       toast.success(`נשמרו ${insertedCount} התאמות`);
+      setAdjustmentErrors({});
       onSaved();
       onClose();
     } catch (error) {
@@ -887,6 +930,7 @@ export default function MultiDateEntryModal({
                           {sortedDates.map(d => {
                             const dateStr = format(d, 'yyyy-MM-dd');
                             const entry = map[dateStr] || { type: 'credit', amount: '', notes: '' };
+                            const rowErrors = (adjustmentErrors[empId] && adjustmentErrors[empId][dateStr]) || {};
                             const isDebit = entry.type === 'debit';
                             return (
                               <div
@@ -925,6 +969,9 @@ export default function MultiDateEntryModal({
                                       onChange={event => updateAdjustmentValue(empId, dateStr, { amount: event.target.value })}
                                       className="bg-white h-10 text-base"
                                     />
+                                    {rowErrors.amount ? (
+                                      <p className="text-xs text-red-600 text-right">{rowErrors.amount}</p>
+                                    ) : null}
                                   </div>
                                   <div className="space-y-1">
                                     <Label className="text-sm font-medium text-slate-700">הערות</Label>
@@ -933,8 +980,11 @@ export default function MultiDateEntryModal({
                                       onChange={event => updateAdjustmentValue(empId, dateStr, { notes: event.target.value })}
                                       rows={2}
                                       className="bg-white text-base leading-6"
-                                      placeholder="הסבר קצר (לא חובה)"
+                                      placeholder="הוסיפו הסבר קצר (חובה)"
                                     />
+                                    {rowErrors.notes ? (
+                                      <p className="text-xs text-red-600 text-right">{rowErrors.notes}</p>
+                                    ) : null}
                                   </div>
                                 </div>
                               </div>

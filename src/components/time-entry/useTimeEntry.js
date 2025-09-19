@@ -335,18 +335,24 @@ export function useTimeEntry({
     const client = supabaseClient || (await import('../../supabaseClient.js')).supabase;
     const canWriteMetadata = await canUseWorkSessionMetadata(client);
     const inserts = [];
+    const invalidNotes = [];
     for (const item of items) {
       const employee = employees.find(e => e.id === item.employee_id);
       if (!employee) continue;
       if (!item.date) continue;
       const amountValue = parseFloat(item.amount);
       if (!item.amount || Number.isNaN(amountValue) || amountValue <= 0) continue;
+      const notesValue = typeof item.notes === 'string' ? item.notes.trim() : '';
+      if (!notesValue) {
+        invalidNotes.push({ employee_id: employee.id, date: item.date });
+        continue;
+      }
       const normalizedAmount = item.type === 'debit' ? -Math.abs(amountValue) : Math.abs(amountValue);
       const payload = {
         employee_id: employee.id,
         date: item.date,
         entry_type: 'adjustment',
-        notes: item.notes || null,
+        notes: notesValue,
         total_payment: normalizedAmount,
         rate_used: normalizedAmount,
         hours: null,
@@ -361,6 +367,12 @@ export function useTimeEntry({
         }
       }
       inserts.push(payload);
+    }
+    if (invalidNotes.length > 0) {
+      const error = new Error('כל התאמה חייבת לכלול הערה.');
+      error.code = 'TIME_ENTRY_ADJUSTMENT_NOTE_REQUIRED';
+      error.invalidEntries = invalidNotes;
+      throw error;
     }
     if (!inserts.length) {
       throw new Error('לא נמצאו התאמות לשמירה');

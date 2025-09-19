@@ -257,12 +257,17 @@ export default function TimeEntry() {
             toast.error('נא להזין סכום גדול מ-0 עבור כל התאמה.', { duration: 15000 });
             return;
           }
+          const notesValue = typeof entry.notes === 'string' ? entry.notes.trim() : '';
+          if (!notesValue) {
+            toast.error('נא למלא סכום והערה עבור כל התאמה.', { duration: 15000 });
+            return;
+          }
           const normalizedAmount = entry.type === 'debit' ? -Math.abs(amountValue) : Math.abs(amountValue);
           const basePayload = {
             employee_id: employee.id,
             date: dateStr,
             entry_type: 'adjustment',
-            notes: entry.notes || null,
+            notes: notesValue,
             total_payment: normalizedAmount,
             rate_used: normalizedAmount,
             hours: null,
