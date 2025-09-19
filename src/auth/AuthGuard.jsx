@@ -14,7 +14,7 @@ function LoadingScreen() {
   );
 }
 
-export default function RequireAuth() {
+export default function AuthGuard() {
   const { status: authStatus, session } = useAuth();
   const { status: orgStatus, activeOrgHasConnection } = useOrg();
   const location = useLocation();
@@ -24,7 +24,17 @@ export default function RequireAuth() {
   }
 
   if (!session) {
-    return <Navigate to="/login" replace state={{ from: location }} />;
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{
+          from: location,
+          reason: 'auth-required',
+          message: 'היי! צריך להיכנס למערכת כדי להמשיך. התחבר ונחזיר אותך בדיוק לאותו מסך.',
+        }}
+      />
+    );
   }
 
   if (orgStatus === 'loading' || orgStatus === 'idle') {

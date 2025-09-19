@@ -14,7 +14,7 @@ import { RuntimeConfigProvider } from './runtime/RuntimeConfigContext.jsx';
 import Diagnostics from './runtime/Diagnostics.jsx';
 import Login from './Pages/Login.jsx';
 import { AuthProvider } from './auth/AuthContext.jsx';
-import RequireAuth from './auth/RequireAuth.jsx';
+import AuthGuard from './auth/AuthGuard.jsx';
 import { OrgProvider } from './org/OrgContext.jsx';
 import OrgSelection from './Pages/OrgSelection.jsx';
 
@@ -22,7 +22,7 @@ function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
-      <Route element={<RequireAuth />}>
+      <Route element={<AuthGuard />}>
         <Route path="/select-org" element={<OrgSelection />} />
         <Route element={<Layout />}>
           {/* ניתוב אוטומטי מהעמוד הראשי לדשבורד */}
@@ -45,7 +45,7 @@ function App() {
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
-export function renderApp(config) {
+export function renderApp(config = null) {
   ReactDOM.createRoot(document.getElementById('root')).render(
     <React.StrictMode>
       <RuntimeConfigProvider config={config}>
