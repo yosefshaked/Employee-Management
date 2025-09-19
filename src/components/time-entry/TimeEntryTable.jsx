@@ -642,11 +642,13 @@ function TimeEntryTableInner({
                                 size="sm"
                                 onClick={() => setAllSummaryOpen(prev => !prev)}
                                 aria-expanded={allSummaryOpen}
-                                className="flex w-full flex-row-reverse items-center justify-between gap-2 rounded-none px-4 py-3 text-right"
+                                className="flex w-full items-center justify-between gap-2 rounded-none px-4 py-3 text-right"
                               >
-                                {allSummaryOpen ? 'הסתר פירוט' : 'הצג פירוט'}
+                                <span className="flex-1 text-right">
+                                  {allSummaryOpen ? 'הסתר פירוט' : 'הצג פירוט'}
+                                </span>
                                 <ChevronDown
-                                  className={`w-4 h-4 transition-transform ${allSummaryOpen ? 'rotate-180' : ''}`}
+                                  className={`h-4 w-4 shrink-0 transition-transform ${allSummaryOpen ? 'rotate-180' : ''}`}
                                 />
                               </Button>
                             </TableCell>
