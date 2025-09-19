@@ -8,11 +8,7 @@ This project is a Vite + React application for managing employees, work sessions
    ```bash
    npm install
    ```
-2. Create a `.env.development` file with your Supabase credentials:
-   ```bash
-   VITE_SUPABASE_URL=your-url
-   VITE_SUPABASE_ANON_KEY=your-anon-key
-   ```
+2. Copy `public/runtime-config.example.json` to `public/runtime-config.json` and update the values with the **app metadata** Supabase URL and anon key.
 3. Start the dev server:
    ```bash
    npm run dev
@@ -31,8 +27,8 @@ To test the Azure runtime locally use the Static Web Apps CLI:
    {
      "IsEncrypted": false,
      "Values": {
-       "SUPABASE_URL": "your-url",
-       "SUPABASE_ANON_KEY": "your-anon-key"
+        "APP_SUPABASE_URL": "https://your-project.supabase.co",
+        "APP_SUPABASE_SERVICE_ROLE": "service-role-key-with-org-access"
      }
    }
    ```
@@ -57,11 +53,16 @@ The command outputs static assets to the `dist/` directory. Configure Azure Stat
 
 ## Runtime configuration
 
-At runtime the app first calls `/api/config` (an Azure Function) to load the public Supabase URL and anon key. If the endpoint is not available the app falls back to the Vite environment variables (`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`). For backwards compatibility the loader also checks `/config` if the Azure endpoint is missing.
+At bootstrap the SPA reads `public/runtime-config.json` (or an injected `window.__EMPLOYEE_MANAGEMENT_PUBLIC_CONFIG__`) to create the **core** Supabase client used for authentication and organization management. After the user signs in and selects an organization the client calls `/api/config` with:
 
-Visit `/#/diagnostics` to verify which source (function or env file) is currently in use; secrets are masked except for the last four characters.
+- `Authorization: Bearer <supabase_access_token>`
+- `x-org-id: <selected org id>` (may also be provided as a `org_id` query string)
 
-If neither source is configured the UI shows a blocking error screen in Hebrew with setup instructions.
+The Azure Function validates membership using the service role (`APP_SUPABASE_SERVICE_ROLE`) and returns the per-organization Supabase `supabase_url` and `anon_key`. Switching organizations re-requests this configuration and rebuilds the runtime client on the fly.
+
+Visit `/#/diagnostics` to verify which configuration source is loaded for the core client. Secrets are masked except for the last four characters.
+
+If `runtime-config.json` is missing the UI shows a blocking error screen in Hebrew with recovery steps.
 
 ## Health check endpoint
 

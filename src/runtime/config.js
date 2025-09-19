@@ -20,20 +20,57 @@ export function getRuntimeConfig() {
   return window[GLOBAL_CONFIG_KEY];
 }
 
-function sanitizeConfig(raw) {
+function sanitizeConfig(raw, source = 'runtime') {
   if (!raw || typeof raw !== 'object') {
     return undefined;
   }
-  const supabaseUrl = raw.supabaseUrl && String(raw.supabaseUrl).trim();
-  const supabaseAnonKey = raw.supabaseAnonKey && String(raw.supabaseAnonKey).trim();
+  const supabaseUrl = raw.supabaseUrl || raw.supabase_url;
+  const supabaseAnonKey = raw.supabaseAnonKey || raw.supabase_anon_key || raw.anon_key;
   if (!supabaseUrl || !supabaseAnonKey) {
     return undefined;
   }
   return {
-    supabaseUrl,
-    supabaseAnonKey,
-    source: raw.source || 'config',
+    supabaseUrl: String(supabaseUrl).trim(),
+    supabaseAnonKey: String(supabaseAnonKey).trim(),
+    source,
   };
+}
+
+function loadFromWindow() {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+  const current = window[GLOBAL_CONFIG_KEY];
+  return sanitizeConfig(current, 'window');
+}
+
+async function loadFromRuntimeFile() {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+
+  const candidates = ['/runtime-config.json', '/config/runtime-config.json'];
+
+  for (const path of candidates) {
+    try {
+      const response = await fetch(path, {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        continue;
+      }
+      const data = await response.json();
+      const sanitized = sanitizeConfig(data, 'file');
+      if (sanitized) {
+        return sanitized;
+      }
+    } catch (error) {
+      console.warn('Failed to load runtime config from', path, error);
+    }
+  }
+
+  return undefined;
 }
 
 export async function loadRuntimeConfig() {
@@ -42,59 +79,17 @@ export async function loadRuntimeConfig() {
     return existing;
   }
 
-  let config = loadFromEnv();
-
-  if (!config) {
-    config = await loadFromFunction();
+  const fromWindow = loadFromWindow();
+  if (fromWindow) {
+    setRuntimeConfig(fromWindow);
+    return fromWindow;
   }
 
-  if (!config) {
-    throw new MissingRuntimeConfigError();
+  const fromFile = await loadFromRuntimeFile();
+  if (fromFile) {
+    setRuntimeConfig(fromFile);
+    return fromFile;
   }
 
-  setRuntimeConfig(config);
-  return config;
-}
-
-async function loadFromFunction() {
-  const endpoints = ['/api/config', '/config'];
-
-  for (const endpoint of endpoints) {
-    try {
-      const response = await fetch(endpoint, {
-        headers: {
-          Accept: 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        continue;
-      }
-
-      const data = await response.json();
-      return sanitizeConfig({
-        ...data,
-        source: 'config',
-      });
-    } catch {
-      continue;
-    }
-  }
-
-  return undefined;
-}
-
-function loadFromEnv() {
-  const envUrl = import.meta.env.VITE_SUPABASE_URL;
-  const envAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-  if (!envUrl || !envAnonKey) {
-    return undefined;
-  }
-
-  return sanitizeConfig({
-    supabaseUrl: envUrl,
-    supabaseAnonKey: envAnonKey,
-    source: 'env',
-  });
+  throw new MissingRuntimeConfigError();
 }

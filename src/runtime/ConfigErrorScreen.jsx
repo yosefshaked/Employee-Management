@@ -21,8 +21,9 @@ function ConfigErrorScreen({ error }) {
         <h1 style={styles.title}>הגדרת חיבור חסרה</h1>
         <p style={styles.message}>{message}</p>
         <ol style={styles.list}>
-          <li>בפריסת Azure Static Web Apps יש להגדיר את המשתנים SUPABASE_URL ו-SUPABASE_ANON_KEY בהגדרות ה-API ולפרוס מחדש.</li>
-          <li>בפיתוח לוקלי ניתן להשתמש ב־.env.development עם VITE_SUPABASE_URL ו־VITE_SUPABASE_ANON_KEY או להריץ את Azure Static Web Apps CLI עם local.settings.json תחת api/.</li>
+          <li>ודא שקובץ <code>public/runtime-config.json</code> נפרס עם המפתחות <code>supabaseUrl</code> ו-<code>supabaseAnonKey</code>.</li>
+          <li>בפיתוח לוקלי ניתן להעתיק את <code>public/runtime-config.example.json</code> ל-<code>public/runtime-config.json</code> ולעדכן את הערכים.</li>
+          <li>ב-Azure Static Web Apps יש להגדיר ב-API את <code>APP_SUPABASE_URL</code> ו-<code>APP_SUPABASE_SERVICE_ROLE</code> כדי שתפקוד /api/config יוכל לשרת ארגונים.</li>
         </ol>
         <button type="button" style={styles.button} onClick={() => window.location.reload()}>
           נסה שוב

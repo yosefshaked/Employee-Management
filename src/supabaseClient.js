@@ -2,16 +2,14 @@ import { createClient } from '@supabase/supabase-js';
 import { getRuntimeConfig } from './runtime/config.js';
 
 const runtimeConfig = getRuntimeConfig();
-const resolvedSupabaseUrl = runtimeConfig?.supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
-const resolvedSupabaseKey = runtimeConfig?.supabaseAnonKey || import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-if (!resolvedSupabaseUrl || !resolvedSupabaseKey) {
-  throw new Error('Supabase configuration missing. ודא ש-/config זמין או שקובץ ה-.env מוגדר.');
+if (!runtimeConfig?.supabaseUrl || !runtimeConfig?.supabaseAnonKey) {
+  throw new Error('Supabase configuration missing. ודא שקובץ runtime-config.json נטען לפני הפעלת המערכת.');
 }
 
-export const coreSupabase = createClient(resolvedSupabaseUrl, resolvedSupabaseKey);
-export const SUPABASE_URL = resolvedSupabaseUrl;
-export const SUPABASE_ANON_KEY = resolvedSupabaseKey;
+export const coreSupabase = createClient(runtimeConfig.supabaseUrl, runtimeConfig.supabaseAnonKey);
+export const SUPABASE_URL = runtimeConfig.supabaseUrl;
+export const SUPABASE_ANON_KEY = runtimeConfig.supabaseAnonKey;
 
 let activeOrgConfig = null;
 let activeOrgClient = null;
@@ -39,7 +37,7 @@ export function setOrgSupabaseConfig(nextConfig) {
   if (!hasValidConfig) {
     activeOrgConfig = nextConfig ? { ...nextConfig } : null;
     activeOrgClient = null;
-    listeners.forEach((listener) => listener(activeOrgClient, activeOrgConfig));
+    listeners.forEach(listener => listener(activeOrgClient, activeOrgConfig));
     return null;
   }
 
@@ -59,7 +57,7 @@ export function setOrgSupabaseConfig(nextConfig) {
 
   activeOrgClient = createClient(normalizedConfig.supabaseUrl, normalizedConfig.supabaseAnonKey);
   activeOrgConfig = normalizedConfig;
-  listeners.forEach((listener) => listener(activeOrgClient, activeOrgConfig));
+  listeners.forEach(listener => listener(activeOrgClient, activeOrgConfig));
   return activeOrgClient;
 }
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useRuntimeConfig } from './RuntimeConfigContext.jsx';
 
 function maskValue(value) {
@@ -15,6 +15,16 @@ function maskValue(value) {
 
 export default function Diagnostics() {
   const config = useRuntimeConfig();
+  const sourceLabel = useMemo(() => {
+    switch (config?.source) {
+      case 'file':
+        return 'קובץ runtime-config.json';
+      case 'window':
+        return 'הזרקת window.__EMPLOYEE_MANAGEMENT_PUBLIC_CONFIG__';
+      default:
+        return 'מקור לא ידוע';
+    }
+  }, [config]);
 
   return (
     <div className="max-w-2xl mx-auto mt-16 bg-white shadow-xl rounded-2xl p-8 space-y-6" dir="rtl">
@@ -25,7 +35,7 @@ export default function Diagnostics() {
       <dl className="grid grid-cols-1 gap-4">
         <div className="border border-slate-200 rounded-xl p-4 bg-slate-50">
           <dt className="text-sm text-slate-500">מקור</dt>
-          <dd className="text-lg font-semibold text-slate-900">{config?.source === 'env' ? 'קובץ .env' : 'פונקציית /config'}</dd>
+          <dd className="text-lg font-semibold text-slate-900">{sourceLabel}</dd>
         </div>
         <div className="border border-slate-200 rounded-xl p-4">
           <dt className="text-sm text-slate-500">Supabase URL</dt>
