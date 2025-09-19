@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Switch } from '@/components/ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
   Dialog,
   DialogContent,
@@ -514,15 +515,31 @@ export default function LeaveOverview({
                         <div className="flex flex-col items-end gap-2">
                           <div className="flex flex-row-reverse items-center gap-2">
                             <span className="text-sm font-medium text-slate-700">{methodLabel}</span>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleOpenOverrideDialog(employee)}
-                              disabled={isLoading}
-                            >
-                              עקיפת שיטת חישוב
-                            </Button>
+                            <div className="flex flex-row-reverse items-center gap-1">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleOpenOverrideDialog(employee)}
+                                disabled={isLoading}
+                              >
+                                עקיפת שיטת חישוב
+                              </Button>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                                    aria-label="מידע על עקיפת שיטת החישוב"
+                                  >
+                                    <Info className="h-4 w-4" />
+                                  </button>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" align="end" className="max-w-xs text-right leading-relaxed">
+                                  שינוי השיטה משפיע על חישוב חופשות חדשות או עריכות שתשמרו מהיום והלאה. רישומים קיימים שומרים את הסכום שנקבע בזמן הקליטה, ולכן אם צריך לעדכן אותם יש לערוך אותם ידנית.
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
                           </div>
                           {hasOverride ? (
                             <Badge variant="outline" className="text-xs text-amber-700 border-amber-200 bg-amber-50">
@@ -561,6 +578,14 @@ export default function LeaveOverview({
               <p>השיטה הארגונית ({defaultMethodLabel}) תחול כאשר אין עקיפה אישית.</p>
             </DialogDescription>
           </DialogHeader>
+          <Alert className="bg-sky-50 border-sky-200 text-sky-900 text-right">
+            <AlertTitle className="flex flex-row-reverse items-center gap-2 text-base">
+              <Info className="h-4 w-4" />חשוב לדעת
+            </AlertTitle>
+            <AlertDescription className="text-sm leading-relaxed">
+              שינוי שיטת החישוב משפיע על כל חופשה שתקליטו או תעדכנו מרגע השמירה ואילך. רישומים שנשמרו בעבר אינם משתנים אוטומטית, ולכן אם ביצעתם שינוי באמצע השנה חשוב לבדוק האם יש צורך לעדכן ידנית ימים שנרשמו כבר.
+            </AlertDescription>
+          </Alert>
           <form className="space-y-4" onSubmit={handleOverrideSubmit}>
             <div className="space-y-1 text-right">
               <Label className="text-sm font-semibold text-slate-700">עובד</Label>
