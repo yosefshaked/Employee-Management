@@ -214,7 +214,7 @@ function TimeEntryTableInner({
 
   const shouldShowHoursSummary = activeTab === 'all' || activeTab === 'work';
   const summaryRowConfigs = [];
-  if (activeTab === 'all' || activeTab === 'work') {
+  if (activeTab === 'all') {
     summaryRowConfigs.push({
       key: 'workPayment',
       label: 'סה"כ תשלום שעות/שיעורים',
