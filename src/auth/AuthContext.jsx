@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { supabase } from '@/supabaseClient';
+import { coreSupabase } from '@/supabaseClient';
 
 const AuthContext = createContext(null);
 
@@ -30,7 +30,7 @@ export function AuthProvider({ children }) {
 
     const resolveSession = async () => {
       try {
-        const { data, error } = await supabase.auth.getSession();
+        const { data, error } = await coreSupabase.auth.getSession();
         if (!isMounted) return;
         if (error) throw error;
         setSession(data.session);
@@ -47,7 +47,7 @@ export function AuthProvider({ children }) {
 
     resolveSession();
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: listener } = coreSupabase.auth.onAuthStateChange((_event, nextSession) => {
       if (!isMounted) return;
       setSession(nextSession);
       setProfile(extractProfile(nextSession));
@@ -61,12 +61,12 @@ export function AuthProvider({ children }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    const { error } = await supabase.auth.signOut();
+    const { error } = await coreSupabase.auth.signOut();
     if (error) throw error;
   }, []);
 
   const signInWithEmail = useCallback(async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data, error } = await coreSupabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     return data;
   }, []);
@@ -75,7 +75,7 @@ export function AuthProvider({ children }) {
     const origin = typeof window === 'undefined' ? undefined : window.location.origin;
     const pathname = typeof window === 'undefined' ? undefined : window.location.pathname;
     const redirectTo = origin && pathname ? `${origin}${pathname}` : undefined;
-    const { data, error } = await supabase.auth.signInWithOAuth({
+    const { data, error } = await coreSupabase.auth.signInWithOAuth({
       provider,
       options: redirectTo ? { redirectTo } : {},
     });
