@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isToday, parseISO } from 'date-fns';
 import { he } from 'date-fns/locale';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -44,6 +44,7 @@ function TimeEntryTableInner({
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [editingCell, setEditingCell] = useState(null); // Will hold { day, employee }
   const [multiMode, setMultiMode] = useState(false);
+  const [allSummaryOpen, setAllSummaryOpen] = useState(false);
   const [selectedDates, setSelectedDates] = useState([]);
   const [selectedEmployees, setSelectedEmployees] = useState(employees.map(e => e.id));
   const displaySessions = useMemo(
@@ -104,6 +105,8 @@ function TimeEntryTableInner({
         workPayment: 0,
         leavePaidAmount: 0,
         leaveUnpaidAmount: 0,
+        leavePaidCount: 0,
+        leaveUnpaidCount: 0,
         adjustmentCredit: 0,
         adjustmentDebit: 0,
         adjustmentNet: 0,
@@ -154,9 +157,12 @@ function TimeEntryTableInner({
         const credit = Math.min(multiplier, remaining);
         const scale = multiplier ? credit / multiplier : 0;
         const amount = sessionValue.amount * scale;
+        const countCredit = Number.isFinite(credit) && credit > 0 ? credit : 0;
         if (s.payable === false || amount <= 0) {
+          empTotals.leaveUnpaidCount += countCredit;
           empTotals.leaveUnpaidAmount += Math.abs(amount);
         } else if (emp.employee_type !== 'global') {
+          empTotals.leavePaidCount += countCredit;
           empTotals.leavePaidAmount += amount;
           empTotals.payment += amount;
         }
@@ -188,10 +194,15 @@ function TimeEntryTableInner({
       if (!amount) return;
       empTotals.payment += amount;
       if (isLeaveEntryType(value?.dayType)) {
+        const multiplier = Number.isFinite(value?.multiplier) && value.multiplier > 0
+          ? value.multiplier
+          : 1;
         if (value?.payable === false) {
           empTotals.leaveUnpaidAmount += Math.abs(amount);
+          empTotals.leaveUnpaidCount += multiplier;
         } else {
           empTotals.leavePaidAmount += amount;
+          empTotals.leavePaidCount += multiplier;
         }
       } else {
         empTotals.workPayment += amount;
@@ -212,7 +223,13 @@ function TimeEntryTableInner({
     setMultiModalOpen(true);
   };
 
-  const shouldShowHoursSummary = activeTab === 'all' || activeTab === 'work';
+  useEffect(() => {
+    if (activeTab !== 'all') {
+      setAllSummaryOpen(false);
+    }
+  }, [activeTab]);
+
+  const shouldShowHoursSummary = activeTab === 'work' || (activeTab === 'all' && allSummaryOpen);
   const summaryRowConfigs = [];
   if (activeTab === 'all') {
     summaryRowConfigs.push({
@@ -221,8 +238,6 @@ function TimeEntryTableInner({
       getValue: totals => totals.workPayment || 0,
       format: 'currency',
     });
-  }
-  if (activeTab === 'all' || activeTab === 'leave') {
     summaryRowConfigs.push({
       key: 'leavePaid',
       label: 'סה"כ חופשות בתשלום',
@@ -234,6 +249,20 @@ function TimeEntryTableInner({
       label: 'סה"כ חופשות ללא תשלום',
       getValue: totals => totals.leaveUnpaidAmount || 0,
       format: 'muted',
+    });
+  }
+  if (activeTab === 'leave') {
+    summaryRowConfigs.push({
+      key: 'leavePaidCount',
+      label: 'סה"כ חופשות בתשלום (כמות)',
+      getValue: totals => totals.leavePaidCount || 0,
+      format: 'count',
+    });
+    summaryRowConfigs.push({
+      key: 'leaveUnpaidCount',
+      label: 'סה"כ חופשות ללא תשלום (כמות)',
+      getValue: totals => totals.leaveUnpaidCount || 0,
+      format: 'count-muted',
     });
   }
   if (activeTab === 'all' || activeTab === 'adjustments') {
@@ -262,9 +291,9 @@ function TimeEntryTableInner({
     if (activeTab === 'leave') {
       return {
         key: 'leaveTotal',
-        label: 'סה"כ חופשות',
-        getValue: totals => (totals.leavePaidAmount || 0) + (totals.leaveUnpaidAmount || 0),
-        format: 'total',
+        label: 'סה"כ חופשות (כמות)',
+        getValue: totals => (totals.leavePaidCount || 0) + (totals.leaveUnpaidCount || 0),
+        format: 'count-total',
         showPreStart: true,
       };
     }
@@ -299,6 +328,18 @@ function TimeEntryTableInner({
     const formatted = `₪${absValue.toLocaleString()}`;
     if (format === 'muted') {
       return { text: formatted, className: 'text-slate-600' };
+    }
+    if (format === 'count' || format === 'count-muted' || format === 'count-total') {
+      const display = numeric.toLocaleString(undefined, {
+        maximumFractionDigits: 2,
+        minimumFractionDigits: Math.abs(numeric % 1) > 0 ? 1 : 0,
+      });
+      const baseClass = format === 'count-muted'
+        ? 'text-slate-600'
+        : format === 'count-total'
+          ? (numeric === 0 ? 'text-slate-600' : 'text-slate-800 font-semibold')
+          : 'text-slate-800';
+      return { text: display, className: baseClass };
     }
     if (format === 'debit') {
       return {
@@ -589,7 +630,31 @@ function TimeEntryTableInner({
                             })}
                           </TableRow>
                         )}
-                        {summaryRowConfigs.map(row => (
+                        {activeTab === 'all' && summaryRowConfigs.length > 0 && (
+                          <TableRow className="bg-slate-100">
+                            <TableCell
+                              colSpan={employees.length + 1}
+                              className="bg-slate-100"
+                            >
+                              <div className="flex justify-end">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => setAllSummaryOpen(prev => !prev)}
+                                  aria-expanded={allSummaryOpen}
+                                  className="flex items-center gap-2"
+                                >
+                                  {allSummaryOpen ? 'הסתר פירוט' : 'הצג פירוט'}
+                                  <ChevronDown
+                                    className={`w-4 h-4 transition-transform ${allSummaryOpen ? 'rotate-180' : ''}`}
+                                  />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        {(activeTab !== 'all' || allSummaryOpen) && summaryRowConfigs.map(row => (
                           <TableRow key={row.key} className="bg-slate-100 font-medium">
                             <TableCell className="text-right sticky right-0 bg-slate-100">{row.label}</TableCell>
                             {employees.map(emp => {
@@ -597,6 +662,8 @@ function TimeEntryTableInner({
                                 workPayment: 0,
                                 leavePaidAmount: 0,
                                 leaveUnpaidAmount: 0,
+                                leavePaidCount: 0,
+                                leaveUnpaidCount: 0,
                                 adjustmentCredit: 0,
                                 adjustmentDebit: 0,
                                 adjustmentNet: 0,
@@ -618,6 +685,8 @@ function TimeEntryTableInner({
                               workPayment: 0,
                               leavePaidAmount: 0,
                               leaveUnpaidAmount: 0,
+                              leavePaidCount: 0,
+                              leaveUnpaidCount: 0,
                               adjustmentNet: 0,
                               payment: 0,
                               preStartLeaveDates: new Set(),
