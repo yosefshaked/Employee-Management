@@ -8,11 +8,7 @@ import React, {
   useState,
 } from 'react';
 import { toast } from 'sonner';
-import {
-  coreSupabase,
-  setOrgSupabaseConfig,
-  getActiveOrgConfig,
-} from '@/supabaseClient.js';
+import { coreSupabase, OrgSupabaseProvider } from '@/supabaseClient.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
@@ -141,6 +137,7 @@ export function OrgProvider({ children }) {
   const [orgInvites, setOrgInvites] = useState([]);
   const [error, setError] = useState(null);
   const [configStatus, setConfigStatus] = useState('idle');
+  const [activeOrgConfig, setActiveOrgConfig] = useState(null);
   const loadingRef = useRef(false);
   const lastUserIdRef = useRef(null);
   const configRequestRef = useRef(0);
@@ -156,7 +153,7 @@ export function OrgProvider({ children }) {
     setOrgMembers([]);
     setOrgInvites([]);
     setError(null);
-    setOrgSupabaseConfig(null);
+    setActiveOrgConfig(null);
     setConfigStatus('idle');
   }, []);
 
@@ -266,7 +263,7 @@ export function OrgProvider({ children }) {
   const fetchOrgRuntimeConfig = useCallback(
     async (orgId) => {
       if (!orgId) {
-        setOrgSupabaseConfig(null);
+        setActiveOrgConfig(null);
         setConfigStatus('idle');
         return;
       }
@@ -302,7 +299,7 @@ export function OrgProvider({ children }) {
         if (!response.ok) {
           const message = payload?.error || 'טעינת הגדרות הארגון נכשלה.';
           toast.error(message);
-          setOrgSupabaseConfig(null);
+          setActiveOrgConfig(null);
           setConfigStatus('error');
           return;
         }
@@ -312,7 +309,7 @@ export function OrgProvider({ children }) {
 
         if (!supabaseUrl || !anonKey) {
           toast.error('חסרים פרטי חיבור עבור הארגון שנבחר.');
-          setOrgSupabaseConfig(null);
+          setActiveOrgConfig(null);
           setConfigStatus('error');
           return;
         }
@@ -323,9 +320,19 @@ export function OrgProvider({ children }) {
           anonKey: maskForDebug(anonKey),
         });
 
-        setOrgSupabaseConfig({
-          supabaseUrl,
-          supabaseAnonKey: anonKey,
+        setActiveOrgConfig((current) => {
+          const normalized = {
+            supabaseUrl: String(supabaseUrl).trim(),
+            supabaseAnonKey: String(anonKey).trim(),
+          };
+          if (
+            current &&
+            current.supabaseUrl === normalized.supabaseUrl &&
+            current.supabaseAnonKey === normalized.supabaseAnonKey
+          ) {
+            return current;
+          }
+          return normalized;
         });
         setConfigStatus('success');
       } catch (error) {
@@ -334,7 +341,7 @@ export function OrgProvider({ children }) {
         }
         console.error('Failed to fetch organization config', error);
         toast.error('לא ניתן היה לטעון את הגדרות הארגון. נסה שוב בעוד מספר רגעים.');
-        setOrgSupabaseConfig(null);
+        setActiveOrgConfig(null);
         setConfigStatus('error');
       }
     },
@@ -357,7 +364,7 @@ export function OrgProvider({ children }) {
       if (!org) {
         setActiveOrgId(null);
         setActiveOrg(null);
-        setOrgSupabaseConfig(null);
+        setActiveOrgConfig(null);
         setConfigStatus('idle');
         return;
       }
@@ -365,7 +372,7 @@ export function OrgProvider({ children }) {
       setActiveOrgId(org.id);
       setActiveOrg(org);
 
-      setOrgSupabaseConfig(null);
+      setActiveOrgConfig(null);
       setConfigStatus('idle');
     },
     [],
@@ -427,7 +434,7 @@ export function OrgProvider({ children }) {
   useEffect(() => {
     if (!activeOrgId) return;
     if (!accessToken) {
-      setOrgSupabaseConfig(null);
+      setActiveOrgConfig(null);
       return;
     }
     void fetchOrgRuntimeConfig(activeOrgId);
@@ -704,8 +711,6 @@ export function OrgProvider({ children }) {
     [user, refreshOrganizations, selectOrg],
   );
 
-  const activeOrgConfigValue = getActiveOrgConfig();
-
   const value = useMemo(
     () => ({
       status,
@@ -727,7 +732,7 @@ export function OrgProvider({ children }) {
       removeMember,
       acceptInvite,
       activeOrgHasConnection: Boolean(activeOrg?.supabase_url && activeOrg?.supabase_anon_key),
-      activeOrgConfig: activeOrgConfigValue,
+      activeOrgConfig,
       configStatus,
     }),
     [
@@ -750,11 +755,15 @@ export function OrgProvider({ children }) {
       removeMember,
       acceptInvite,
       configStatus,
-      activeOrgConfigValue,
+      activeOrgConfig,
     ],
   );
 
-  return <OrgContext.Provider value={value}>{children}</OrgContext.Provider>;
+  return (
+    <OrgSupabaseProvider config={activeOrgConfig}>
+      <OrgContext.Provider value={value}>{children}</OrgContext.Provider>
+    </OrgSupabaseProvider>
+  );
 }
 
 // eslint-disable-next-line react-refresh/only-export-components
