@@ -2,8 +2,6 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
-
-// ייבוא של כל העמודים והתבנית הראשית שלך (ללא שינוי)
 import Layout from './Layout.jsx';
 import Dashboard from './Pages/Dashboard.jsx';
 import Employees from './Pages/Employees.jsx';
@@ -12,15 +10,16 @@ import Reports from './Pages/Reports.jsx';
 import ReportsErrorBoundary from './components/reports/ReportsErrorBoundary.js';
 import Services from './Pages/Services.jsx';
 import Settings from './Pages/Settings.jsx';
+import { RuntimeConfigProvider } from './runtime/RuntimeConfigContext.jsx';
+import Diagnostics from './runtime/Diagnostics.jsx';
 
-// קומפוננטה ראשית שמגדירה את הניווט (עכשיו עם לוגיקת טעינה)
 function App() {
   return (
     <Layout>
       <Routes>
         {/* ניתוב אוטומטי מהעמוד הראשי לדשבורד */}
         <Route path="/" element={<Navigate to="/Dashboard" replace />} />
-        
+
         {/* הגדרת כל העמודים */}
         <Route path="/Dashboard" element={<Dashboard />} />
         <Route path="/Employees" element={<Employees />} />
@@ -29,18 +28,23 @@ function App() {
         <Route path="/Reports" element={<ReportsErrorBoundary><Reports /></ReportsErrorBoundary>} />
         <Route path="/Services" element={<Services />} />
         <Route path="/Settings" element={<Settings />} />
+        <Route path="/diagnostics" element={<Diagnostics />} />
       </Routes>
     </Layout>
   );
 }
 
-// הקוד שמפעיל את כל האפליקציה (ללא שינוי)
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <HashRouter>
-      <App />
-    </HashRouter>
-  </React.StrictMode>
-);
+// eslint-disable-next-line react-refresh/only-export-components
+export function renderApp(config) {
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    <React.StrictMode>
+      <RuntimeConfigProvider config={config}>
+        <HashRouter>
+          <App />
+        </HashRouter>
+      </RuntimeConfigProvider>
+    </React.StrictMode>,
+  );
+}
 
 export default App;
