@@ -64,6 +64,7 @@ export default function MultiDateEntryModal({
   workSessions = [],
   leavePayPolicy = null,
   allowHalfDay = false,
+  defaultMode = 'regular',
 }) {
   const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees]);
   const initialRows = useMemo(() => {
@@ -111,7 +112,15 @@ export default function MultiDateEntryModal({
     });
   }, [employees, workSessions, services, leavePayPolicy]);
 
-  const [mode, setMode] = useState('regular');
+  const normalizedDefaultMode = useMemo(() => {
+    return defaultMode === 'leave' || defaultMode === 'adjustment' ? defaultMode : 'regular';
+  }, [defaultMode]);
+  const [mode, setMode] = useState(normalizedDefaultMode);
+  useEffect(() => {
+    if (open) {
+      setMode(normalizedDefaultMode);
+    }
+  }, [open, normalizedDefaultMode]);
   const handleModeChange = useCallback((nextMode) => {
     setMode(nextMode);
     if (nextMode !== 'adjustment') {
@@ -173,6 +182,12 @@ export default function MultiDateEntryModal({
 
   const [adjustmentValues, setAdjustmentValues] = useState(defaultAdjustmentValues);
   const [adjustmentErrors, setAdjustmentErrors] = useState({});
+
+  useEffect(() => {
+    if (open && normalizedDefaultMode !== 'adjustment') {
+      setAdjustmentErrors({});
+    }
+  }, [open, normalizedDefaultMode, setAdjustmentErrors]);
 
   useEffect(() => {
     setAdjustmentValues(defaultAdjustmentValues);

@@ -542,6 +542,9 @@ function TimeEntryTableInner({
           workSessions={contextSessions}
           leavePayPolicy={leavePayPolicy}
           allowHalfDay={leavePolicy?.allow_half_day}
+          defaultMode={activeTab === 'leave'
+            ? 'leave'
+            : (activeTab === 'adjustments' ? 'adjustment' : 'regular')}
           onSaved={() => {
             onImported();
             setSelectedDates([]);
