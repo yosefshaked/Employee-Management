@@ -19,12 +19,16 @@ export default function RequireAuth() {
   const { status: orgStatus, activeOrgHasConnection } = useOrg();
   const location = useLocation();
 
-  if (authStatus === 'loading' || orgStatus === 'loading' || orgStatus === 'idle') {
+  if (authStatus === 'loading') {
     return <LoadingScreen />;
   }
 
   if (!session) {
     return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  if (orgStatus === 'loading' || orgStatus === 'idle') {
+    return <LoadingScreen />;
   }
 
   const needsOrgSelection = orgStatus === 'needs-org' || orgStatus === 'needs-selection';
