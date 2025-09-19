@@ -1,7 +1,7 @@
 # תיק פרויקט: מערכת ניהול שכר ועובדים
 
-**גרסה: 1.4.2**
-**תאריך עדכון אחרון: 2025-09-18**
+**גרסה: 1.4.3**
+**תאריך עדכון אחרון: 2025-09-19**
 
 ## 1. חזון ומטרה
 
@@ -230,6 +230,107 @@
     *   צור פרויקט חדש ב-`supabase.com`.
     *   צור את 4 הטבלאות (`Employees`, `Services`, `RateHistory`, `WorkSessions`) כפי שמפורט בסעיף 3.
     *   ודא שכל ה-`Primary Keys`, `Foreign Keys`, וה-`Constraints` מוגדרים כראוי.
+
+### בסיס אבטחה ל-Supabase (Row Level Security)
+
+בכל פרויקט של לקוח חייבים להפעיל Row Level Security (RLS) כדי שרק משתמשים מחוברים יוכלו לקרוא או לעדכן נתונים. עוזר ההקמה במסך ההגדרות (Settings → אבטחת Supabase) מציג את ה-SQL הבא עם כפתור העתקה:
+
+```
+-- Baseline RLS for Employee Management (single-tenant)
+-- Run in the Supabase SQL editor while connected as the project owner.
+
+ALTER TABLE public."Employees" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Authenticated select Employees" ON public."Employees"
+  FOR SELECT TO authenticated
+  USING (true);
+CREATE POLICY "Authenticated insert Employees" ON public."Employees"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
+CREATE POLICY "Authenticated update Employees" ON public."Employees"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
+CREATE POLICY "Authenticated delete Employees" ON public."Employees"
+  FOR DELETE TO authenticated
+  USING (true);
+
+ALTER TABLE public."WorkSessions" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Authenticated select WorkSessions" ON public."WorkSessions"
+  FOR SELECT TO authenticated
+  USING (true);
+CREATE POLICY "Authenticated insert WorkSessions" ON public."WorkSessions"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
+CREATE POLICY "Authenticated update WorkSessions" ON public."WorkSessions"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
+CREATE POLICY "Authenticated delete WorkSessions" ON public."WorkSessions"
+  FOR DELETE TO authenticated
+  USING (true);
+
+ALTER TABLE public."LeaveBalances" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Authenticated select LeaveBalances" ON public."LeaveBalances"
+  FOR SELECT TO authenticated
+  USING (true);
+CREATE POLICY "Authenticated insert LeaveBalances" ON public."LeaveBalances"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
+CREATE POLICY "Authenticated update LeaveBalances" ON public."LeaveBalances"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
+CREATE POLICY "Authenticated delete LeaveBalances" ON public."LeaveBalances"
+  FOR DELETE TO authenticated
+  USING (true);
+
+ALTER TABLE public."RateHistory" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Authenticated select RateHistory" ON public."RateHistory"
+  FOR SELECT TO authenticated
+  USING (true);
+CREATE POLICY "Authenticated insert RateHistory" ON public."RateHistory"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
+CREATE POLICY "Authenticated update RateHistory" ON public."RateHistory"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
+CREATE POLICY "Authenticated delete RateHistory" ON public."RateHistory"
+  FOR DELETE TO authenticated
+  USING (true);
+
+ALTER TABLE public."Services" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Authenticated select Services" ON public."Services"
+  FOR SELECT TO authenticated
+  USING (true);
+CREATE POLICY "Authenticated insert Services" ON public."Services"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
+CREATE POLICY "Authenticated update Services" ON public."Services"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
+CREATE POLICY "Authenticated delete Services" ON public."Services"
+  FOR DELETE TO authenticated
+  USING (true);
+
+ALTER TABLE public."Settings" ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Authenticated select Settings" ON public."Settings"
+  FOR SELECT TO authenticated
+  USING (true);
+CREATE POLICY "Authenticated insert Settings" ON public."Settings"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
+CREATE POLICY "Authenticated update Settings" ON public."Settings"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
+CREATE POLICY "Authenticated delete Settings" ON public."Settings"
+  FOR DELETE TO authenticated
+  USING (true);
+```
+
+**אימות:** לאחר הרצת ה-SQL, חזור לעוזר ההקמה ולחץ על "בדוק מדיניות". הפעולה מבצעת קריאות קריאה בלבד שמוודאות שמשתמש מחובר מקבל גישה בעוד שבקשה אנונימית מקבלת סטטוס 401/403. המשך הלאה רק כאשר כל הטבלאות מוצגות עם תגית ירוקה של "מאובטח".
 4.  **צור קובץ סביבה:**
     *   בתיקייה הראשית של הפרויקט, צור קובץ חדש בשם `.env`.
     *   הוסף את פרטי הגישה ל-Supabase לקובץ זה:

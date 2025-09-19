@@ -2,12 +2,14 @@ import { createClient } from '@supabase/supabase-js';
 import { getRuntimeConfig } from './runtime/config.js';
 
 const runtimeConfig = getRuntimeConfig();
-const supabaseUrl = runtimeConfig?.supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = runtimeConfig?.supabaseAnonKey || import.meta.env.VITE_SUPABASE_ANON_KEY;
+const resolvedSupabaseUrl = runtimeConfig?.supabaseUrl || import.meta.env.VITE_SUPABASE_URL;
+const resolvedSupabaseKey = runtimeConfig?.supabaseAnonKey || import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseKey) {
+if (!resolvedSupabaseUrl || !resolvedSupabaseKey) {
   throw new Error('Supabase configuration missing. ודא ש-/config זמין או שקובץ ה-.env מוגדר.');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
-export const supabaseConfigSource = runtimeConfig?.source || (supabaseUrl && supabaseKey ? 'env' : 'unknown');
+export const supabase = createClient(resolvedSupabaseUrl, resolvedSupabaseKey);
+export const supabaseConfigSource = runtimeConfig?.source || (resolvedSupabaseUrl && resolvedSupabaseKey ? 'env' : 'unknown');
+export const SUPABASE_URL = resolvedSupabaseUrl;
+export const SUPABASE_ANON_KEY = resolvedSupabaseKey;

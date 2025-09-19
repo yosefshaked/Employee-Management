@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { Plus, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/supabaseClient';
+import RlsBaselineCard from '@/components/settings/RlsBaselineCard.jsx';
 import {
   DEFAULT_LEAVE_POLICY,
   HOLIDAY_TYPE_LABELS,
@@ -293,6 +294,8 @@ export default function Settings() {
           <h1 className="text-3xl font-bold text-slate-900 mb-2">חגים וימי חופשה</h1>
           <p className="text-slate-600">נהל את מדיניות החופשות והחגים הארגונית במקום מרכזי אחד</p>
         </div>
+
+        <RlsBaselineCard />
 
         {/* Storage Usage widget temporarily disabled; flip features.storageUsage=true to re-enable (requires RPCs). */}
 
