@@ -1,79 +1,29 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { supabase } from '@/supabaseClient';
-import { useAuth } from '@/auth/AuthContext.jsx';
-
-const ORG_SETTING_KEYS = ['organization', 'organization_profile', 'org_profile', 'org_settings'];
+import { useOrg } from '@/org/OrgContext.jsx';
 
 export default function OrgConfigBanner() {
-  const { session } = useAuth();
-  const [shouldShow, setShouldShow] = useState(false);
-  const [isChecking, setIsChecking] = useState(false);
+  const { activeOrg } = useOrg();
 
-  useEffect(() => {
-    let isActive = true;
-
-    if (!session) {
-      setShouldShow(false);
-      setIsChecking(false);
-      return () => {
-        isActive = false;
-      };
-    }
-
-    const checkSettings = async () => {
-      setIsChecking(true);
-      try {
-        const { count, error } = await supabase
-          .from('Settings')
-          .select('id', { count: 'exact', head: true })
-          .in('key', ORG_SETTING_KEYS);
-
-        if (!isActive) return;
-
-        if (error && error.code !== 'PGRST116') {
-          throw error;
-        }
-
-        const hasConfiguration = typeof count === 'number' ? count > 0 : false;
-        setShouldShow(!hasConfiguration);
-      } catch (error) {
-        console.error('Failed to verify organization configuration', error);
-        if (isActive) setShouldShow(true);
-      } finally {
-        if (isActive) setIsChecking(false);
-      }
-    };
-
-    const handleVerified = () => {
-      if (!isActive) return;
-      checkSettings();
-    };
-
-    if (typeof window !== 'undefined') {
-      window.addEventListener('setup-assistant:verified', handleVerified);
-    }
-
-    checkSettings();
-
-    return () => {
-      isActive = false;
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('setup-assistant:verified', handleVerified);
-      }
-    };
-  }, [session]);
-
-  if (isChecking || !shouldShow) {
+  if (!activeOrg) {
     return null;
   }
+
+  const missingConnection = !activeOrg.supabase_url || !activeOrg.supabase_anon_key;
+  const pendingSetup = !activeOrg.setup_completed;
+
+  if (!missingConnection && !pendingSetup) {
+    return null;
+  }
+
+  const message = missingConnection
+    ? 'כדי להתחיל להשתמש במערכת יש להוסיף את כתובת ה-URL והמפתח הציבורי של Supabase בארגון הנוכחי.'
+    : 'נדרש להשלים את אשף ההגדרות ולוודא שהטבלאות והמדיניות קיימות בפרויקט ה-Supabase שלכם.';
 
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-2xl px-4 py-2 flex items-center gap-3 text-amber-800 text-sm mt-4 mr-6 ml-6" role="status">
       <AlertTriangle className="w-4 h-4" aria-hidden="true" />
-      <p className="font-medium">
-        נראה שאין עדיין הגדרות ארגון. השלם את ההגדרה במסך ההגדרות כדי לאפשר חוויה מלאה למשתמשים.
-      </p>
+      <p className="font-medium">{message}</p>
     </div>
   );
 }

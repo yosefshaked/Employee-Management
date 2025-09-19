@@ -28,6 +28,7 @@ import {
 import ChangelogModal from "./components/ChangelogModal";
 import OrgConfigBanner from "@/components/OrgConfigBanner.jsx";
 import { useAuth } from "@/auth/AuthContext.jsx";
+import OrgSwitcher from "@/org/OrgSwitcher.jsx";
 
 const navigationItems = [
   {
@@ -105,6 +106,9 @@ export default function Layout({ children }) {
           </SidebarHeader>
           
           <SidebarContent className="p-4">
+            <div className="mb-4">
+              <OrgSwitcher />
+            </div>
             <SidebarGroup>
               <SidebarGroupLabel className="text-sm font-semibold text-slate-600 mb-3">
                 ניווט

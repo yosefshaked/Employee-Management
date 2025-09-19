@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { supabase } from '@/supabaseClient.js';
+import { useOrg } from '@/org/OrgContext.jsx';
 import {
   AlertCircle,
   CheckCircle2,
@@ -643,85 +644,105 @@ function StepSection({ number, title, description, statusBadge, children }) {
 }
 
 export default function SetupAssistant() {
-  const [connection, setConnection] = useState({ supabase_url: '', anon_key: '' });
-  const [originalConnection, setOriginalConnection] = useState({ supabase_url: '', anon_key: '' });
-  const [isLoadingConnection, setIsLoadingConnection] = useState(true);
+  const { activeOrg, updateConnection, recordVerification } = useOrg();
+  const [connection, setConnection] = useState({
+    supabase_url: '',
+    anon_key: '',
+    policy_links_text: '',
+    legal_contact_email: '',
+    legal_terms_url: '',
+    legal_privacy_url: '',
+  });
+  const [originalConnection, setOriginalConnection] = useState({
+    supabase_url: '',
+    anon_key: '',
+    policy_links_text: '',
+    legal_contact_email: '',
+    legal_terms_url: '',
+    legal_privacy_url: '',
+  });
   const [isSavingConnection, setIsSavingConnection] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
-  const [verificationStatus, setVerificationStatus] = useState('idle');
+  const [verificationStatus, setVerificationStatus] = useState(activeOrg?.setup_completed ? 'success' : 'idle');
   const [verifyResults, setVerifyResults] = useState([]);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState('');
-  const [lastVerifiedAt, setLastVerifiedAt] = useState(null);
+  const [lastVerifiedAt, setLastVerifiedAt] = useState(activeOrg?.verified_at || null);
 
   useEffect(() => {
-    let isMounted = true;
+    if (!activeOrg) {
+      const reset = {
+        supabase_url: '',
+        anon_key: '',
+        policy_links_text: '',
+        legal_contact_email: '',
+        legal_terms_url: '',
+        legal_privacy_url: '',
+      };
+      setConnection(reset);
+      setOriginalConnection(reset);
+      setLastSavedAt(null);
+      setVerificationStatus('idle');
+      setLastVerifiedAt(null);
+      return;
+    }
 
-    const loadInitial = async () => {
-      setIsLoadingConnection(true);
-      try {
-        const [connectionResponse, statusResponse] = await Promise.all([
-          supabase
-            .from('Settings')
-            .select('settings_value, updated_at')
-            .eq('key', 'supabase_connection')
-            .maybeSingle(),
-          supabase
-            .from('Settings')
-            .select('settings_value, updated_at')
-            .eq('key', 'org_settings')
-            .maybeSingle(),
-        ]);
+    const policyLinks = Array.isArray(activeOrg.policy_links)
+      ? activeOrg.policy_links
+          .map((item) => {
+            if (!item) return '';
+            if (typeof item === 'string') return item.trim();
+            if (typeof item.url === 'string') return item.url.trim();
+            if (typeof item.href === 'string') return item.href.trim();
+            return '';
+          })
+          .filter(Boolean)
+      : [];
 
-        if (!isMounted) return;
-
-        if (connectionResponse.error && connectionResponse.error.code !== 'PGRST116') {
-          throw connectionResponse.error;
-        }
-
-        const rawConnection = connectionResponse.data?.settings_value || {};
-        const normalizedConnection = {
-          supabase_url: (rawConnection.supabase_url || '').trim(),
-          anon_key: (rawConnection.anon_key || rawConnection.supabase_anon_key || '').trim(),
-        };
-
-        setConnection(normalizedConnection);
-        setOriginalConnection(normalizedConnection);
-        setLastSavedAt(rawConnection.saved_at || connectionResponse.data?.updated_at || null);
-
-        if (statusResponse.error && statusResponse.error.code !== 'PGRST116') {
-          throw statusResponse.error;
-        }
-
-        const statusValue = statusResponse.data?.settings_value || {};
-        if (statusValue.setup_completed) {
-          setVerificationStatus('success');
-          setLastVerifiedAt(statusValue.verified_at || statusResponse.data?.updated_at || null);
-        }
-      } catch (error) {
-        console.error('Failed to load setup assistant data', error);
-        toast.error('טעינת פרטי ההגדרה נכשלה. נסה לרענן את הדף.');
-      } finally {
-        if (isMounted) setIsLoadingConnection(false);
-      }
+    const legalSettings = activeOrg.legal_settings || {};
+    const nextConnection = {
+      supabase_url: activeOrg.supabase_url || '',
+      anon_key: activeOrg.supabase_anon_key || '',
+      policy_links_text: policyLinks.join('\n'),
+      legal_contact_email: (legalSettings.contact_email || legalSettings.email || '').trim(),
+      legal_terms_url: (legalSettings.terms_url || legalSettings.terms || '').trim(),
+      legal_privacy_url: (
+        legalSettings.privacy_url
+        || legalSettings.privacy
+        || legalSettings.legal_info_url
+        || ''
+      ).trim(),
     };
 
-    loadInitial();
+    setConnection(nextConnection);
+    setOriginalConnection(nextConnection);
+    setLastSavedAt(activeOrg.updated_at || null);
 
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+    if (activeOrg.setup_completed) {
+      setVerificationStatus('success');
+      setLastVerifiedAt(activeOrg.verified_at || activeOrg.updated_at || null);
+    } else {
+      setVerificationStatus('idle');
+      setLastVerifiedAt(activeOrg.verified_at || null);
+    }
+  }, [activeOrg]);
 
   const hasUnsavedChanges = useMemo(() => {
     return (
-      connection.supabase_url !== originalConnection.supabase_url ||
-      connection.anon_key !== originalConnection.anon_key
+      connection.supabase_url !== originalConnection.supabase_url
+      || connection.anon_key !== originalConnection.anon_key
+      || connection.policy_links_text !== originalConnection.policy_links_text
+      || connection.legal_contact_email !== originalConnection.legal_contact_email
+      || connection.legal_terms_url !== originalConnection.legal_terms_url
+      || connection.legal_privacy_url !== originalConnection.legal_privacy_url
     );
   }, [connection, originalConnection]);
 
   const hasConnectionValues = Boolean(connection.supabase_url.trim() && connection.anon_key.trim());
-  const hasSavedConnection = Boolean(originalConnection.supabase_url && originalConnection.anon_key);
+  const hasSavedConnection = Boolean(
+    originalConnection.supabase_url
+    && originalConnection.anon_key
+  );
 
   const handleConnectionChange = (field) => (event) => {
     const value = event.target.value;
@@ -730,37 +751,30 @@ export default function SetupAssistant() {
 
   const handleSaveConnection = async (event) => {
     event.preventDefault();
-    if (!hasConnectionValues || isSavingConnection) return;
+    if (!activeOrg || !hasConnectionValues || isSavingConnection) return;
 
     setIsSavingConnection(true);
     try {
       const now = new Date().toISOString();
-      const payload = {
-        supabase_url: connection.supabase_url.trim(),
-        anon_key: connection.anon_key.trim(),
-        saved_at: now,
+      const policyLinks = connection.policy_links_text
+        .split(/\n+/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+      const legalSettings = {
+        contact_email: connection.legal_contact_email.trim() || null,
+        terms_url: connection.legal_terms_url.trim() || null,
+        privacy_url: connection.legal_privacy_url.trim() || null,
       };
 
-      const { error } = await supabase
-        .from('Settings')
-        .upsert(
-          {
-            key: 'supabase_connection',
-            settings_value: payload,
-            updated_at: now,
-          },
-          {
-            onConflict: 'key',
-            returning: 'minimal',
-          },
-        );
-
-      if (error) throw error;
-
-      setOriginalConnection({
-        supabase_url: payload.supabase_url,
-        anon_key: payload.anon_key,
+      await updateConnection(activeOrg.id, {
+        supabaseUrl: connection.supabase_url.trim(),
+        supabaseAnonKey: connection.anon_key.trim(),
+        policyLinks,
+        legalSettings,
       });
+
+      setOriginalConnection({ ...connection });
       setLastSavedAt(now);
       toast.success('חיבור ה-Supabase נשמר בהצלחה.');
     } catch (error) {
@@ -772,26 +786,9 @@ export default function SetupAssistant() {
   };
 
   const markSetupComplete = async (verifiedAt) => {
+    if (!activeOrg) return;
     try {
-      const { error } = await supabase
-        .from('Settings')
-        .upsert(
-          {
-            key: 'org_settings',
-            settings_value: {
-              setup_completed: true,
-              setup_version: 'setup_assistant_v1',
-              verified_at: verifiedAt,
-            },
-            updated_at: verifiedAt,
-          },
-          {
-            onConflict: 'key',
-            returning: 'minimal',
-          },
-        );
-
-      if (error) throw error;
+      await recordVerification(activeOrg.id, verifiedAt);
     } catch (error) {
       console.error('Failed to mark setup assistant as completed', error);
     } finally {
@@ -806,6 +803,11 @@ export default function SetupAssistant() {
   };
 
   const handleVerify = async () => {
+    if (!activeOrg) return;
+    if (!hasSavedConnection) {
+      toast.error('קודם שמור את כתובת ה-URL והמפתח לפני הרצת האימות.');
+      return;
+    }
     setIsVerifying(true);
     setVerifyError('');
     setVerifyResults([]);
@@ -856,11 +858,11 @@ export default function SetupAssistant() {
   };
 
   const renderConnectionStatusBadge = () => {
-    if (isLoadingConnection) {
+    if (!activeOrg) {
       return (
         <Badge className="gap-1 bg-slate-100 text-slate-600 border border-slate-200">
-          <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-          <span>טוען</span>
+          <AlertCircle className="w-4 h-4" aria-hidden="true" />
+          <span>בחר ארגון</span>
         </Badge>
       );
     }
@@ -886,7 +888,7 @@ export default function SetupAssistant() {
     return (
       <Badge className="gap-1 bg-slate-100 text-slate-600 border border-slate-200">
         <AlertCircle className="w-4 h-4" aria-hidden="true" />
-        <span>מלא את הפרטים</span>
+        <span>נדרש חיבור</span>
       </Badge>
     );
   };
@@ -932,8 +934,24 @@ export default function SetupAssistant() {
   };
 
   const connectionHelperText = hasSavedConnection
-    ? 'ניתן לעדכן את הפרטים בכל עת – הם נשמרים בטבלת ההגדרות.'
-    : 'נשמור עבורך את ה-URL וה-ANON KEY בטבלת ההגדרות כדי שהצוות ידע מה הוגדר.';
+    ? 'ניתן לעדכן את הפרטים בכל עת – הם נשמרים בהגדרות הארגון.'
+    : 'נשמור עבורך את הכתובת והמפתח בחשבון הארגון כדי שכל המנהלים יוכלו להמשיך את העבודה.';
+
+  if (!activeOrg) {
+    return (
+      <Card className="border-0 shadow-xl bg-white/90" dir="rtl">
+        <CardHeader className="border-b border-slate-200">
+          <CardTitle className="text-2xl font-semibold text-slate-900">אשף הגדרה ראשוני ל-Supabase</CardTitle>
+          <p className="text-sm text-slate-600 mt-2">
+            בחר או צור ארגון לפני שמגדירים חיבור ל-Supabase. ניתן לבצע זאת ממסך בחירת הארגון לאחר ההתחברות.
+          </p>
+        </CardHeader>
+        <CardContent className="py-8">
+          <p className="text-sm text-slate-500 text-center">אין ארגון פעיל כרגע.</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <Card className="border-0 shadow-xl bg-white/90" dir="rtl">
@@ -955,7 +973,7 @@ export default function SetupAssistant() {
         <StepSection
           number={1}
           title="חיבור ל-Supabase"
-          description="הזן את ה-URL הציבורי ואת מפתח ה-ANON של הפרויקט. נשמור אותם בטבלת ההגדרות של הארגון."
+          description="הזן את ה-URL הציבורי ואת מפתח ה-ANON של הפרויקט. נשמור אותם בהגדרות הארגון המשותפות."
           statusBadge={renderConnectionStatusBadge()}
         >
           <form className="space-y-4" onSubmit={handleSaveConnection}>
@@ -985,6 +1003,53 @@ export default function SetupAssistant() {
                   required
                 />
                 <p className="text-xs text-slate-500">{connectionHelperText}</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="policy_links">קישורי מדיניות (שורה לכל קישור)</Label>
+              <Textarea
+                id="policy_links"
+                dir="ltr"
+                rows={3}
+                placeholder="https://supabase.example.com/policies"
+                value={connection.policy_links_text}
+                onChange={handleConnectionChange('policy_links_text')}
+              />
+              <p className="text-xs text-slate-500">הוסף כאן קישורים למסמכי SQL, נהלי אבטחה או הערות רלוונטיות עבור מנהלים נוספים.</p>
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="legal_contact_email">אימייל איש קשר משפטי</Label>
+                <Input
+                  id="legal_contact_email"
+                  type="email"
+                  dir="ltr"
+                  placeholder="legal@example.com"
+                  value={connection.legal_contact_email}
+                  onChange={handleConnectionChange('legal_contact_email')}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="legal_terms_url">קישור לתנאי שימוש</Label>
+                <Input
+                  id="legal_terms_url"
+                  type="url"
+                  dir="ltr"
+                  placeholder="https://example.com/terms"
+                  value={connection.legal_terms_url}
+                  onChange={handleConnectionChange('legal_terms_url')}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="legal_privacy_url">קישור למדיניות פרטיות</Label>
+                <Input
+                  id="legal_privacy_url"
+                  type="url"
+                  dir="ltr"
+                  placeholder="https://example.com/privacy"
+                  value={connection.legal_privacy_url}
+                  onChange={handleConnectionChange('legal_privacy_url')}
+                />
               </div>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1036,7 +1101,12 @@ export default function SetupAssistant() {
                 {lastVerifiedAt ? (
                   <span className="text-xs text-slate-500">בדיקה אחרונה: {formatDateTime(lastVerifiedAt)}</span>
                 ) : null}
-                <Button type="button" onClick={handleVerify} disabled={isVerifying} className="gap-2">
+                <Button
+                  type="button"
+                  onClick={handleVerify}
+                  disabled={isVerifying || !hasSavedConnection}
+                  className="gap-2"
+                >
                   {isVerifying ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}
                   {isVerifying ? 'מריץ בדיקות...' : 'הרץ אימות'}
                 </Button>

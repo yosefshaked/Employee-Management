@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.4.5**
-**Last Updated: 2025-09-21**
+**Version: 1.5.0**
+**Last Updated: 2025-10-05**
 
 ## 1. Vision & Purpose
 
@@ -39,6 +39,14 @@ The system is built on a modern client-server architecture, packaged as a standa
 
 *   **Configuration Management:**
     *   API keys are managed via a local `.env` file for security, ensuring no sensitive credentials are committed to version control.
+
+### 2.1. Organization & Membership Model
+
+- The desktop shell keeps a dedicated Supabase project for application metadata. Core tables include `app_organizations`, `app_org_memberships`, and `app_org_invitations`.
+- Each organization row stores the Supabase connection (`supabase_url`, `supabase_anon_key`), optional `policy_links` (array of URLs), `legal_settings` (JSON payload for contact email, terms, privacy policy), and lifecycle markers (`setup_completed`, `verified_at`).
+- Membership rows link Supabase Auth `user_id` values to an organization with a `role` (`admin` or `member`). Each user currently belongs to a single organization; switching orgs rewires the runtime Supabase client to the selected connection.
+- Invitation rows record pending emails. Admins can issue invites from **Settings → Org Members**, revoke pending ones, or remove existing members (except themselves).
+- On login the `OrgProvider` loads the user’s memberships, persists the last selected org in `localStorage`, and ensures routes without a saved connection redirect to **Settings** so the Setup Assistant can finish configuration.
 
 ---
 
@@ -230,13 +238,20 @@ This guide is for a new developer (or AI) joining the project who needs to set u
     *   Create the 4 tables (`Employees`, `Services`, `RateHistory`, `WorkSessions`) as specified in Section 3.
     *   Ensure all `Primary Keys`, `Foreign Keys`, and `Constraints` are configured correctly.
 
+### Organization Onboarding Flow
+
+1. Sign in with Supabase Auth (Google, Microsoft, or email+password).
+2. The **Select Organization** screen lists any memberships tied to your account. Create a new organization or accept pending invites to continue.
+3. After selecting an organization, open **Settings → Setup Assistant** to store the Supabase URL/anon key and run the guided SQL.
+4. Use **Settings → Org Members** to invite additional admins. They will see the invite on the Select Organization screen and inherit the same Supabase connection once accepted.
+
 ### Supabase Security Baseline (Row Level Security)
 
 Every customer project must enable row level security (RLS) so that only authenticated users can read or modify data. The in-app Setup Assistant (Settings → Setup Assistant) guides admins through three required steps:
 
-1. **Connect** – enter the Supabase public URL and anon key. The values are stored under the `supabase_connection` key in the `Settings` table so other admins can confirm the configuration.
+1. **Connect** – enter the Supabase public URL and anon key. The values are saved on the organization record (`app_organizations.supabase_url` / `supabase_anon_key`) together with any policy links or legal metadata so every admin sees the same configuration.
 2. **Apply SQL** – run the schema/helper block and the RLS baseline block below (in this order) from the Supabase SQL editor while signed in as the project owner.
-3. **Verify** – click “הרץ אימות” in the assistant. It calls the `setup_assistant_diagnostics()` helper with the anon key, reports any missing pieces, and marks `Settings.org_settings` with `setup_completed: true` when everything passes.
+3. **Verify** – click “הרץ אימות” in the assistant. It calls the `setup_assistant_diagnostics()` helper with the anon key, reports any missing pieces, and flips `app_organizations.setup_completed` + `verified_at` when everything passes. Routes other than **Settings** remain blocked until this step succeeds.
 
 #### Schema + helper SQL
 

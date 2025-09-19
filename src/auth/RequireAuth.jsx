@@ -1,6 +1,7 @@
 import React from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
 
 function LoadingScreen() {
   return (
@@ -14,15 +15,29 @@ function LoadingScreen() {
 }
 
 export default function RequireAuth() {
-  const { status, session } = useAuth();
+  const { status: authStatus, session } = useAuth();
+  const { status: orgStatus, activeOrgHasConnection } = useOrg();
   const location = useLocation();
 
-  if (status === 'loading') {
+  if (authStatus === 'loading' || orgStatus === 'loading' || orgStatus === 'idle') {
     return <LoadingScreen />;
   }
 
   if (!session) {
     return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  const needsOrgSelection = orgStatus === 'needs-org' || orgStatus === 'needs-selection';
+  if (needsOrgSelection && location.pathname !== '/select-org') {
+    return <Navigate to="/select-org" replace state={{ from: location }} />;
+  }
+
+  if (location.pathname === '/select-org') {
+    return <Outlet />;
+  }
+
+  if (!needsOrgSelection && !activeOrgHasConnection && location.pathname !== '/Settings') {
+    return <Navigate to="/Settings" replace />;
   }
 
   return <Outlet />;

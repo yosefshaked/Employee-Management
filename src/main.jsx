@@ -15,12 +15,15 @@ import Diagnostics from './runtime/Diagnostics.jsx';
 import Login from './Pages/Login.jsx';
 import { AuthProvider } from './auth/AuthContext.jsx';
 import RequireAuth from './auth/RequireAuth.jsx';
+import { OrgProvider } from './org/OrgContext.jsx';
+import OrgSelection from './Pages/OrgSelection.jsx';
 
 function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route element={<RequireAuth />}>
+        <Route path="/select-org" element={<OrgSelection />} />
         <Route element={<Layout />}>
           {/* ניתוב אוטומטי מהעמוד הראשי לדשבורד */}
           <Route path="/" element={<Navigate to="/Dashboard" replace />} />
@@ -47,9 +50,11 @@ export function renderApp(config) {
     <React.StrictMode>
       <RuntimeConfigProvider config={config}>
         <AuthProvider>
-          <HashRouter>
-            <App />
-          </HashRouter>
+          <OrgProvider>
+            <HashRouter>
+              <App />
+            </HashRouter>
+          </OrgProvider>
         </AuthProvider>
       </RuntimeConfigProvider>
     </React.StrictMode>,
