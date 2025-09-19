@@ -61,6 +61,16 @@ function TimeEntryTableInner({
     },
     [allWorkSessions, displaySessions],
   );
+  const leaveValueResolver = useMemo(
+    () => createLeaveDayValueResolver({
+      employees,
+      workSessions: contextSessions,
+      services,
+      leavePayPolicy,
+      leaveDayValueSelector: selectLeaveDayValue,
+    }),
+    [contextSessions, employees, services, leavePayPolicy],
+  );
   const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees]);
   const [importOpen, setImportOpen] = useState(false);
   const [multiModalOpen, setMultiModalOpen] = useState(false);
@@ -88,14 +98,18 @@ function TimeEntryTableInner({
     const end = endOfMonth(currentMonth);
     const totals = {};
     employees.forEach(emp => {
-      totals[emp.id] = { hours: 0, sessions: 0, payment: 0, preStartLeaveDates: new Set() };
-    });
-    const resolveLeaveValue = createLeaveDayValueResolver({
-      employees,
-      workSessions: contextSessions,
-      services,
-      leavePayPolicy,
-      leaveDayValueSelector: selectLeaveDayValue,
+      totals[emp.id] = {
+        hours: 0,
+        sessions: 0,
+        workPayment: 0,
+        leavePaidAmount: 0,
+        leaveUnpaidAmount: 0,
+        adjustmentCredit: 0,
+        adjustmentDebit: 0,
+        adjustmentNet: 0,
+        payment: 0,
+        preStartLeaveDates: new Set(),
+      };
     });
     const processedLeave = new Map();
     const globalAgg = aggregateGlobalDays(
@@ -103,7 +117,7 @@ function TimeEntryTableInner({
         const d = parseISO(s.date);
         return d >= start && d <= end;
       }),
-      employeesById
+      employeesById,
     );
     displaySessions.forEach(s => {
       const sessionDate = parseISO(s.date);
@@ -112,22 +126,23 @@ function TimeEntryTableInner({
       const empTotals = totals[s.employee_id];
       if (!empTotals || !emp) return;
       if (s.entry_type === 'adjustment') {
-        empTotals.payment += s.total_payment || 0;
+        const amount = Number(s.total_payment) || 0;
+        if (amount > 0) {
+          empTotals.adjustmentCredit += amount;
+        } else if (amount < 0) {
+          empTotals.adjustmentDebit += Math.abs(amount);
+        }
+        empTotals.adjustmentNet += amount;
+        empTotals.payment += amount;
         return;
       }
       if (isLeaveEntryType(s.entry_type)) {
-        if (s.payable === false) return;
-        if (emp.employee_type === 'global') return;
-        if (emp.start_date && s.date < emp.start_date) {
-          totals[s.employee_id]?.preStartLeaveDates.add(s.date);
-          return;
-        }
         const key = `${s.employee_id}|${s.date}`;
         const already = processedLeave.get(key) || 0;
         if (already >= 1) return;
-        const sessionValue = resolveLeaveSessionValue(s, resolveLeaveValue, { employee: emp });
+        const sessionValue = resolveLeaveSessionValue(s, leaveValueResolver, { employee: emp });
         if (sessionValue.preStartDate) {
-          totals[s.employee_id]?.preStartLeaveDates.add(s.date);
+          empTotals.preStartLeaveDates.add(s.date);
           processedLeave.set(key, 1);
           return;
         }
@@ -139,30 +154,51 @@ function TimeEntryTableInner({
         const credit = Math.min(multiplier, remaining);
         const scale = multiplier ? credit / multiplier : 0;
         const amount = sessionValue.amount * scale;
-        if (amount) {
+        if (s.payable === false || amount <= 0) {
+          empTotals.leaveUnpaidAmount += Math.abs(amount);
+        } else if (emp.employee_type !== 'global') {
+          empTotals.leavePaidAmount += amount;
           empTotals.payment += amount;
         }
         processedLeave.set(key, already + credit);
         return;
       }
-      if (emp.employee_type === 'global' && (s.entry_type === 'hours' || isLeaveEntryType(s.entry_type))) {
-        // payment handled via aggregation
-      } else {
-        empTotals.payment += s.total_payment || 0;
-      }
       if (s.entry_type === 'session') {
         empTotals.sessions += s.sessions_count || 0;
-      } else if (s.entry_type === 'hours') {
+        const amount = Number(s.total_payment) || 0;
+        empTotals.workPayment += amount;
+        empTotals.payment += amount;
+        return;
+      }
+      if (s.entry_type === 'hours') {
         empTotals.hours += s.hours || 0;
+        const amount = Number(s.total_payment) || 0;
+        if (emp.employee_type !== 'global') {
+          empTotals.workPayment += amount;
+          empTotals.payment += amount;
+        }
+        return;
       }
     });
-    globalAgg.forEach((v, key) => {
+    globalAgg.forEach((value, key) => {
       const [empId] = key.split('|');
       const empTotals = totals[empId];
-      if (empTotals) empTotals.payment += v.dailyAmount;
+      if (!empTotals) return;
+      const amount = Number(value?.dailyAmount) || 0;
+      if (!amount) return;
+      empTotals.payment += amount;
+      if (isLeaveEntryType(value?.dayType)) {
+        if (value?.payable === false) {
+          empTotals.leaveUnpaidAmount += Math.abs(amount);
+        } else {
+          empTotals.leavePaidAmount += amount;
+        }
+      } else {
+        empTotals.workPayment += amount;
+      }
     });
     return totals;
-  }, [displaySessions, contextSessions, employees, services, leavePayPolicy, employeesById, currentMonth]);
+  }, [displaySessions, employees, employeesById, currentMonth, leaveValueResolver]);
 
   const toggleDateSelection = (day) => {
     setSelectedDates(prev => {
@@ -174,6 +210,116 @@ function TimeEntryTableInner({
   const startMultiEntry = () => {
     if (!selectedDates.length || !selectedEmployees.length) return;
     setMultiModalOpen(true);
+  };
+
+  const shouldShowHoursSummary = activeTab === 'all' || activeTab === 'work';
+  const summaryRowConfigs = [];
+  if (activeTab === 'all' || activeTab === 'work') {
+    summaryRowConfigs.push({
+      key: 'workPayment',
+      label: 'סה"כ תשלום שעות/שיעורים',
+      getValue: totals => totals.workPayment || 0,
+      format: 'currency',
+    });
+  }
+  if (activeTab === 'all' || activeTab === 'leave') {
+    summaryRowConfigs.push({
+      key: 'leavePaid',
+      label: 'סה"כ חופשות בתשלום',
+      getValue: totals => totals.leavePaidAmount || 0,
+      format: 'currency',
+    });
+    summaryRowConfigs.push({
+      key: 'leaveUnpaid',
+      label: 'סה"כ חופשות ללא תשלום',
+      getValue: totals => totals.leaveUnpaidAmount || 0,
+      format: 'muted',
+    });
+  }
+  if (activeTab === 'all' || activeTab === 'adjustments') {
+    summaryRowConfigs.push({
+      key: 'adjustmentsCredit',
+      label: 'סה"כ התאמות - זיכויים',
+      getValue: totals => totals.adjustmentCredit || 0,
+      format: 'currency',
+    });
+    summaryRowConfigs.push({
+      key: 'adjustmentsDebit',
+      label: 'סה"כ התאמות - ניקויים',
+      getValue: totals => totals.adjustmentDebit || 0,
+      format: 'debit',
+    });
+    if (activeTab === 'all') {
+      summaryRowConfigs.push({
+        key: 'adjustmentsNet',
+        label: 'סה"כ התאמות (נטו)',
+        getValue: totals => totals.adjustmentNet || 0,
+        format: 'net',
+      });
+    }
+  }
+  const finalRowConfig = (() => {
+    if (activeTab === 'leave') {
+      return {
+        key: 'leaveTotal',
+        label: 'סה"כ חופשות',
+        getValue: totals => (totals.leavePaidAmount || 0) + (totals.leaveUnpaidAmount || 0),
+        format: 'total',
+        showPreStart: true,
+      };
+    }
+    if (activeTab === 'adjustments') {
+      return {
+        key: 'adjustmentsNet',
+        label: 'סה"כ התאמות (נטו)',
+        getValue: totals => totals.adjustmentNet || 0,
+        format: 'net',
+      };
+    }
+    if (activeTab === 'work') {
+      return {
+        key: 'workTotal',
+        label: 'סה"כ צפי לתשלום',
+        getValue: totals => totals.workPayment || 0,
+        format: 'total',
+      };
+    }
+    return {
+      key: 'grandTotal',
+      label: 'סה"כ צפי לתשלום',
+      getValue: totals => totals.payment || 0,
+      format: 'total',
+      showPreStart: true,
+    };
+  })();
+
+  const formatCurrencyValue = (amount, format = 'currency') => {
+    const numeric = Number(amount) || 0;
+    const absValue = Math.abs(numeric);
+    const formatted = `₪${absValue.toLocaleString()}`;
+    if (format === 'muted') {
+      return { text: formatted, className: 'text-slate-600' };
+    }
+    if (format === 'debit') {
+      return {
+        text: numeric ? `-₪${absValue.toLocaleString()}` : '₪0',
+        className: numeric ? 'text-red-700' : 'text-slate-600',
+      };
+    }
+    if (format === 'net') {
+      if (numeric > 0) return { text: `+₪${absValue.toLocaleString()}`, className: 'text-green-700' };
+      if (numeric < 0) return { text: `-₪${absValue.toLocaleString()}`, className: 'text-red-700' };
+      return { text: '₪0', className: 'text-slate-600' };
+    }
+    if (format === 'total') {
+      if (numeric < 0) return { text: `-₪${absValue.toLocaleString()}`, className: 'text-red-700' };
+      if (numeric === 0) return { text: '₪0', className: 'text-slate-600' };
+      return { text: `₪${absValue.toLocaleString()}`, className: 'text-green-700' };
+    }
+    return {
+      text: `₪${absValue.toLocaleString()}`,
+      className: numeric === 0 ? 'text-slate-600' : 'text-green-700',
+    };
   };
 
   return (
@@ -272,18 +418,19 @@ function TimeEntryTableInner({
                                 );
                                 const adjustmentTotal = adjustments.reduce((sum, s) => sum + (s.total_payment || 0), 0);
 
-                                let summaryText = '-';
-                                let summaryPayment = 0;
-                                let extraInfo = '';
-                                const rateInfo = getRateForDate(emp.id, day);
-                                const showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
-                                let leaveKind = null;
-                                let leaveLabel = null;
-                                const startDateStr = typeof emp.start_date === 'string' ? emp.start_date : null;
-                                const isPreStartLeave = Boolean(
-                                  paidLeave &&
-                                  startDateStr &&
-                                  paidLeave.date &&
+        let summaryText = '-';
+        let summaryPayment = 0;
+        let extraInfo = '';
+        const rateInfo = getRateForDate(emp.id, day);
+        const showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
+        let leaveKind = null;
+        let leaveLabel = null;
+        let leavePayment = null;
+        const startDateStr = typeof emp.start_date === 'string' ? emp.start_date : null;
+        const isPreStartLeave = Boolean(
+          paidLeave &&
+          startDateStr &&
+          paidLeave.date &&
                                   paidLeave.date < startDateStr
                                 );
 
@@ -305,14 +452,21 @@ function TimeEntryTableInner({
                                       isPaid && mixedDetails.halfDay ? 'חצי יום' : null,
                                     ].filter(Boolean);
                                     summaryText = parts.join(' · ') || 'מעורב';
-                                    leaveLabel = summaryText;
-                                  } else {
-                                    summaryText = leaveLabel || 'חופשה';
-                                  }
-                                } else if (regularSessions.length > 0) {
-                                  if (emp.employee_type === 'instructor') {
-                                    summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
-                                    const sessionCount = regularSessions.reduce((sum, s) => sum + (s.sessions_count || 0), 0);
+                                  leaveLabel = summaryText;
+                                } else {
+                                  summaryText = leaveLabel || 'חופשה';
+                                }
+                                const leaveValue = resolveLeaveSessionValue(paidLeave, leaveValueResolver, { employee: emp });
+                                if (!leaveValue.preStartDate) {
+                                  const calculatedAmount = paidLeave.payable === false
+                                    ? 0
+                                    : (Number.isFinite(leaveValue.amount) ? leaveValue.amount : 0);
+                                  leavePayment = Math.max(0, calculatedAmount || 0);
+                                }
+                              } else if (regularSessions.length > 0) {
+                                if (emp.employee_type === 'instructor') {
+                                  summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
+                                  const sessionCount = regularSessions.reduce((sum, s) => sum + (s.sessions_count || 0), 0);
                                     summaryText = `${sessionCount} מפגשים`;
                                   } else if (emp.employee_type === 'hourly') {
                                     const hoursCount = regularSessions.reduce((sum, s) => sum + (s.hours || 0), 0);
@@ -388,6 +542,12 @@ function TimeEntryTableInner({
                                           <div className="text-xs text-red-700">לא הוגדר תעריף</div>
                                         )}
 
+                                        {leavePayment !== null && !isPreStartLeave && (
+                                          <div className={`text-xs ${leavePayment > 0 ? 'text-green-700' : 'text-slate-600'}`}>
+                                            ₪{leavePayment.toLocaleString()}
+                                          </div>
+                                        )}
+
                                         {summaryPayment > 0 && emp.employee_type !== 'global' && (
                                           <div className="text-xs text-green-700">₪{summaryPayment.toLocaleString()}</div>
                                         )}
@@ -410,30 +570,70 @@ function TimeEntryTableInner({
                         ))}
 
                         {/* Totals Rows */}
-                        <TableRow className="bg-slate-100 font-medium">
-                          <TableCell className="text-right sticky right-0 bg-slate-100">סה"כ שיעורים/שעות</TableCell>
+                        {shouldShowHoursSummary && (
+                          <TableRow className="bg-slate-100 font-medium">
+                            <TableCell className="text-right sticky right-0 bg-slate-100">סה"כ שיעורים/שעות</TableCell>
+                            {employees.map(emp => {
+                              const totals = monthlyTotals[emp.id] || {
+                                hours: 0,
+                                sessions: 0,
+                              };
+                              const value = emp.employee_type === 'instructor'
+                                ? `${totals.sessions} מפגשים`
+                                : `${(totals.hours || 0).toFixed(1)} שעות`;
+                              return (
+                                <TableCell key={emp.id} className="text-center">
+                                  {value}
+                                </TableCell>
+                              );
+                            })}
+                          </TableRow>
+                        )}
+                        {summaryRowConfigs.map(row => (
+                          <TableRow key={row.key} className="bg-slate-100 font-medium">
+                            <TableCell className="text-right sticky right-0 bg-slate-100">{row.label}</TableCell>
+                            {employees.map(emp => {
+                              const totals = monthlyTotals[emp.id] || {
+                                workPayment: 0,
+                                leavePaidAmount: 0,
+                                leaveUnpaidAmount: 0,
+                                adjustmentCredit: 0,
+                                adjustmentDebit: 0,
+                                adjustmentNet: 0,
+                              };
+                              const rawValue = typeof row.getValue === 'function' ? row.getValue(totals, emp) : 0;
+                              const { text, className } = formatCurrencyValue(rawValue, row.format);
+                              return (
+                                <TableCell key={emp.id} className={`text-center ${className}`}>
+                                  {text}
+                                </TableCell>
+                              );
+                            })}
+                          </TableRow>
+                        ))}
+                        <TableRow className="bg-slate-100 font-semibold">
+                          <TableCell className="text-right sticky right-0 bg-slate-100">{finalRowConfig.label}</TableCell>
                           {employees.map(emp => {
-                            const totals = monthlyTotals[emp.id] || { hours: 0, sessions: 0 };
-                            const value = emp.employee_type === 'instructor'
-                              ? `${totals.sessions} מפגשים`
-                              : `${totals.hours.toFixed(1)} שעות`;
-                            return (
-                              <TableCell key={emp.id} className="text-center">
-                                {value}
-                              </TableCell>
+                            const totals = monthlyTotals[emp.id] || {
+                              workPayment: 0,
+                              leavePaidAmount: 0,
+                              leaveUnpaidAmount: 0,
+                              adjustmentNet: 0,
+                              payment: 0,
+                              preStartLeaveDates: new Set(),
+                            };
+                            const value = typeof finalRowConfig.getValue === 'function'
+                              ? finalRowConfig.getValue(totals, emp)
+                              : 0;
+                            const { text, className } = formatCurrencyValue(value, finalRowConfig.format);
+                            const hasPreStart = finalRowConfig.showPreStart && (
+                              totals.preStartLeaveDates instanceof Set
+                                ? totals.preStartLeaveDates.size > 0
+                                : Array.isArray(totals.preStartLeaveDates) && totals.preStartLeaveDates.length > 0
                             );
-                          })}
-                        </TableRow>
-                        <TableRow className="bg-slate-100 font-medium">
-                          <TableCell className="text-right sticky right-0 bg-slate-100">סה"כ צפי לתשלום</TableCell>
-                          {employees.map(emp => {
-                            const totals = monthlyTotals[emp.id] || { payment: 0 };
-                            const hasPreStart = totals.preStartLeaveDates instanceof Set
-                              ? totals.preStartLeaveDates.size > 0
-                              : Array.isArray(totals.preStartLeaveDates) && totals.preStartLeaveDates.length > 0;
                             return (
-                              <TableCell key={emp.id} className="text-center text-green-700">
-                                <div>₪{totals.payment.toLocaleString()}</div>
+                              <TableCell key={emp.id} className={`text-center ${className}`}>
+                                <div>{text}</div>
                                 {hasPreStart && (
                                   <div className="mt-1 text-[11px] text-amber-700">
                                     תאריך לפני תחילת עבודה—הושמט מהסכום
