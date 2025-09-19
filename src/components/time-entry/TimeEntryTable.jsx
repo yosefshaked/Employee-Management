@@ -634,23 +634,21 @@ function TimeEntryTableInner({
                           <TableRow className="bg-slate-100">
                             <TableCell
                               colSpan={employees.length + 1}
-                              className="bg-slate-100"
+                              className="bg-slate-100 p-0"
                             >
-                              <div className="flex justify-end">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setAllSummaryOpen(prev => !prev)}
-                                  aria-expanded={allSummaryOpen}
-                                  className="flex items-center gap-2"
-                                >
-                                  {allSummaryOpen ? 'הסתר פירוט' : 'הצג פירוט'}
-                                  <ChevronDown
-                                    className={`w-4 h-4 transition-transform ${allSummaryOpen ? 'rotate-180' : ''}`}
-                                  />
-                                </Button>
-                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => setAllSummaryOpen(prev => !prev)}
+                                aria-expanded={allSummaryOpen}
+                                className="flex w-full flex-row-reverse items-center justify-between gap-2 rounded-none px-4 py-3 text-right"
+                              >
+                                {allSummaryOpen ? 'הסתר פירוט' : 'הצג פירוט'}
+                                <ChevronDown
+                                  className={`w-4 h-4 transition-transform ${allSummaryOpen ? 'rotate-180' : ''}`}
+                                />
+                              </Button>
                             </TableCell>
                           </TableRow>
                         )}
