@@ -11,6 +11,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { Plus, Save, Trash2 } from 'lucide-react';
 import { supabase } from '@/supabaseClient';
+import SetupAssistant from '@/components/settings/SetupAssistant.jsx';
+import OrgMembersCard from '@/components/settings/OrgMembersCard.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
 import {
   DEFAULT_LEAVE_POLICY,
   HOLIDAY_TYPE_LABELS,
@@ -106,12 +109,20 @@ function HolidayRuleRow({ rule, onChange, onRemove, onSave, allowHalfDay, isSavi
 }
 
 export default function Settings() {
+  const { activeOrgHasConnection } = useOrg();
   const [policy, setPolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingLeavePayPolicy, setIsSavingLeavePayPolicy] = useState(false);
   useEffect(() => {
+    if (!activeOrgHasConnection) {
+      setPolicy(DEFAULT_LEAVE_POLICY);
+      setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
+      setIsLoading(false);
+      return;
+    }
+
     const loadPolicy = async () => {
       setIsLoading(true);
       try {
@@ -141,7 +152,6 @@ export default function Settings() {
         } else {
           setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicyResponse.data?.settings_value));
         }
-
       } catch (error) {
         console.error('Error loading leave policy', error);
         toast.error('שגיאה בטעינת הגדרות החופשה');
@@ -150,8 +160,9 @@ export default function Settings() {
       }
       setIsLoading(false);
     };
+
     loadPolicy();
-  }, []);
+  }, [activeOrgHasConnection]);
 
   const handleToggle = (key) => (checked) => {
     setPolicy(prev => ({ ...prev, [key]: checked }));
@@ -194,6 +205,10 @@ export default function Settings() {
   };
 
   const handleSave = async () => {
+    if (!activeOrgHasConnection) {
+      toast.error('השלם את חיבור ה-Supabase לפני שמירה.');
+      return;
+    }
     setIsSaving(true);
     try {
       const normalized = normalizeLeavePolicy(policy);
@@ -254,6 +269,10 @@ export default function Settings() {
   };
 
   const handleSaveLeavePayPolicy = async () => {
+    if (!activeOrgHasConnection) {
+      toast.error('השלם את חיבור ה-Supabase לפני שמירה.');
+      return;
+    }
     setIsSavingLeavePayPolicy(true);
     try {
       const normalized = normalizeLeavePayPolicy(leavePayPolicy);
@@ -294,7 +313,13 @@ export default function Settings() {
           <p className="text-slate-600">נהל את מדיניות החופשות והחגים הארגונית במקום מרכזי אחד</p>
         </div>
 
-        {/* Storage Usage widget temporarily disabled; flip features.storageUsage=true to re-enable (requires RPCs). */}
+        <SetupAssistant />
+
+        <OrgMembersCard />
+
+        {activeOrgHasConnection ? (
+          <>
+            {/* Storage Usage widget temporarily disabled; flip features.storageUsage=true to re-enable (requires RPCs). */}
 
         <Card className="border-0 shadow-lg bg-white/80">
           <CardHeader className="border-b">
@@ -539,6 +564,12 @@ export default function Settings() {
             )}
           </CardContent>
         </Card>
+          </>
+        ) : (
+          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl px-4 py-3 text-sm text-right">
+            השלם את אשף ההגדרה כדי להטעין ולהגדיר את מדיניות החופשות עבור הארגון.
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.4.2**
-**Last Updated: 2025-09-18**
+**Version: 1.5.0**
+**Last Updated: 2025-10-05**
 
 ## 1. Vision & Purpose
 
@@ -39,6 +39,14 @@ The system is built on a modern client-server architecture, packaged as a standa
 
 *   **Configuration Management:**
     *   API keys are managed via a local `.env` file for security, ensuring no sensitive credentials are committed to version control.
+
+### 2.1. Organization & Membership Model
+
+- The desktop shell keeps a dedicated Supabase project for application metadata. Core tables include `app_organizations`, `app_org_memberships`, and `app_org_invitations`.
+- Each organization row stores the Supabase connection (`supabase_url`, `supabase_anon_key`), optional `policy_links` (array of URLs), `legal_settings` (JSON payload for contact email, terms, privacy policy), and lifecycle markers (`setup_completed`, `verified_at`).
+- Membership rows link Supabase Auth `user_id` values to an organization with a `role` (`admin` or `member`). Each user currently belongs to a single organization; switching orgs rewires the runtime Supabase client to the selected connection.
+- Invitation rows record pending emails. Admins can issue invites from **Settings → Org Members**, revoke pending ones, or remove existing members (except themselves).
+- On login the `OrgProvider` loads the user’s memberships, persists the last selected org in `localStorage`, and ensures routes without a saved connection redirect to **Settings** so the Setup Assistant can finish configuration.
 
 ---
 
@@ -229,6 +237,567 @@ This guide is for a new developer (or AI) joining the project who needs to set u
     *   Create a new project on `supabase.com`.
     *   Create the 4 tables (`Employees`, `Services`, `RateHistory`, `WorkSessions`) as specified in Section 3.
     *   Ensure all `Primary Keys`, `Foreign Keys`, and `Constraints` are configured correctly.
+
+### Organization Onboarding Flow
+
+1. Sign in with Supabase Auth (Google, Microsoft, or email+password).
+2. The **Select Organization** screen lists any memberships tied to your account. Create a new organization or accept pending invites to continue.
+3. After selecting an organization, open **Settings → Setup Assistant** to store the Supabase URL/anon key and run the guided SQL.
+4. Use **Settings → Org Members** to invite additional admins. They will see the invite on the Select Organization screen and inherit the same Supabase connection once accepted.
+
+### Supabase Security Baseline (Row Level Security)
+
+Every customer project must enable row level security (RLS) so that only authenticated users can read or modify data. The in-app Setup Assistant (Settings → Setup Assistant) guides admins through three required steps:
+
+1. **Connect** – enter the Supabase public URL and anon key. The values are saved on the organization record (`app_organizations.supabase_url` / `supabase_anon_key`) together with any policy links or legal metadata so every admin sees the same configuration.
+2. **Apply SQL** – run the schema/helper block and the RLS baseline block below (in this order) from the Supabase SQL editor while signed in as the project owner.
+3. **Verify** – click “הרץ אימות” in the assistant. It calls the `setup_assistant_diagnostics()` helper with the anon key, reports any missing pieces, and flips `app_organizations.setup_completed` + `verified_at` when everything passes. Routes other than **Settings** remain blocked until this step succeeds.
+
+#### Schema + helper SQL
+
+```sql
+-- שלב 1: יצירת סכימה מלאה ו-אובייקט עזר לאימות
+set search_path = public;
+
+create extension if not exists "pgcrypto";
+
+create table if not exists public."Employees" (
+  "id" uuid not null default gen_random_uuid(),
+  "name" text not null,
+  "employee_id" text not null,
+  "employee_type" text,
+  "current_rate" numeric,
+  "phone" text,
+  "email" text,
+  "start_date" date,
+  "is_active" boolean default true,
+  "notes" text,
+  "working_days" jsonb,
+  "annual_leave_days" numeric default 12,
+  "leave_pay_method" text,
+  "leave_fixed_day_rate" numeric,
+  "metadata" jsonb,
+  constraint "Employees_pkey" primary key ("id")
+);
+
+create table if not exists public."Services" (
+  "id" uuid not null default gen_random_uuid(),
+  "name" text not null,
+  "duration_minutes" bigint,
+  "payment_model" text,
+  "color" text,
+  "metadata" jsonb,
+  constraint "Services_pkey" primary key ("id")
+);
+
+create table if not exists public."RateHistory" (
+  "id" uuid not null default gen_random_uuid(),
+  "rate" numeric not null,
+  "effective_date" date not null,
+  "notes" text,
+  "employee_id" uuid not null default gen_random_uuid(),
+  "service_id" uuid default gen_random_uuid(),
+  "metadata" jsonb,
+  constraint "RateHistory_pkey" primary key ("id"),
+  constraint "RateHistory_employee_id_fkey" foreign key ("employee_id") references public."Employees"("id"),
+  constraint "RateHistory_service_id_fkey" foreign key ("service_id") references public."Services"("id")
+);
+
+create table if not exists public."WorkSessions" (
+  "id" uuid not null default gen_random_uuid(),
+  "employee_id" uuid not null default gen_random_uuid(),
+  "service_id" uuid default gen_random_uuid(),
+  "date" date not null,
+  "session_type" text,
+  "hours" numeric,
+  "sessions_count" bigint,
+  "students_count" bigint,
+  "rate_used" numeric,
+  "total_payment" numeric,
+  "notes" text,
+  "created_at" timestamptz default now(),
+  "entry_type" text not null default 'hours',
+  "payable" boolean,
+  "metadata" jsonb,
+  "deleted" boolean not null default false,
+  "deleted_at" timestamptz,
+  constraint "WorkSessions_pkey" primary key ("id"),
+  constraint "WorkSessions_employee_id_fkey" foreign key ("employee_id") references public."Employees"("id"),
+  constraint "WorkSessions_service_id_fkey" foreign key ("service_id") references public."Services"("id")
+);
+
+create table if not exists public."LeaveBalances" (
+  "id" bigint generated always as identity primary key,
+  "created_at" timestamptz not null default now(),
+  "employee_id" uuid not null default gen_random_uuid(),
+  "leave_type" text not null,
+  "balance" numeric not null default 0,
+  "effective_date" date not null,
+  "notes" text,
+  "metadata" jsonb,
+  constraint "LeaveBalances_employee_id_fkey" foreign key ("employee_id") references public."Employees"("id")
+);
+
+create table if not exists public."Settings" (
+  "id" uuid not null default gen_random_uuid(),
+  "created_at" timestamptz not null default now(),
+  "settings_value" jsonb not null,
+  "updated_at" timestamptz default now(),
+  "key" text not null unique,
+  "metadata" jsonb,
+  constraint "Settings_pkey" primary key ("id")
+);
+
+create index if not exists "RateHistory_employee_service_idx" on public."RateHistory" ("employee_id", "service_id", "effective_date");
+create index if not exists "LeaveBalances_employee_date_idx" on public."LeaveBalances" ("employee_id", "effective_date");
+create index if not exists "WorkSessions_employee_date_idx" on public."WorkSessions" ("employee_id", "date");
+create index if not exists "WorkSessions_service_idx" on public."WorkSessions" ("service_id");
+create index if not exists "WorkSessions_deleted_idx" on public."WorkSessions" ("deleted") where "deleted" = true;
+
+create or replace function public.setup_assistant_diagnostics()
+returns table (
+  table_name text,
+  has_table boolean,
+  rls_enabled boolean,
+  missing_policies text[],
+  delta_sql text
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  required_tables constant text[] := array['Employees', 'WorkSessions', 'LeaveBalances', 'RateHistory', 'Services', 'Settings'];
+  required_policy_names text[];
+  required_commands constant text[] := array['SELECT', 'INSERT', 'UPDATE', 'DELETE'];
+  table_reg regclass;
+  existing_policies text[];
+  idx integer;
+begin
+  foreach table_name in array required_tables loop
+    required_policy_names := array[
+      format('Authenticated select %s', table_name),
+      format('Authenticated insert %s', table_name),
+      format('Authenticated update %s', table_name),
+      format('Authenticated delete %s', table_name)
+    ];
+
+    table_reg := to_regclass(format('public.%I', table_name));
+    has_table := table_reg is not null;
+    rls_enabled := false;
+    missing_policies := array[]::text[];
+    delta_sql := '';
+
+    if not has_table then
+      missing_policies := required_policy_names;
+      delta_sql := format('-- הטבלה "%s" חסרה. הרץ את בלוק הסכימה המלא.', table_name);
+      return next;
+      continue;
+    end if;
+
+    select coalesce(c.relrowsecurity, false)
+      into rls_enabled
+    from pg_class c
+    where c.oid = table_reg;
+
+    select coalesce(array_agg(policyname order by policyname), array[]::text[])
+      into existing_policies
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = lower(table_name);
+
+    missing_policies := array(
+      select policy_name
+      from unnest(required_policy_names) as policy_name
+      where not (policy_name = any(existing_policies))
+    );
+
+    if not rls_enabled then
+      delta_sql := delta_sql || format('ALTER TABLE public."%s" ENABLE ROW LEVEL SECURITY;', table_name) || E'\\n';
+    end if;
+
+    if array_length(missing_policies, 1) is null then
+      missing_policies := array[]::text[];
+    else
+      for idx in 1..array_length(required_policy_names, 1) loop
+        if array_position(missing_policies, required_policy_names[idx]) is not null then
+          if required_commands[idx] = 'SELECT' then
+            delta_sql := delta_sql || format(
+              'CREATE POLICY "%s" ON public."%s"%s  FOR SELECT TO authenticated%s  USING (true);%s',
+              required_policy_names[idx],
+              table_name,
+              E'\\n',
+              E'\\n',
+              E'\\n'
+            );
+          elsif required_commands[idx] = 'INSERT' then
+            delta_sql := delta_sql || format(
+              'CREATE POLICY "%s" ON public."%s"%s  FOR INSERT TO authenticated%s  WITH CHECK (true);%s',
+              required_policy_names[idx],
+              table_name,
+              E'\\n',
+              E'\\n',
+              E'\\n'
+            );
+          elsif required_commands[idx] = 'UPDATE' then
+            delta_sql := delta_sql || format(
+              'CREATE POLICY "%s" ON public."%s"%s  FOR UPDATE TO authenticated%s  USING (true)%s  WITH CHECK (true);%s',
+              required_policy_names[idx],
+              table_name,
+              E'\\n',
+              E'\\n',
+              E'\\n',
+              E'\\n'
+            );
+          elsif required_commands[idx] = 'DELETE' then
+            delta_sql := delta_sql || format(
+              'CREATE POLICY "%s" ON public."%s"%s  FOR DELETE TO authenticated%s  USING (true);%s',
+              required_policy_names[idx],
+              table_name,
+              E'\\n',
+              E'\\n',
+              E'\\n'
+            );
+          end if;
+        end if;
+      end loop;
+    end if;
+
+    if delta_sql = '' then
+      delta_sql := null;
+    end if;
+
+    return next;
+  end loop;
+
+  return;
+end;
+$$;
+
+grant execute on function public.setup_assistant_diagnostics() to authenticated;
+```
+
+#### RLS baseline SQL
+
+```sql
+-- שלב 2: הפעלת RLS והוספת מדיניות מאובטחת
+alter table public."Employees" enable row level security;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'Employees'
+      and policyname = 'Authenticated select Employees'
+  ) then
+    create policy "Authenticated select Employees" on public."Employees"
+      for select to authenticated
+      using (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'Employees'
+      and policyname = 'Authenticated insert Employees'
+  ) then
+    create policy "Authenticated insert Employees" on public."Employees"
+      for insert to authenticated
+      with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'Employees'
+      and policyname = 'Authenticated update Employees'
+  ) then
+    create policy "Authenticated update Employees" on public."Employees"
+      for update to authenticated
+      using (true)
+      with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'Employees'
+      and policyname = 'Authenticated delete Employees'
+  ) then
+    create policy "Authenticated delete Employees" on public."Employees"
+      for delete to authenticated
+      using (true);
+  end if;
+end;
+$$;
+
+alter table public."WorkSessions" enable row level security;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'WorkSessions'
+      and policyname = 'Authenticated select WorkSessions'
+  ) then
+    create policy "Authenticated select WorkSessions" on public."WorkSessions"
+      for select to authenticated
+      using (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'WorkSessions'
+      and policyname = 'Authenticated insert WorkSessions'
+  ) then
+    create policy "Authenticated insert WorkSessions" on public."WorkSessions"
+      for insert to authenticated
+      with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'WorkSessions'
+      and policyname = 'Authenticated update WorkSessions'
+  ) then
+    create policy "Authenticated update WorkSessions" on public."WorkSessions"
+      for update to authenticated
+      using (true)
+      with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'WorkSessions'
+      and policyname = 'Authenticated delete WorkSessions'
+  ) then
+    create policy "Authenticated delete WorkSessions" on public."WorkSessions"
+      for delete to authenticated
+      using (true);
+  end if;
+end;
+$$;
+
+alter table public."LeaveBalances" enable row level security;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'LeaveBalances'
+      and policyname = 'Authenticated select LeaveBalances'
+  ) then
+    create policy "Authenticated select LeaveBalances" on public."LeaveBalances"
+      for select to authenticated
+      using (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'LeaveBalances'
+      and policyname = 'Authenticated insert LeaveBalances'
+  ) then
+    create policy "Authenticated insert LeaveBalances" on public."LeaveBalances"
+      for insert to authenticated
+      with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'LeaveBalances'
+      and policyname = 'Authenticated update LeaveBalances'
+  ) then
+    create policy "Authenticated update LeaveBalances" on public."LeaveBalances"
+      for update to authenticated
+      using (true)
+      with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'LeaveBalances'
+      and policyname = 'Authenticated delete LeaveBalances'
+  ) then
+    create policy "Authenticated delete LeaveBalances" on public."LeaveBalances"
+      for delete to authenticated
+      using (true);
+  end if;
+end;
+$$;
+
+alter table public."RateHistory" enable row level security;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'RateHistory'
+      and policyname = 'Authenticated select RateHistory'
+  ) then
+    create policy "Authenticated select RateHistory" on public."RateHistory"
+      for select to authenticated
+      using (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'RateHistory'
+      and policyname = 'Authenticated insert RateHistory'
+  ) then
+    create policy "Authenticated insert RateHistory" on public."RateHistory"
+      for insert to authenticated
+      with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'RateHistory'
+      and policyname = 'Authenticated update RateHistory'
+  ) then
+    create policy "Authenticated update RateHistory" on public."RateHistory"
+      for update to authenticated
+      using (true)
+      with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'RateHistory'
+      and policyname = 'Authenticated delete RateHistory'
+  ) then
+    create policy "Authenticated delete RateHistory" on public."RateHistory"
+      for delete to authenticated
+      using (true);
+  end if;
+end;
+$$;
+
+alter table public."Services" enable row level security;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'Services'
+      and policyname = 'Authenticated select Services'
+  ) then
+    create policy "Authenticated select Services" on public."Services"
+      for select to authenticated
+      using (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'Services'
+      and policyname = 'Authenticated insert Services'
+  ) then
+    create policy "Authenticated insert Services" on public."Services"
+      for insert to authenticated
+      with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'Services'
+      and policyname = 'Authenticated update Services'
+  ) then
+    create policy "Authenticated update Services" on public."Services"
+      for update to authenticated
+      using (true)
+      with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'Services'
+      and policyname = 'Authenticated delete Services'
+  ) then
+    create policy "Authenticated delete Services" on public."Services"
+      for delete to authenticated
+      using (true);
+  end if;
+end;
+$$;
+
+alter table public."Settings" enable row level security;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'Settings'
+      and policyname = 'Authenticated select Settings'
+  ) then
+    create policy "Authenticated select Settings" on public."Settings"
+      for select to authenticated
+      using (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'Settings'
+      and policyname = 'Authenticated insert Settings'
+  ) then
+    create policy "Authenticated insert Settings" on public."Settings"
+      for insert to authenticated
+      with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'Settings'
+      and policyname = 'Authenticated update Settings'
+  ) then
+    create policy "Authenticated update Settings" on public."Settings"
+      for update to authenticated
+      using (true)
+      with check (true);
+  end if;
+
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public'
+      and tablename = 'Settings'
+      and policyname = 'Authenticated delete Settings'
+  ) then
+    create policy "Authenticated delete Settings" on public."Settings"
+      for delete to authenticated
+      using (true);
+  end if;
+end;
+$$;
+```
+
+#### Verification helper
+
+- `setup_assistant_diagnostics()` returns one row per table with `has_table`, `rls_enabled`, `missing_policies[]`, and an optional `delta_sql` snippet you can paste back into Supabase if anything is missing.
+- The Setup Assistant displays the `delta_sql` output and re-runs the checks whenever you press the verify button so the UI goes green once everything is secured.
+#### Verification helper
+
+- `setup_assistant_diagnostics()` returns one row per table with `has_table`, `rls_enabled`, `missing_policies[]`, and an optional `delta_sql` snippet you can paste back into Supabase if anything is missing.
+- The Setup Assistant displays the `delta_sql` output and re-runs the checks whenever you press the verify button so the UI goes green once everything is secured.
+
+**Verification:** After running the SQL, return to the Setup Assistant and use the “Verify Policies” button. The routine performs read-only checks to confirm that authenticated requests succeed while anonymous requests receive 401/403 responses. All tables should report a green “Secured” badge before continuing.
 4.  **Create Environment File:**
     *   In the root of the project, create a new file named `.env`.
     *   Add your Supabase credentials to this file:

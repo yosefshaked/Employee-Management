@@ -66,7 +66,6 @@
     "files": [
       "dist/**/*",
       "electron.cjs",
-      "launcher.html",
       "public/**/*",
       "preload.js"
     ],
