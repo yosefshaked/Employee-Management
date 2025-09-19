@@ -359,6 +359,8 @@ function TimeEntryTableInner({
                                               }
                                             } else if (activeTab === 'adjustments') {
                                               payload.dayType = 'adjustment';
+                                            } else if (activeTab === 'leave') {
+                                              payload.dayType = 'paid_leave';
                                             }
                                             if (!payload.dayType && !paidLeave && regularSessions.length === 0 && adjustments.length > 0) {
                                               payload.dayType = 'adjustment';
