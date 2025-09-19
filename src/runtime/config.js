@@ -57,25 +57,31 @@ export async function loadRuntimeConfig() {
 }
 
 async function loadFromFunction() {
-  try {
-    const response = await fetch('/config', {
-      headers: {
-        Accept: 'application/json',
-      },
-    });
+  const endpoints = ['/api/config', '/config'];
 
-    if (!response.ok) {
-      return undefined;
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        headers: {
+          Accept: 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        continue;
+      }
+
+      const data = await response.json();
+      return sanitizeConfig({
+        ...data,
+        source: 'config',
+      });
+    } catch {
+      continue;
     }
-
-    const data = await response.json();
-    return sanitizeConfig({
-      ...data,
-      source: 'config',
-    });
-  } catch {
-    return undefined;
   }
+
+  return undefined;
 }
 
 function loadFromEnv() {
