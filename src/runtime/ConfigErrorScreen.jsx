@@ -21,8 +21,8 @@ function ConfigErrorScreen({ error }) {
         <h1 style={styles.title}>הגדרת חיבור חסרה</h1>
         <p style={styles.message}>{message}</p>
         <ol style={styles.list}>
-          <li>בפריסת Cloudflare Pages יש להגדיר את המשתנים SUPABASE_URL ו-SUPABASE_ANON_KEY ולפרוס מחדש.</li>
-          <li>בפיתוח לוקלי ניתן להשתמש ב־.env.development עם VITE_SUPABASE_URL ו־VITE_SUPABASE_ANON_KEY או בקובץ .dev.vars עם wrangler pages dev.</li>
+          <li>בפריסת Azure Static Web Apps יש להגדיר את המשתנים SUPABASE_URL ו-SUPABASE_ANON_KEY בהגדרות ה-API ולפרוס מחדש.</li>
+          <li>בפיתוח לוקלי ניתן להשתמש ב־.env.development עם VITE_SUPABASE_URL ו־VITE_SUPABASE_ANON_KEY או להריץ את Azure Static Web Apps CLI עם local.settings.json תחת api/.</li>
         </ol>
         <button type="button" style={styles.button} onClick={() => window.location.reload()}>
           נסה שוב
