@@ -98,7 +98,7 @@ function OrganizationList({ organizations, onSelect }) {
                   <p className="text-xs text-slate-500 mt-1">חבר צוות</p>
                 )}
               </div>
-              {organization.supabase_url && organization.supabase_anon_key ? (
+              {organization.has_connection ? (
                 <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
                   חיבור פעיל
                 </Badge>

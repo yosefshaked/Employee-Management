@@ -17,13 +17,6 @@ import { mapSupabaseError } from '@/org/errors.js';
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const LEGACY_STORAGE_PREFIX = 'employee-management:last-org';
 
-function maskForDebug(value) {
-  if (!value) return '';
-  const trimmed = String(value);
-  if (trimmed.length <= 4) return '••••';
-  return `${trimmed.slice(0, 2)}••••${trimmed.slice(-2)}`;
-}
-
 function readStoredOrgId(userId) {
   if (typeof window === 'undefined') return null;
   try {
@@ -65,7 +58,7 @@ function writeStoredOrgId(userId, orgId) {
 
 const OrgContext = createContext(null);
 
-function normalizeOrgRecord(record, organizationOverride) {
+function normalizeOrgRecord(record, organizationOverride, connectionOverride) {
   if (!record) return null;
   const organization = organizationOverride || record.organizations;
   if (!organization) return null;
@@ -81,14 +74,15 @@ function normalizeOrgRecord(record, organizationOverride) {
     id: organization.id,
     name: organization.name,
     slug: organization.slug || null,
-    supabase_url: organization.supabase_url || '',
-    supabase_anon_key: organization.supabase_anon_key || '',
     policy_links: Array.isArray(organization.policy_links) ? organization.policy_links : [],
     legal_settings: organization.legal_settings || {},
     setup_completed: Boolean(organization.setup_completed),
     verified_at: organization.verified_at || null,
     created_at: organization.created_at,
     updated_at: organization.updated_at,
+    has_connection: Boolean(
+      connectionOverride?.supabaseUrl && connectionOverride?.supabaseAnonKey,
+    ),
     membership,
   };
 }
@@ -139,6 +133,7 @@ export function OrgProvider({ children }) {
   const [incomingInvites, setIncomingInvites] = useState([]);
   const [orgMembers, setOrgMembers] = useState([]);
   const [orgInvites, setOrgInvites] = useState([]);
+  const [orgConnections, setOrgConnections] = useState(new Map());
   const [error, setError] = useState(null);
   const [configStatus, setConfigStatus] = useState('idle');
   const [activeOrgConfig, setActiveOrgConfig] = useState(null);
@@ -156,6 +151,7 @@ export function OrgProvider({ children }) {
     setIncomingInvites([]);
     setOrgMembers([]);
     setOrgInvites([]);
+    setOrgConnections(new Map());
     setError(null);
     setActiveOrgConfig(null);
     setConfigStatus('idle');
@@ -203,12 +199,13 @@ export function OrgProvider({ children }) {
       );
 
       let organizationMap = null;
+      const connectionMap = new Map();
 
       if (orgIds.length) {
         const { data: organizationsData, error: organizationsError } = await coreSupabase
           .from('organizations')
           .select(
-            'id, name, slug, supabase_url, supabase_anon_key, policy_links, legal_settings, setup_completed, verified_at, created_at, updated_at',
+            'id, name, slug, policy_links, legal_settings, setup_completed, verified_at, created_at, updated_at',
           )
           .in('id', orgIds);
 
@@ -218,7 +215,13 @@ export function OrgProvider({ children }) {
       }
 
       let normalizedOrganizations = membershipData
-        .map((membership) => normalizeOrgRecord(membership, organizationMap?.get(membership.org_id)))
+        .map((membership) =>
+          normalizeOrgRecord(
+            membership,
+            organizationMap?.get(membership.org_id),
+            connectionMap.get(membership.org_id),
+          ),
+        )
         .filter(Boolean);
 
       if (orgIds.length) {
@@ -230,31 +233,29 @@ export function OrgProvider({ children }) {
         if (settingsError) {
           console.warn('Failed to load org settings snapshot', settingsError);
         } else if (settingsData?.length) {
-          const settingsMap = new Map(
-            settingsData.map((item) => [
-              item.org_id,
-              {
-                supabase_url: item.supabase_url || '',
-                supabase_anon_key: item.anon_key || '',
-                org_settings_metadata: item.metadata || null,
-                org_settings_updated_at: item.updated_at || null,
-              },
-            ]),
-          );
+          settingsData.forEach((item) => {
+            connectionMap.set(item.org_id, {
+              supabaseUrl: item.supabase_url || '',
+              supabaseAnonKey: item.anon_key || '',
+              metadata: item.metadata || null,
+              updatedAt: item.updated_at || null,
+            });
+          });
 
           normalizedOrganizations = normalizedOrganizations.map((org) => {
-            const settings = settingsMap.get(org.id);
+            const settings = connectionMap.get(org.id);
             if (!settings) return org;
             return {
               ...org,
-              supabase_url: org.supabase_url || settings.supabase_url || '',
-              supabase_anon_key: org.supabase_anon_key || settings.supabase_anon_key || '',
-              org_settings_metadata: settings.org_settings_metadata,
-              org_settings_updated_at: settings.org_settings_updated_at,
+              has_connection: Boolean(settings.supabaseUrl && settings.supabaseAnonKey),
+              org_settings_metadata: settings.metadata,
+              org_settings_updated_at: settings.updatedAt,
             };
           });
         }
       }
+
+      setOrgConnections(connectionMap);
 
       const normalizedInvites = inviteData
         .map((invite) => normalizeInvite(invite, organizationMap?.get(invite.org_id)))
@@ -394,12 +395,6 @@ export function OrgProvider({ children }) {
         if (configRequestRef.current !== requestId) {
           return;
         }
-
-        console.info('Loaded organization runtime config', {
-          orgId,
-          supabaseUrl: maskForDebug(config.supabaseUrl),
-          anonKey: maskForDebug(config.supabaseAnonKey),
-        });
 
         setActiveOrgConfig((current) => {
           const normalized = {
@@ -584,6 +579,34 @@ export function OrgProvider({ children }) {
           .delete()
           .eq('org_id', orgId);
         if (error) throw error;
+        setOrgConnections((prev) => {
+          const next = new Map(prev);
+          next.delete(orgId);
+          return next;
+        });
+        setOrganizations((prev) =>
+          prev.map((org) =>
+            org.id === orgId
+              ? {
+                  ...org,
+                  has_connection: false,
+                  org_settings_metadata: null,
+                  org_settings_updated_at: null,
+                }
+              : org,
+          ),
+        );
+        if (orgId === activeOrgId) {
+          setActiveOrg((current) => {
+            if (!current || current.id !== orgId) return current;
+            return {
+              ...current,
+              has_connection: false,
+              org_settings_metadata: null,
+              org_settings_updated_at: null,
+            };
+          });
+        }
         return;
       }
 
@@ -598,8 +621,42 @@ export function OrgProvider({ children }) {
         .from('org_settings')
         .upsert(payload, { onConflict: 'org_id' });
       if (error) throw error;
+      setOrgConnections((prev) => {
+        const next = new Map(prev);
+        const previous = prev.get(orgId);
+        next.set(orgId, {
+          supabaseUrl: normalizedUrl,
+          supabaseAnonKey: normalizedKey,
+          metadata: previous?.metadata ?? null,
+          updatedAt: payload.updated_at,
+        });
+        return next;
+      });
+      setOrganizations((prev) =>
+        prev.map((org) =>
+          org.id === orgId
+            ? {
+                ...org,
+                has_connection: Boolean(normalizedUrl && normalizedKey),
+                org_settings_metadata: org.org_settings_metadata ?? null,
+                org_settings_updated_at: payload.updated_at,
+              }
+            : org,
+        ),
+      );
+      if (orgId === activeOrgId) {
+        setActiveOrg((current) => {
+          if (!current || current.id !== orgId) return current;
+          return {
+            ...current,
+            has_connection: Boolean(normalizedUrl && normalizedKey),
+            org_settings_metadata: current.org_settings_metadata ?? null,
+            org_settings_updated_at: payload.updated_at,
+          };
+        });
+      }
     },
-    [],
+    [activeOrgId],
   );
 
   const createOrganization = useCallback(
@@ -727,8 +784,11 @@ export function OrgProvider({ children }) {
       }
       await updateOrganizationMetadata(orgId, updates);
       await syncOrgSettings(orgId, supabaseUrl, supabaseAnonKey);
+      if (orgId && orgId === activeOrgId) {
+        await fetchOrgRuntimeConfig(orgId);
+      }
     },
-    [updateOrganizationMetadata, syncOrgSettings],
+    [updateOrganizationMetadata, syncOrgSettings, activeOrgId, fetchOrgRuntimeConfig],
   );
 
   const recordVerification = useCallback(
@@ -841,6 +901,13 @@ export function OrgProvider({ children }) {
     [user, refreshOrganizations, selectOrg],
   );
 
+  const activeOrgConnection = useMemo(() => {
+    if (!activeOrgId) return null;
+    const connection = orgConnections.get(activeOrgId);
+    if (!connection) return null;
+    return connection;
+  }, [activeOrgId, orgConnections]);
+
   const value = useMemo(
     () => ({
       status,
@@ -862,11 +929,12 @@ export function OrgProvider({ children }) {
       removeMember,
       acceptInvite,
       activeOrgHasConnection: Boolean(
-        (activeOrg?.supabase_url || activeOrgConfig?.supabaseUrl) &&
-          (activeOrg?.supabase_anon_key || activeOrgConfig?.supabaseAnonKey),
+        (activeOrgConnection?.supabaseUrl || activeOrgConfig?.supabaseUrl) &&
+          (activeOrgConnection?.supabaseAnonKey || activeOrgConfig?.supabaseAnonKey),
       ),
       activeOrgConfig,
       configStatus,
+      activeOrgConnection,
     }),
     [
       status,
@@ -889,6 +957,7 @@ export function OrgProvider({ children }) {
       acceptInvite,
       configStatus,
       activeOrgConfig,
+      activeOrgConnection,
     ],
   );
 
