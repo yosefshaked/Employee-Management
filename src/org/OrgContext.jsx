@@ -307,36 +307,105 @@ export function OrgProvider({ children }) {
         const profileMap = new Map();
 
         if (userIds.length) {
-          const profileTablesToTry = ['user_profiles', 'profiles'];
+          const missingTableCodes = new Set(['PGRST204', 'PGRST205', 'PGRST301', '42P01']);
+          const unauthorizedCodes = new Set(['42501', 'PGRST401', 'PGRST403']);
 
-          for (const tableName of profileTablesToTry) {
-            const { data: profileData, error: profileError } = await coreSupabase
-              .from(tableName)
-              .select('user_id, email, full_name')
-              .in('user_id', userIds);
+          const profileLoaders = [
+            {
+              label: 'public.user_profiles',
+              load: () =>
+                coreSupabase
+                  .from('user_profiles')
+                  .select('user_id, email, full_name')
+                  .in('user_id', userIds),
+              map: (profile) => ({
+                userId: profile.user_id,
+                email: profile.email || null,
+                fullName: profile.full_name || null,
+              }),
+            },
+            {
+              label: 'public.profiles',
+              load: () =>
+                coreSupabase
+                  .from('profiles')
+                  .select('user_id, email, full_name')
+                  .in('user_id', userIds),
+              map: (profile) => ({
+                userId: profile.user_id,
+                email: profile.email || null,
+                fullName: profile.full_name || null,
+              }),
+            },
+            {
+              label: 'auth.users',
+              load: () =>
+                coreSupabase
+                  .schema('auth')
+                  .from('users')
+                  .select('id, email, raw_user_meta_data')
+                  .in('id', userIds),
+              map: (profile) => ({
+                userId: profile.id,
+                email: profile.email || null,
+                fullName:
+                  (profile.raw_user_meta_data &&
+                    (profile.raw_user_meta_data.full_name || profile.raw_user_meta_data.name)) ||
+                  null,
+              }),
+            },
+          ];
+
+          for (const loader of profileLoaders) {
+            let result;
+            try {
+              result = await loader.load();
+            } catch (unexpectedError) {
+              console.warn(`Failed to load user profiles from ${loader.label}`, unexpectedError);
+              continue;
+            }
+
+            const { data: profileData, error: profileError } = result || {};
 
             if (profileError) {
-              const missingTableCodes = new Set(['PGRST204', 'PGRST205', '42P01']);
+              const message = typeof profileError.message === 'string' ? profileError.message : '';
               const missingTable =
                 missingTableCodes.has(profileError.code) ||
-                (typeof profileError.message === 'string' &&
-                  (profileError.message.includes('Could not find the table') ||
-                    profileError.message.includes('does not exist')));
+                message.includes('Could not find the table') ||
+                message.includes('does not exist');
+              const unauthorized =
+                unauthorizedCodes.has(profileError.code) ||
+                message.includes('permission denied');
 
               if (missingTable) {
                 continue;
               }
 
-              console.warn(`Failed to load user profiles from ${tableName}`, profileError);
-              break;
+              if (unauthorized) {
+                console.warn(`Missing permission to read ${loader.label}`, profileError);
+                continue;
+              }
+
+              console.warn(`Failed to load user profiles from ${loader.label}`, profileError);
+              continue;
             }
 
             (profileData || []).forEach((profile) => {
-              profileMap.set(profile.user_id, {
-                id: profile.user_id,
-                email: profile.email || null,
-                full_name: profile.full_name || profile.email || null,
-                name: profile.full_name || profile.email || null,
+              const normalized = loader.map(profile) || {};
+              const userId = normalized.userId;
+
+              if (!userId) {
+                return;
+              }
+
+              const email = normalized.email || null;
+              const fullName = normalized.fullName || email || null;
+
+              profileMap.set(userId, {
+                id: userId,
+                email,
+                full_name: fullName,
+                name: fullName,
               });
             });
 
