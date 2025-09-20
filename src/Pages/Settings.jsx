@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -9,7 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
-import { Plus, Save, Trash2 } from 'lucide-react';
+import { Plus, Save, Trash2, PlugZap, Sparkles } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/supabaseClient';
 import SetupAssistant from '@/components/settings/SetupAssistant.jsx';
 import OrgMembersCard from '@/components/settings/OrgMembersCard.jsx';
@@ -109,12 +110,33 @@ function HolidayRuleRow({ rule, onChange, onRemove, onSave, allowHalfDay, isSavi
 }
 
 export default function Settings() {
-  const { activeOrgHasConnection } = useOrg();
+  const { activeOrg, activeOrgHasConnection } = useOrg();
   const [policy, setPolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingLeavePayPolicy, setIsSavingLeavePayPolicy] = useState(false);
+  const setupDialogAutoOpenRef = useRef(!activeOrgHasConnection);
+  const [isSetupDialogOpen, setIsSetupDialogOpen] = useState(!activeOrgHasConnection);
+
+  useEffect(() => {
+    if (activeOrgHasConnection) {
+      setupDialogAutoOpenRef.current = false;
+      setIsSetupDialogOpen(false);
+      return;
+    }
+    if (!setupDialogAutoOpenRef.current) {
+      setupDialogAutoOpenRef.current = true;
+      setIsSetupDialogOpen(true);
+    }
+  }, [activeOrgHasConnection]);
+
+  const handleSetupDialogChange = (open) => {
+    setIsSetupDialogOpen(open);
+    if (!open && !activeOrgHasConnection) {
+      setupDialogAutoOpenRef.current = true;
+    }
+  };
   useEffect(() => {
     if (!activeOrgHasConnection) {
       setPolicy(DEFAULT_LEAVE_POLICY);
@@ -313,9 +335,60 @@ export default function Settings() {
           <p className="text-slate-600">נהל את מדיניות החופשות והחגים הארגונית במקום מרכזי אחד</p>
         </div>
 
-        <SetupAssistant />
+        <div className="grid gap-6 xl:grid-cols-[1.5fr,1fr]">
+          <Card className="border-0 shadow-lg bg-white/80" dir="rtl">
+            <CardHeader className="border-b border-slate-200 space-y-3">
+              <CardTitle className="flex flex-col gap-2 text-xl font-semibold text-slate-900 sm:flex-row sm:items-center sm:justify-between">
+                <span className="flex items-center gap-2 text-slate-900">
+                  <PlugZap className="w-5 h-5 text-blue-600" aria-hidden="true" />
+                  מצב חיבור Supabase
+                </span>
+                <Badge className={activeOrgHasConnection ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-amber-100 text-amber-800 border border-amber-200'}>
+                  {activeOrgHasConnection ? 'חיבור פעיל' : 'נדרש חיבור'}
+                </Badge>
+              </CardTitle>
+              <p className="text-sm text-slate-600">
+                {activeOrgHasConnection
+                  ? 'החיבור הנוכחי מאפשר שמירה וטעינה של מדיניות החופשות. ניתן לפתוח את האשף כדי לעדכן מפתחות או להריץ בדיקות חוזרות.'
+                  : 'השלם את אשף ההגדרה כדי לחבר את Supabase ולשמור את מדיניות החופשות עבור הארגון.'}
+              </p>
+              <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500">
+                <span>ארגון פעיל: {activeOrg ? activeOrg.name : 'לא נבחר ארגון'}</span>
+                {activeOrgHasConnection ? (
+                  <div className="flex items-center gap-1 text-emerald-700">
+                    <Sparkles className="w-4 h-4" aria-hidden="true" />
+                    <span>האשף זמין לכל בדיקה חוזרת</span>
+                  </div>
+                ) : null}
+              </div>
+            </CardHeader>
+            <CardContent className="flex flex-wrap items-center justify-end gap-3 pt-6">
+              <Button onClick={() => setIsSetupDialogOpen(true)} className="gap-2">
+                <PlugZap className="w-4 h-4" aria-hidden="true" />
+                {activeOrgHasConnection ? 'נהל חיבור Supabase' : 'התחל אשף הגדרה'}
+              </Button>
+            </CardContent>
+          </Card>
 
-        <OrgMembersCard />
+          <OrgMembersCard />
+        </div>
+
+        <Dialog open={isSetupDialogOpen} onOpenChange={handleSetupDialogChange}>
+          <DialogContent
+            wide
+            className="max-w-5xl w-[min(100vw-2rem,1080px)] p-0 bg-transparent shadow-none"
+          >
+            <DialogHeader className="sr-only">
+              <DialogTitle>אשף הגדרת חיבור Supabase</DialogTitle>
+              <DialogDescription>
+                השלם את ההגדרות והבדיקות כדי לחבר את הארגון הפעיל ל-Supabase.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="max-h-[85vh] overflow-y-auto p-2 sm:p-4">
+              <SetupAssistant />
+            </div>
+          </DialogContent>
+        </Dialog>
 
         {activeOrgHasConnection ? (
           <>

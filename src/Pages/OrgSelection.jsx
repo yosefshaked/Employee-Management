@@ -133,8 +133,11 @@ function CreateOrgDialog({ open, onClose, onCreate }) {
       onClose();
     } catch (submitError) {
       console.error('Failed to create organization', submitError);
-      toast.error('יצירת הארגון נכשלה. נסה שוב.');
-      setError('');
+      const message = submitError instanceof Error && submitError.message
+        ? submitError.message
+        : 'יצירת הארגון נכשלה. נסה שוב.';
+      toast.error(message);
+      setError(message);
     } finally {
       setIsSubmitting(false);
     }

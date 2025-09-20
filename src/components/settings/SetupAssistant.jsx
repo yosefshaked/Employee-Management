@@ -5,10 +5,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { supabase } from '@/supabaseClient.js';
 import { useOrg } from '@/org/OrgContext.jsx';
 import {
+  Building2,
   AlertCircle,
   CheckCircle2,
   ClipboardCopy,
@@ -644,7 +646,7 @@ function StepSection({ number, title, description, statusBadge, children }) {
 }
 
 export default function SetupAssistant() {
-  const { activeOrg, updateConnection, recordVerification } = useOrg();
+  const { activeOrg, updateConnection, recordVerification, createOrganization } = useOrg();
   const [connection, setConnection] = useState({
     supabase_url: '',
     anon_key: '',
@@ -668,6 +670,85 @@ export default function SetupAssistant() {
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState('');
   const [lastVerifiedAt, setLastVerifiedAt] = useState(activeOrg?.verified_at || null);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [newOrgName, setNewOrgName] = useState('');
+  const [createOrgError, setCreateOrgError] = useState('');
+  const [isCreatingOrg, setIsCreatingOrg] = useState(false);
+
+  const handleOpenCreateDialog = () => {
+    setCreateOrgError('');
+    setNewOrgName('');
+    setIsCreateDialogOpen(true);
+  };
+
+  const handleCreateOrg = async (event) => {
+    event.preventDefault();
+    if (isCreatingOrg) return;
+    const trimmedName = newOrgName.trim();
+    if (!trimmedName) {
+      setCreateOrgError('יש להזין שם ארגון.');
+      return;
+    }
+    setCreateOrgError('');
+    setIsCreatingOrg(true);
+    try {
+      await createOrganization({ name: trimmedName });
+      setIsCreateDialogOpen(false);
+      setNewOrgName('');
+    } catch (error) {
+      console.error('Failed to create organization from setup assistant', error);
+      const message = error instanceof Error && error.message
+        ? error.message
+        : 'יצירת הארגון נכשלה. נסה שוב.';
+      setCreateOrgError(message);
+      toast.error(message);
+    } finally {
+      setIsCreatingOrg(false);
+    }
+  };
+
+  const renderCreateOrgDialog = () => (
+    <Dialog
+      open={isCreateDialogOpen}
+      onOpenChange={(open) => {
+        setIsCreateDialogOpen(open);
+        if (!open) {
+          setCreateOrgError('');
+          setIsCreatingOrg(false);
+        }
+      }}
+    >
+      <DialogContent className="max-w-md" dir="rtl">
+        <DialogHeader className="text-right">
+          <DialogTitle>יצירת ארגון חדש</DialogTitle>
+          <DialogDescription>
+            לאחר יצירת הארגון ניתן להזין כאן את פרטי ה-Supabase ולשמור אותם בהגדרות המשותפות.
+          </DialogDescription>
+        </DialogHeader>
+        <form className="space-y-4" onSubmit={handleCreateOrg}>
+          <div className="space-y-2 text-right">
+            <Label htmlFor="setup-org-name">שם הארגון</Label>
+            <Input
+              id="setup-org-name"
+              value={newOrgName}
+              onChange={(event) => setNewOrgName(event.target.value)}
+              placeholder="למשל: המרכז הקהילתי העירוני"
+              autoFocus
+            />
+            {createOrgError ? <p className="text-xs text-red-600">{createOrgError}</p> : null}
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setIsCreateDialogOpen(false)} disabled={isCreatingOrg}>
+              ביטול
+            </Button>
+            <Button type="submit" disabled={isCreatingOrg} className="gap-2">
+              {isCreatingOrg ? 'יוצר...' : 'צור ארגון'}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
 
   useEffect(() => {
     if (!activeOrg) {
@@ -939,22 +1020,35 @@ export default function SetupAssistant() {
 
   if (!activeOrg) {
     return (
-      <Card className="border-0 shadow-xl bg-white/90" dir="rtl">
-        <CardHeader className="border-b border-slate-200">
-          <CardTitle className="text-2xl font-semibold text-slate-900">אשף הגדרה ראשוני ל-Supabase</CardTitle>
-          <p className="text-sm text-slate-600 mt-2">
-            בחר או צור ארגון לפני שמגדירים חיבור ל-Supabase. ניתן לבצע זאת ממסך בחירת הארגון לאחר ההתחברות.
-          </p>
-        </CardHeader>
-        <CardContent className="py-8">
-          <p className="text-sm text-slate-500 text-center">אין ארגון פעיל כרגע.</p>
-        </CardContent>
-      </Card>
+      <>
+        <Card className="border-0 shadow-xl bg-white/90" dir="rtl">
+          <CardHeader className="border-b border-slate-200">
+            <CardTitle className="text-2xl font-semibold text-slate-900">אשף הגדרה ראשוני ל-Supabase</CardTitle>
+            <p className="text-sm text-slate-600 mt-2">
+              בחר או צור ארגון לפני שמגדירים חיבור ל-Supabase. ניתן לבצע זאת ממסך בחירת הארגון או בלחיצה על הכפתור שלמטה.
+            </p>
+          </CardHeader>
+          <CardContent className="py-8 space-y-4">
+            <p className="text-sm text-slate-500 text-center">אין ארגון פעיל כרגע.</p>
+            <div className="flex flex-col items-center gap-3">
+              <Button onClick={handleOpenCreateDialog} className="gap-2">
+                <Building2 className="w-4 h-4" aria-hidden="true" />
+                צור ארגון חדש
+              </Button>
+              <p className="text-xs text-slate-500 text-center max-w-sm">
+                לאחר יצירת הארגון ניתן לחזור לאשף ולשמור כאן את פרטי החיבור ל-Supabase.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        {renderCreateOrgDialog()}
+      </>
     );
   }
 
   return (
-    <Card className="border-0 shadow-xl bg-white/90" dir="rtl">
+    <>
+      <Card className="border-0 shadow-xl bg-white/90" dir="rtl">
       <CardHeader className="border-b border-slate-200">
         <CardTitle className="text-2xl font-semibold text-slate-900 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <span>אשף הגדרה ראשוני ל-Supabase</span>
@@ -968,6 +1062,13 @@ export default function SetupAssistant() {
         <p className="text-sm text-slate-600 mt-2">
           שלושה צעדים קצרים: חיבור המפתחות, הרצת ה-SQL המאובטח, ואימות שהטבלאות ומדיניות ה-RLS קיימות. האשף פועל בכיוון ימין-לשמאל ומספק כפתורי העתקה לכל בלוק.
         </p>
+        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500 mt-3">
+          <span>ההגדרות נשמרות עבור: {activeOrg?.name || 'ארגון ללא שם'}</span>
+          <Button variant="outline" size="sm" onClick={handleOpenCreateDialog} className="gap-2">
+            <Building2 className="w-4 h-4" aria-hidden="true" />
+            צור ארגון חדש
+          </Button>
+        </div>
       </CardHeader>
       <CardContent className="space-y-10 pt-6">
         <StepSection
@@ -1201,6 +1302,8 @@ export default function SetupAssistant() {
           </div>
         </StepSection>
       </CardContent>
-    </Card>
+      </Card>
+      {renderCreateOrgDialog()}
+    </>
   );
 }
