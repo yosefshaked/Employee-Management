@@ -41,8 +41,10 @@ export default function AuthGuard() {
     return <LoadingScreen />;
   }
 
-  const needsOrgSelection = orgStatus === 'needs-org' || orgStatus === 'needs-selection';
-  if (needsOrgSelection && location.pathname !== '/select-org') {
+  const requiresOrgCreation = orgStatus === 'needs-org';
+  const requiresOrgSelection = orgStatus === 'needs-selection';
+
+  if (requiresOrgCreation && location.pathname !== '/select-org') {
     return <Navigate to="/select-org" replace state={{ from: location }} />;
   }
 
@@ -50,7 +52,7 @@ export default function AuthGuard() {
     return <Outlet />;
   }
 
-  if (!needsOrgSelection && !activeOrgHasConnection && location.pathname !== '/Settings') {
+  if (!requiresOrgCreation && !requiresOrgSelection && !activeOrgHasConnection && location.pathname !== '/Settings') {
     return <Navigate to="/Settings" replace />;
   }
 

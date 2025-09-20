@@ -8,31 +8,14 @@ This project is a Vite + React application for managing employees, work sessions
    ```bash
    npm install
    ```
-2. Create a `.env.development` file with your Supabase credentials:
-   ```bash
-   VITE_SUPABASE_URL=your-url
-   VITE_SUPABASE_ANON_KEY=your-anon-key
-   ```
-3. Start the dev server:
-   ```bash
-   npm run dev
-   ```
-
-### Azure Static Web Apps emulator
-
-To test the Azure runtime locally use the Static Web Apps CLI:
-
-1. Install the CLI (once per machine):
-   ```bash
-   npm install -g @azure/static-web-apps-cli
-   ```
-2. Create an `api/local.settings.json` file with your Supabase credentials:
+2. Create `api/local.settings.json` with your Supabase credentials:
    ```json
    {
      "IsEncrypted": false,
      "Values": {
-       "SUPABASE_URL": "your-url",
-       "SUPABASE_ANON_KEY": "your-anon-key"
+       "APP_SUPABASE_URL": "https://your-project.supabase.co",
+       "APP_SUPABASE_ANON_KEY": "public-anon-key",
+       "APP_SUPABASE_SERVICE_ROLE": "service-role-key-with-org-access"
      }
    }
    ```
@@ -40,7 +23,7 @@ To test the Azure runtime locally use the Static Web Apps CLI:
    ```bash
    npm run dev
    ```
-4. In another terminal launch the emulator:
+4. In another terminal launch the Azure Static Web Apps emulator so `/api/config` is available:
    ```bash
    swa start http://localhost:5173 --api-location api
    ```
@@ -57,11 +40,16 @@ The command outputs static assets to the `dist/` directory. Configure Azure Stat
 
 ## Runtime configuration
 
-At runtime the app first calls `/api/config` (an Azure Function) to load the public Supabase URL and anon key. If the endpoint is not available the app falls back to the Vite environment variables (`VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`). For backwards compatibility the loader also checks `/config` if the Azure endpoint is missing.
+At bootstrap the SPA calls the Azure Function `GET /api/config`. Without credentials the function returns the core Supabase URL and anon key defined by `APP_SUPABASE_URL` and `APP_SUPABASE_ANON_KEY`. After the user signs in and selects an organization the client reissues the request with:
 
-Visit `/#/diagnostics` to verify which source (function or env file) is currently in use; secrets are masked except for the last four characters.
+- `Authorization: Bearer <supabase_access_token>`
+- `x-org-id: <selected org id>` (taken from `localStorage.active_org_id`)
 
-If neither source is configured the UI shows a blocking error screen in Hebrew with setup instructions.
+The function validates membership using the service role (`APP_SUPABASE_SERVICE_ROLE`) and returns the per-organization Supabase `supabase_url` and `anon_key`. Missing or invalid tokens yield `401`, while users outside the organization receive `403`. Switching organizations re-requests this configuration and rebuilds the runtime client on the fly.
+
+Visit `/#/diagnostics` in development to review the last `/api/config` request (org id, HTTP status, and request scope). Secrets are masked except for the last four characters.
+
+If `/api/config` is unreachable or returns non-JSON content the UI shows a blocking error screen in Hebrew with recovery steps.
 
 ## Health check endpoint
 

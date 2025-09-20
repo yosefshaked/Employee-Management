@@ -27,7 +27,9 @@ import {
 } from "@/components/ui/sidebar";
 import ChangelogModal from "./components/ChangelogModal";
 import OrgConfigBanner from "@/components/OrgConfigBanner.jsx";
+import OrgSelectionBanner from "@/components/OrgSelectionBanner.jsx";
 import { useAuth } from "@/auth/AuthContext.jsx";
+import { useOrg } from "@/org/OrgContext.jsx";
 import OrgSwitcher from "@/org/OrgSwitcher.jsx";
 
 const navigationItems = [
@@ -67,6 +69,7 @@ export default function Layout({ children }) {
   const location = useLocation();
   const [showChangelog, setShowChangelog] = useState(false);
   const { user, signOut } = useAuth();
+  const { activeOrg } = useOrg();
 
   const handleSignOut = async () => {
     try {
@@ -106,9 +109,6 @@ export default function Layout({ children }) {
           </SidebarHeader>
           
           <SidebarContent className="p-4">
-            <div className="mb-4">
-              <OrgSwitcher />
-            </div>
             <SidebarGroup>
               <SidebarGroupLabel className="text-sm font-semibold text-slate-600 mb-3">
                 ניווט
@@ -136,6 +136,7 @@ export default function Layout({ children }) {
           </SidebarContent>
 
           <SidebarFooter className="border-t border-slate-200 p-6 space-y-4">
+            <OrgSwitcher />
             <button
               onClick={() => setShowChangelog(true)}
               style={{
@@ -160,6 +161,9 @@ export default function Layout({ children }) {
               <div className="flex-1 min-w-0 text-right">
                 <p className="font-semibold text-slate-900 text-sm truncate">{user?.name || user?.email || 'משתמש מחובר'}</p>
                 {user?.email && <p className="text-xs text-slate-500 truncate">{user.email}</p>}
+                <p className="text-xs text-blue-600 truncate">
+                  {activeOrg?.name ? `ארגון: ${activeOrg.name}` : 'לא נבחר ארגון'}
+                </p>
               </div>
               <button
                 type="button"
@@ -181,6 +185,7 @@ export default function Layout({ children }) {
             </div>
           </header>
 
+          <OrgSelectionBanner />
           <OrgConfigBanner />
 
           <div className="flex-1 overflow-auto">

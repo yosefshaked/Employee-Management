@@ -1,100 +1,210 @@
 const GLOBAL_CONFIG_KEY = '__EMPLOYEE_MANAGEMENT_PUBLIC_CONFIG__';
+const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
+const CACHE = new Map();
+
+let lastDiagnostics = {
+  orgId: null,
+  status: null,
+  scope: 'app',
+  ok: false,
+  error: null,
+  timestamp: null,
+};
 
 export class MissingRuntimeConfigError extends Error {
-  constructor(message = 'לא נמצאה תצורת Supabase לטעינת המערכת.') {
+  constructor(message = 'טעינת ההגדרות נכשלה. ודא שפונקציית /api/config זמינה ומחזירה JSON תקין.') {
     super(message);
     this.name = 'MissingRuntimeConfigError';
   }
 }
 
 export function setRuntimeConfig(config) {
+  CACHE.set('app', config);
   if (typeof window !== 'undefined') {
     window[GLOBAL_CONFIG_KEY] = config;
   }
 }
 
 export function getRuntimeConfig() {
+  if (CACHE.has('app')) {
+    return CACHE.get('app');
+  }
   if (typeof window === 'undefined') {
     return undefined;
   }
   return window[GLOBAL_CONFIG_KEY];
 }
 
-function sanitizeConfig(raw) {
+function sanitizeConfig(raw, source = 'api') {
   if (!raw || typeof raw !== 'object') {
     return undefined;
   }
-  const supabaseUrl = raw.supabaseUrl && String(raw.supabaseUrl).trim();
-  const supabaseAnonKey = raw.supabaseAnonKey && String(raw.supabaseAnonKey).trim();
-  if (!supabaseUrl || !supabaseAnonKey) {
+  const supabaseUrl = raw.supabaseUrl || raw.supabase_url;
+  const supabaseAnonKey = raw.supabaseAnonKey || raw.supabase_anon_key || raw.anon_key;
+  const trimmedUrl = typeof supabaseUrl === 'string' ? supabaseUrl.trim() : '';
+  const trimmedKey = typeof supabaseAnonKey === 'string' ? supabaseAnonKey.trim() : '';
+
+  if (!trimmedUrl || !trimmedKey) {
     return undefined;
   }
+
   return {
-    supabaseUrl,
-    supabaseAnonKey,
-    source: raw.source || 'config',
+    supabaseUrl: trimmedUrl,
+    supabaseAnonKey: trimmedKey,
+    source,
   };
 }
 
-export async function loadRuntimeConfig() {
-  const existing = getRuntimeConfig();
-  if (existing) {
-    return existing;
+function getStoredOrgId() {
+  if (typeof window === 'undefined') {
+    return null;
   }
-
-  let config = loadFromEnv();
-
-  if (!config) {
-    config = await loadFromFunction();
+  try {
+    return window.localStorage.getItem(ACTIVE_ORG_STORAGE_KEY);
+  } catch {
+    return null;
   }
-
-  if (!config) {
-    throw new MissingRuntimeConfigError();
-  }
-
-  setRuntimeConfig(config);
-  return config;
 }
 
-async function loadFromFunction() {
-  const endpoints = ['/api/config', '/config'];
-
-  for (const endpoint of endpoints) {
-    try {
-      const response = await fetch(endpoint, {
-        headers: {
-          Accept: 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        continue;
-      }
-
-      const data = await response.json();
-      return sanitizeConfig({
-        ...data,
-        source: 'config',
-      });
-    } catch {
-      continue;
-    }
-  }
-
-  return undefined;
+function updateDiagnostics({ orgId, status, scope, ok, error }) {
+  lastDiagnostics = {
+    orgId: orgId || null,
+    status: typeof status === 'number' ? status : null,
+    scope,
+    ok,
+    error: error || null,
+    timestamp: Date.now(),
+  };
 }
 
-function loadFromEnv() {
-  const envUrl = import.meta.env.VITE_SUPABASE_URL;
-  const envAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+export function getRuntimeConfigDiagnostics() {
+  return { ...lastDiagnostics };
+}
 
-  if (!envUrl || !envAnonKey) {
-    return undefined;
+function buildCacheKey(scope, orgId) {
+  if (scope === 'org') {
+    return `org:${orgId || 'none'}`;
+  }
+  return 'app';
+}
+
+function ensureJsonResponse(response, orgId, scope) {
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    updateDiagnostics({
+      orgId,
+      status: response.status,
+      scope,
+      ok: false,
+      error: 'response-not-json',
+    });
+    throw new MissingRuntimeConfigError(
+      'הפונקציה לא מחזירה JSON תקין. ודא ש-/api/config מחזירה תשובה מסוג application/json.',
+    );
+  }
+}
+
+export async function loadRuntimeConfig(options = {}) {
+  const { accessToken = null, orgId: explicitOrgId = undefined, force = false } = options;
+  const scope = accessToken ? 'org' : 'app';
+  const storedOrgId = explicitOrgId ?? getStoredOrgId();
+  const cacheKey = buildCacheKey(scope, storedOrgId);
+
+  if (!force && CACHE.has(cacheKey)) {
+    return CACHE.get(cacheKey);
   }
 
-  return sanitizeConfig({
-    supabaseUrl: envUrl,
-    supabaseAnonKey: envAnonKey,
-    source: 'env',
+  const headers = { Accept: 'application/json' };
+  if (storedOrgId) {
+    headers['x-org-id'] = storedOrgId;
+  }
+  if (accessToken) {
+    headers.Authorization = `Bearer ${accessToken}`;
+  }
+
+  let response;
+  try {
+    response = await fetch('/api/config', {
+      method: 'GET',
+      headers,
+      cache: 'no-store',
+    });
+  } catch {
+    updateDiagnostics({
+      orgId: storedOrgId,
+      status: null,
+      scope,
+      ok: false,
+      error: 'network-failure',
+    });
+    throw new MissingRuntimeConfigError(
+      'לא ניתן ליצור קשר עם פונקציית /api/config. ודא שהיא פרוסה ופועלת.',
+    );
+  }
+
+  ensureJsonResponse(response, storedOrgId, scope);
+
+  let payload;
+  try {
+    payload = await response.json();
+  } catch {
+    updateDiagnostics({
+      orgId: storedOrgId,
+      status: response.status,
+      scope,
+      ok: false,
+      error: 'invalid-json',
+    });
+    throw new MissingRuntimeConfigError(
+      'לא ניתן לפענח את תשובת /api/config. ודא שהפונקציה מחזירה JSON תקין.',
+    );
+  }
+
+  if (!response.ok) {
+    const serverMessage = typeof payload?.error === 'string'
+      ? payload.error
+      : `טעינת ההגדרות נכשלה (סטטוס ${response.status}).`;
+    updateDiagnostics({
+      orgId: storedOrgId,
+      status: response.status,
+      scope,
+      ok: false,
+      error: serverMessage,
+    });
+    throw new MissingRuntimeConfigError(serverMessage);
+  }
+
+  const sanitized = sanitizeConfig(payload, scope === 'org' ? 'org-api' : 'api');
+  if (!sanitized) {
+    updateDiagnostics({
+      orgId: storedOrgId,
+      status: response.status,
+      scope,
+      ok: false,
+      error: 'missing-keys',
+    });
+    throw new MissingRuntimeConfigError(
+      'הפונקציה לא סיפקה supabase_url ו-anon_key. עדכן את /api/config.',
+    );
+  }
+
+  const normalized = {
+    ...sanitized,
+    orgId: scope === 'org' ? storedOrgId || null : null,
+  };
+
+  CACHE.set(cacheKey, normalized);
+  if (scope === 'app') {
+    setRuntimeConfig(normalized);
+  }
+
+  updateDiagnostics({
+    orgId: storedOrgId,
+    status: response.status,
+    scope,
+    ok: true,
+    error: null,
   });
+
+  return normalized;
 }

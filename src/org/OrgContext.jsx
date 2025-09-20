@@ -8,24 +8,37 @@ import React, {
   useState,
 } from 'react';
 import { toast } from 'sonner';
-import {
-  coreSupabase,
-  setOrgSupabaseConfig,
-  getActiveOrgConfig,
-} from '@/supabaseClient.js';
+import { coreSupabase, OrgSupabaseProvider } from '@/supabaseClient.js';
+import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 
-const STORAGE_KEY_PREFIX = 'employee-management:last-org';
+const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
+const LEGACY_STORAGE_PREFIX = 'employee-management:last-org';
 
-function buildStorageKey(userId) {
-  if (!userId) return STORAGE_KEY_PREFIX;
-  return `${STORAGE_KEY_PREFIX}:${userId}`;
+function maskForDebug(value) {
+  if (!value) return '';
+  const trimmed = String(value);
+  if (trimmed.length <= 4) return '••••';
+  return `${trimmed.slice(0, 2)}••••${trimmed.slice(-2)}`;
 }
 
 function readStoredOrgId(userId) {
   if (typeof window === 'undefined') return null;
   try {
-    return window.localStorage.getItem(buildStorageKey(userId));
+    const stored = window.localStorage.getItem(ACTIVE_ORG_STORAGE_KEY);
+    if (stored) {
+      return stored;
+    }
+    if (!userId) {
+      return null;
+    }
+    const legacyKeyWithUser = `${LEGACY_STORAGE_PREFIX}:${userId}`;
+    const legacyValueWithUser = window.localStorage.getItem(legacyKeyWithUser);
+    if (legacyValueWithUser) {
+      return legacyValueWithUser;
+    }
+    const legacyFallback = window.localStorage.getItem(LEGACY_STORAGE_PREFIX);
+    return legacyFallback;
   } catch {
     return null;
   }
@@ -34,12 +47,15 @@ function readStoredOrgId(userId) {
 function writeStoredOrgId(userId, orgId) {
   if (typeof window === 'undefined') return;
   try {
-    const key = buildStorageKey(userId);
     if (!orgId) {
-      window.localStorage.removeItem(key);
+      window.localStorage.removeItem(ACTIVE_ORG_STORAGE_KEY);
     } else {
-      window.localStorage.setItem(key, orgId);
+      window.localStorage.setItem(ACTIVE_ORG_STORAGE_KEY, orgId);
     }
+    if (userId) {
+      window.localStorage.removeItem(`${LEGACY_STORAGE_PREFIX}:${userId}`);
+    }
+    window.localStorage.removeItem(LEGACY_STORAGE_PREFIX);
   } catch {
     // ignore storage failures silently
   }
@@ -112,7 +128,7 @@ function normalizeMember(record) {
 }
 
 export function OrgProvider({ children }) {
-  const { status: authStatus, user } = useAuth();
+  const { status: authStatus, user, session } = useAuth();
   const [status, setStatus] = useState('idle');
   const [organizations, setOrganizations] = useState([]);
   const [activeOrgId, setActiveOrgId] = useState(null);
@@ -121,8 +137,13 @@ export function OrgProvider({ children }) {
   const [orgMembers, setOrgMembers] = useState([]);
   const [orgInvites, setOrgInvites] = useState([]);
   const [error, setError] = useState(null);
+  const [configStatus, setConfigStatus] = useState('idle');
+  const [activeOrgConfig, setActiveOrgConfig] = useState(null);
   const loadingRef = useRef(false);
   const lastUserIdRef = useRef(null);
+  const configRequestRef = useRef(0);
+
+  const accessToken = session?.access_token || null;
 
   const resetState = useCallback(() => {
     setStatus('idle');
@@ -133,7 +154,8 @@ export function OrgProvider({ children }) {
     setOrgMembers([]);
     setOrgInvites([]);
     setError(null);
-    setOrgSupabaseConfig(null);
+    setActiveOrgConfig(null);
+    setConfigStatus('idle');
   }, []);
 
   const loadMemberships = useCallback(async () => {
@@ -239,6 +261,69 @@ export function OrgProvider({ children }) {
     [],
   );
 
+  const fetchOrgRuntimeConfig = useCallback(
+    async (orgId) => {
+      if (!orgId) {
+        setActiveOrgConfig(null);
+        setConfigStatus('idle');
+        return;
+      }
+
+      if (!accessToken) {
+        setConfigStatus('idle');
+        return;
+      }
+
+      const requestId = configRequestRef.current + 1;
+      configRequestRef.current = requestId;
+      setConfigStatus('loading');
+
+      try {
+        const config = await loadRuntimeConfig({ accessToken, orgId, force: true });
+
+        if (configRequestRef.current !== requestId) {
+          return;
+        }
+
+        console.info('Loaded organization runtime config', {
+          orgId,
+          supabaseUrl: maskForDebug(config.supabaseUrl),
+          anonKey: maskForDebug(config.supabaseAnonKey),
+        });
+
+        setActiveOrgConfig((current) => {
+          const normalized = {
+            supabaseUrl: config.supabaseUrl,
+            supabaseAnonKey: config.supabaseAnonKey,
+          };
+          if (
+            current &&
+            current.supabaseUrl === normalized.supabaseUrl &&
+            current.supabaseAnonKey === normalized.supabaseAnonKey
+          ) {
+            return current;
+          }
+          return normalized;
+        });
+        setConfigStatus('success');
+      } catch (error) {
+        if (configRequestRef.current !== requestId) {
+          return;
+        }
+
+        const message = error instanceof MissingRuntimeConfigError
+          ? error.message
+          : 'לא ניתן היה לטעון את הגדרות הארגון. נסה שוב בעוד מספר רגעים.';
+
+        console.error('Failed to fetch organization config', error);
+        toast.error(message);
+        setActiveOrgConfig(null);
+        setConfigStatus('error');
+      }
+    },
+    [accessToken],
+  );
+
   const determineStatus = useCallback(
     (orgList) => {
       if (!user) return 'idle';
@@ -255,21 +340,16 @@ export function OrgProvider({ children }) {
       if (!org) {
         setActiveOrgId(null);
         setActiveOrg(null);
-        setOrgSupabaseConfig(null);
+        setActiveOrgConfig(null);
+        setConfigStatus('idle');
         return;
       }
 
       setActiveOrgId(org.id);
       setActiveOrg(org);
 
-      if (org.supabase_url && org.supabase_anon_key) {
-        setOrgSupabaseConfig({
-          supabaseUrl: org.supabase_url,
-          supabaseAnonKey: org.supabase_anon_key,
-        });
-      } else {
-        setOrgSupabaseConfig(null);
-      }
+      setActiveOrgConfig(null);
+      setConfigStatus('idle');
     },
     [],
   );
@@ -300,7 +380,7 @@ export function OrgProvider({ children }) {
         const existing = orgList.find((item) => item.id === storedOrgId) || orgList[0] || null;
         if (existing) {
           applyActiveOrg(existing);
-          writeStoredOrgId(user.id, existing.id);
+          writeStoredOrgId(user?.id ?? null, existing.id);
           await loadOrgDirectory(existing.id);
         } else {
           applyActiveOrg(null);
@@ -327,11 +407,20 @@ export function OrgProvider({ children }) {
     loadOrgDirectory(activeOrgId);
   }, [activeOrgId, loadOrgDirectory]);
 
+  useEffect(() => {
+    if (!activeOrgId) return;
+    if (!accessToken) {
+      setActiveOrgConfig(null);
+      return;
+    }
+    void fetchOrgRuntimeConfig(activeOrgId);
+  }, [activeOrgId, accessToken, fetchOrgRuntimeConfig]);
+
   const selectOrg = useCallback(
     async (orgId) => {
       if (!orgId) {
         applyActiveOrg(null);
-        if (user) writeStoredOrgId(user.id, '');
+        writeStoredOrgId(user?.id ?? null, '');
         setStatus(determineStatus(organizations));
         return;
       }
@@ -343,7 +432,7 @@ export function OrgProvider({ children }) {
       }
 
       applyActiveOrg(next);
-      if (user) writeStoredOrgId(user.id, orgId);
+      writeStoredOrgId(user?.id ?? null, orgId);
       await loadOrgDirectory(orgId);
       setStatus(determineStatus(organizations));
     },
@@ -361,7 +450,7 @@ export function OrgProvider({ children }) {
 
       if (nextActive) {
         applyActiveOrg(nextActive);
-        writeStoredOrgId(user.id, nextActive.id);
+        writeStoredOrgId(user?.id ?? null, nextActive.id);
         await loadOrgDirectory(nextActive.id);
       } else {
         applyActiveOrg(null);
@@ -371,6 +460,36 @@ export function OrgProvider({ children }) {
       setStatus(determineStatus(orgList));
     },
     [user, activeOrgId, loadMemberships, applyActiveOrg, loadOrgDirectory, determineStatus],
+  );
+
+  const syncOrgSettings = useCallback(
+    async (orgId, supabaseUrl, supabaseAnonKey) => {
+      if (!orgId) throw new Error('זיהוי ארגון חסר.');
+      const normalizedUrl = supabaseUrl ? supabaseUrl.trim() : '';
+      const normalizedKey = supabaseAnonKey ? supabaseAnonKey.trim() : '';
+
+      if (!normalizedUrl || !normalizedKey) {
+        const { error } = await coreSupabase
+          .from('org_settings')
+          .delete()
+          .eq('org_id', orgId);
+        if (error) throw error;
+        return;
+      }
+
+      const payload = {
+        org_id: orgId,
+        supabase_url: normalizedUrl,
+        anon_key: normalizedKey,
+        updated_at: new Date().toISOString(),
+      };
+
+      const { error } = await coreSupabase
+        .from('org_settings')
+        .upsert(payload, { onConflict: 'org_id' });
+      if (error) throw error;
+    },
+    [],
   );
 
   const createOrganization = useCallback(
@@ -417,11 +536,13 @@ export function OrgProvider({ children }) {
 
       if (membershipError) throw membershipError;
 
+      await syncOrgSettings(orgData.id, supabaseUrl, supabaseAnonKey);
+
       await refreshOrganizations({ keepSelection: false });
       await selectOrg(orgData.id);
       toast.success('הארגון נוצר בהצלחה.');
     },
-    [user, refreshOrganizations, selectOrg],
+    [user, refreshOrganizations, selectOrg, syncOrgSettings],
   );
 
   const updateOrganizationMetadata = useCallback(
@@ -451,8 +572,9 @@ export function OrgProvider({ children }) {
         updates.legal_settings = legalSettings;
       }
       await updateOrganizationMetadata(orgId, updates);
+      await syncOrgSettings(orgId, supabaseUrl, supabaseAnonKey);
     },
-    [updateOrganizationMetadata],
+    [updateOrganizationMetadata, syncOrgSettings],
   );
 
   const recordVerification = useCallback(
@@ -586,7 +708,8 @@ export function OrgProvider({ children }) {
       removeMember,
       acceptInvite,
       activeOrgHasConnection: Boolean(activeOrg?.supabase_url && activeOrg?.supabase_anon_key),
-      activeOrgConfig: getActiveOrgConfig(),
+      activeOrgConfig,
+      configStatus,
     }),
     [
       status,
@@ -607,10 +730,16 @@ export function OrgProvider({ children }) {
       revokeInvite,
       removeMember,
       acceptInvite,
+      configStatus,
+      activeOrgConfig,
     ],
   );
 
-  return <OrgContext.Provider value={value}>{children}</OrgContext.Provider>;
+  return (
+    <OrgSupabaseProvider config={activeOrgConfig}>
+      <OrgContext.Provider value={value}>{children}</OrgContext.Provider>
+    </OrgSupabaseProvider>
+  );
 }
 
 // eslint-disable-next-line react-refresh/only-export-components

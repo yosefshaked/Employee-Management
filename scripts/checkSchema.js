@@ -10,15 +10,19 @@ const REQUIRED_COLUMNS = [
   { table: 'LeaveBalances', column: 'effective_date', types: ['date', 'timestamp with time zone', 'timestamp without time zone'] },
 ];
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const supabaseUrl =
+  process.env.APP_SUPABASE_URL ||
+  process.env.SUPABASE_URL ||
+  '';
 const supabaseKey =
-  process.env.VITE_SUPABASE_ANON_KEY ||
+  process.env.APP_SUPABASE_SERVICE_ROLE ||
+  process.env.APP_SUPABASE_ANON_KEY ||
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
   process.env.SUPABASE_KEY ||
   '';
 
 if (!supabaseUrl || !supabaseKey) {
-  console.error('Missing Supabase credentials. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (or service role key) to run the schema check.');
+  console.error('Missing Supabase credentials. Set APP_SUPABASE_URL and APP_SUPABASE_SERVICE_ROLE (or anon key) to run the schema check.');
   process.exit(1);
 }
 
