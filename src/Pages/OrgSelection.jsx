@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { AlertCircle, Building2, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { mapSupabaseError } from '@/org/errors.js';
 
 function LoadingState() {
   return (
@@ -97,7 +98,7 @@ function OrganizationList({ organizations, onSelect }) {
                   <p className="text-xs text-slate-500 mt-1">חבר צוות</p>
                 )}
               </div>
-              {organization.supabase_url && organization.supabase_anon_key ? (
+              {organization.has_connection ? (
                 <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">
                   חיבור פעיל
                 </Badge>
@@ -121,21 +122,21 @@ function CreateOrgDialog({ open, onClose, onCreate }) {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (isSubmitting) return;
     setError('');
-    if (!name.trim()) {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
       setError('יש להזין שם ארגון.');
       return;
     }
     setIsSubmitting(true);
     try {
-      await onCreate({ name: name.trim() });
+      await onCreate({ name: trimmedName });
       setName('');
       onClose();
     } catch (submitError) {
       console.error('Failed to create organization', submitError);
-      const message = submitError instanceof Error && submitError.message
-        ? submitError.message
-        : 'יצירת הארגון נכשלה. נסה שוב.';
+      const message = mapSupabaseError(submitError);
       toast.error(message);
       setError(message);
     } finally {
@@ -170,7 +171,7 @@ function CreateOrgDialog({ open, onClose, onCreate }) {
             <Button type="button" variant="ghost" onClick={onClose} disabled={isSubmitting}>
               ביטול
             </Button>
-            <Button type="submit" disabled={isSubmitting} className="gap-2">
+            <Button type="submit" disabled={isSubmitting || !name.trim()} className="gap-2">
               {isSubmitting ? 'יוצר...' : 'צור ארגון'}
             </Button>
           </div>

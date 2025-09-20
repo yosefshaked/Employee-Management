@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { toast } from 'sonner';
 import { supabase } from '@/supabaseClient.js';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { mapSupabaseError } from '@/org/errors.js';
 import {
   Building2,
   AlertCircle,
@@ -646,7 +647,14 @@ function StepSection({ number, title, description, statusBadge, children }) {
 }
 
 export default function SetupAssistant() {
-  const { activeOrg, updateConnection, recordVerification, createOrganization } = useOrg();
+  const {
+    activeOrg,
+    activeOrgConnection,
+    activeOrgHasConnection,
+    updateConnection,
+    recordVerification,
+    createOrganization,
+  } = useOrg();
   const [connection, setConnection] = useState({
     supabase_url: '',
     anon_key: '',
@@ -697,9 +705,7 @@ export default function SetupAssistant() {
       setNewOrgName('');
     } catch (error) {
       console.error('Failed to create organization from setup assistant', error);
-      const message = error instanceof Error && error.message
-        ? error.message
-        : 'יצירת הארגון נכשלה. נסה שוב.';
+      const message = mapSupabaseError(error);
       setCreateOrgError(message);
       toast.error(message);
     } finally {
@@ -741,7 +747,7 @@ export default function SetupAssistant() {
             <Button type="button" variant="ghost" onClick={() => setIsCreateDialogOpen(false)} disabled={isCreatingOrg}>
               ביטול
             </Button>
-            <Button type="submit" disabled={isCreatingOrg} className="gap-2">
+            <Button type="submit" disabled={isCreatingOrg || !newOrgName.trim()} className="gap-2">
               {isCreatingOrg ? 'יוצר...' : 'צור ארגון'}
             </Button>
           </div>
@@ -781,9 +787,16 @@ export default function SetupAssistant() {
       : [];
 
     const legalSettings = activeOrg.legal_settings || {};
+    const connectionSnapshot = activeOrgConnection || {
+      supabaseUrl: '',
+      supabaseAnonKey: '',
+      metadata: null,
+      updatedAt: null,
+    };
+
     const nextConnection = {
-      supabase_url: activeOrg.supabase_url || '',
-      anon_key: activeOrg.supabase_anon_key || '',
+      supabase_url: connectionSnapshot.supabaseUrl || '',
+      anon_key: connectionSnapshot.supabaseAnonKey || '',
       policy_links_text: policyLinks.join('\n'),
       legal_contact_email: (legalSettings.contact_email || legalSettings.email || '').trim(),
       legal_terms_url: (legalSettings.terms_url || legalSettings.terms || '').trim(),
@@ -797,16 +810,21 @@ export default function SetupAssistant() {
 
     setConnection(nextConnection);
     setOriginalConnection(nextConnection);
-    setLastSavedAt(activeOrg.updated_at || null);
+    const updatedAt =
+      activeOrg.org_settings_updated_at
+      || connectionSnapshot.updatedAt
+      || activeOrg.updated_at
+      || null;
+    setLastSavedAt(updatedAt);
 
     if (activeOrg.setup_completed) {
       setVerificationStatus('success');
-      setLastVerifiedAt(activeOrg.verified_at || activeOrg.updated_at || null);
+      setLastVerifiedAt(activeOrg.verified_at || updatedAt);
     } else {
       setVerificationStatus('idle');
       setLastVerifiedAt(activeOrg.verified_at || null);
     }
-  }, [activeOrg]);
+  }, [activeOrg, activeOrgConnection]);
 
   const hasUnsavedChanges = useMemo(() => {
     return (
@@ -821,7 +839,8 @@ export default function SetupAssistant() {
 
   const hasConnectionValues = Boolean(connection.supabase_url.trim() && connection.anon_key.trim());
   const hasSavedConnection = Boolean(
-    originalConnection.supabase_url
+    activeOrgHasConnection
+    && originalConnection.supabase_url
     && originalConnection.anon_key
   );
 

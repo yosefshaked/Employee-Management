@@ -3,13 +3,13 @@ import { AlertTriangle } from 'lucide-react';
 import { useOrg } from '@/org/OrgContext.jsx';
 
 export default function OrgConfigBanner() {
-  const { activeOrg } = useOrg();
+  const { activeOrg, activeOrgHasConnection } = useOrg();
 
   if (!activeOrg) {
     return null;
   }
 
-  const missingConnection = !activeOrg.supabase_url || !activeOrg.supabase_anon_key;
+  const missingConnection = !activeOrgHasConnection;
   const pendingSetup = !activeOrg.setup_completed;
 
   if (!missingConnection && !pendingSetup) {
