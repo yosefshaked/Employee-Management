@@ -38,15 +38,6 @@ function isSupabaseDuplicateError(error) {
   return message.includes('duplicate key value') || message.includes('already exists');
 }
 
-function isSupabaseRecursionError(error) {
-  if (!error) return false;
-  if (typeof error.code === 'string' && error.code === '42P17') {
-    return true;
-  }
-  const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
-  return message.includes('infinite recursion detected');
-}
-
 function resolveSupabaseErrorMessage(error, {
   duplicateMessage,
   permissionMessage,
@@ -73,33 +64,6 @@ function resolveSupabaseErrorMessage(error, {
   }
 
   return fallbackMessage || 'פעולה נכשלה. נסה שוב.';
-}
-
-function generateUuid() {
-  if (typeof crypto !== 'undefined') {
-    if (typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID();
-    }
-    if (typeof crypto.getRandomValues === 'function') {
-      const array = new Uint8Array(16);
-      crypto.getRandomValues(array);
-      array[6] = (array[6] & 0x0f) | 0x40;
-      array[8] = (array[8] & 0x3f) | 0x80;
-      const hex = Array.from(array, (byte) => byte.toString(16).padStart(2, '0'));
-      return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex
-        .slice(8, 10)
-        .join('')}-${hex.slice(10, 16).join('')}`;
-    }
-  }
-  let timestamp = Date.now();
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
-    const random = (timestamp + Math.random() * 16) % 16 | 0;
-    timestamp = Math.floor(timestamp / 16);
-    if (char === 'x') {
-      return random.toString(16);
-    }
-    return ((random & 0x3) | 0x8).toString(16);
-  });
 }
 
 function maskForDebug(value) {
@@ -689,18 +653,17 @@ export function OrgProvider({ children }) {
 
   const createOrganization = useCallback(
     async ({ name, supabaseUrl, supabaseAnonKey, policyLinks = [], legalSettings = {} }) => {
-      let userId = user?.id || session?.user?.id || null;
-
-      if (!userId) {
+      if (!user?.id && !session?.user?.id) {
         const { data: authUser, error: authError } = await coreSupabase.auth.getUser();
         if (authError) {
           console.error('Failed to resolve authenticated user for organization creation', authError);
           throw new Error('לא ניתן היה לאמת את המשתמש. נסה להתחבר מחדש.');
         }
-        userId = authUser?.user?.id || null;
-      }
 
-      if (!userId) throw new Error('אין משתמש מחובר.');
+        if (!authUser?.user?.id) {
+          throw new Error('אין משתמש מחובר.');
+        }
+      }
 
       const trimmedName = (name || '').trim();
       if (!trimmedName) throw new Error('יש להזין שם ארגון.');
@@ -734,78 +697,57 @@ export function OrgProvider({ children }) {
       const now = new Date().toISOString();
 
       try {
-        const orgId = generateUuid();
-        const insertPayload = {
-          id: orgId,
-          name: trimmedName,
-          supabase_url: payload.supabaseUrl || null,
-          supabase_anon_key: payload.supabaseAnonKey || null,
-          policy_links: payload.policyLinks || [],
-          legal_settings: payload.legalSettings || {},
-          created_by: userId,
-          created_at: now,
-          updated_at: now,
-        };
+        const { data: rpcResult, error: rpcError } = await coreSupabase.rpc('create_organization', {
+          p_name: trimmedName,
+        });
 
-        const { data: orgData, error: orgError } = await coreSupabase
-          .from('organizations')
-          .insert(insertPayload)
-          .select('id')
-          .single();
-
-        let effectiveOrgId = orgData?.id || null;
-
-        if (orgError) {
-          console.error('Supabase rejected organization insert', orgError);
-          const recursionDetected = isSupabaseRecursionError(orgError);
-
-          if (!recursionDetected) {
-            const message = resolveSupabaseErrorMessage(orgError, {
-              duplicateMessage: 'ארגון עם שם זה כבר קיים.',
-              permissionMessage: 'אין לך הרשאות ליצור ארגון חדש.',
-              fallbackMessage: 'יצירת הארגון נכשלה. נסה שוב.',
-            });
-            throw new Error(message);
-          }
-
-          console.warn('Retrying organization insert without returning due to recursive policy error.');
-
-          const { error: minimalError } = await coreSupabase
-            .from('organizations')
-            .insert({ ...insertPayload }, { returning: 'minimal' });
-
-          if (minimalError) {
-            console.error('Supabase rejected organization insert without returning data', minimalError);
-            const message = resolveSupabaseErrorMessage(minimalError, {
-              duplicateMessage: 'ארגון עם שם זה כבר קיים.',
-              permissionMessage: 'אין לך הרשאות ליצור ארגון חדש.',
-              fallbackMessage: 'יצירת הארגון נכשלה. נסה שוב.',
-            });
-            throw new Error(message);
-          }
-
-          effectiveOrgId = orgId;
+        if (rpcError) {
+          console.error('Supabase create_organization RPC failed', rpcError);
+          const message = resolveSupabaseErrorMessage(rpcError, {
+            duplicateMessage: 'ארגון עם שם זה כבר קיים.',
+            permissionMessage: 'אין לך הרשאות ליצור ארגון חדש.',
+            fallbackMessage: 'יצירת הארגון נכשלה. נסה שוב.',
+          });
+          throw new Error(message);
         }
+
+        const effectiveOrgId = typeof rpcResult === 'string' ? rpcResult : rpcResult?.id || null;
 
         if (!effectiveOrgId) {
           throw new Error('שרת Supabase לא החזיר מזהה ארגון לאחר יצירה.');
         }
 
-        const { error: membershipError } = await coreSupabase.from('org_memberships').insert({
-          org_id: effectiveOrgId,
-          user_id: userId,
-          role: 'admin',
-          created_at: now,
-        });
+        const updates = {};
 
-        if (membershipError) {
-          if (isSupabaseDuplicateError(membershipError)) {
-            console.info('Creator already had a membership for the new organization; continuing.');
-          } else {
-            console.error('Failed to insert creator membership for new organization', membershipError);
-            const message = resolveSupabaseErrorMessage(membershipError, {
-              permissionMessage: 'אין לך הרשאות לשייך משתמש לארגון החדש.',
-              fallbackMessage: 'שגיאה בשיוך המשתמש לארגון החדש.',
+        if (Object.prototype.hasOwnProperty.call(payload, 'supabaseUrl')) {
+          updates.supabase_url = payload.supabaseUrl || null;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(payload, 'supabaseAnonKey')) {
+          updates.supabase_anon_key = payload.supabaseAnonKey || null;
+        }
+
+        if (Object.prototype.hasOwnProperty.call(payload, 'policyLinks')) {
+          updates.policy_links = payload.policyLinks || [];
+        }
+
+        if (Object.prototype.hasOwnProperty.call(payload, 'legalSettings')) {
+          updates.legal_settings = payload.legalSettings || {};
+        }
+
+        if (Object.keys(updates).length) {
+          updates.updated_at = now;
+
+          const { error: updateError } = await coreSupabase
+            .from('organizations')
+            .update(updates)
+            .eq('id', effectiveOrgId);
+
+          if (updateError) {
+            console.error('Failed to update organization metadata after creation', updateError);
+            const message = resolveSupabaseErrorMessage(updateError, {
+              permissionMessage: 'אין לך הרשאות לעדכן את הארגון החדש.',
+              fallbackMessage: 'עדכון פרטי הארגון נכשל לאחר היצירה.',
             });
             throw new Error(message);
           }
