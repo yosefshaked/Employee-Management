@@ -19,11 +19,71 @@ function maskForLog(value) {
   return `${stringValue.slice(0, 2)}••••${stringValue.slice(-2)}`;
 }
 
+function normalizeHeaderValue(rawValue) {
+  if (!rawValue) {
+    return undefined;
+  }
+
+  if (typeof rawValue === 'string') {
+    return rawValue;
+  }
+
+  if (Array.isArray(rawValue)) {
+    for (const entry of rawValue) {
+      const normalized = normalizeHeaderValue(entry);
+      if (typeof normalized === 'string' && normalized.length > 0) {
+        return normalized;
+      }
+    }
+    return undefined;
+  }
+
+  if (typeof rawValue === 'object') {
+    if (typeof rawValue.value === 'string') {
+      return rawValue.value;
+    }
+
+    if (Array.isArray(rawValue.value)) {
+      const normalized = normalizeHeaderValue(rawValue.value);
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    if (typeof rawValue[0] === 'string') {
+      return rawValue[0];
+    }
+
+    if (typeof rawValue.toString === 'function' && rawValue.toString !== Object.prototype.toString) {
+      const candidate = rawValue.toString();
+      if (typeof candidate === 'string' && candidate && candidate !== '[object Object]') {
+        return candidate;
+      }
+    }
+
+    if (typeof rawValue[Symbol.iterator] === 'function') {
+      for (const entry of rawValue) {
+        const normalized = normalizeHeaderValue(entry);
+        if (typeof normalized === 'string' && normalized.length > 0) {
+          return normalized;
+        }
+      }
+    }
+  }
+
+  if (typeof rawValue === 'number' || typeof rawValue === 'boolean') {
+    return String(rawValue);
+  }
+
+  return undefined;
+}
+
 function extractBearerToken(rawValue) {
-  if (typeof rawValue !== 'string') {
+  const normalized = normalizeHeaderValue(rawValue);
+  if (typeof normalized !== 'string') {
     return null;
   }
-  const trimmed = rawValue.trim();
+  const trimmed = normalized.trim();
   if (!trimmed) {
     return null;
   }
@@ -40,48 +100,66 @@ function resolveHeaderValue(headers, name) {
   }
 
   if (typeof headers.get === 'function') {
-    const directValue = headers.get(name);
-    if (directValue) {
+    const directValue = normalizeHeaderValue(headers.get(name));
+    if (typeof directValue === 'string' && directValue.length > 0) {
       return directValue;
     }
 
-    const lowerValue = headers.get(name.toLowerCase());
-    if (lowerValue) {
+    const lowerValue = normalizeHeaderValue(headers.get(name.toLowerCase()));
+    if (typeof lowerValue === 'string' && lowerValue.length > 0) {
       return lowerValue;
     }
   }
 
   if (typeof headers === 'object') {
-    if (headers[name]) {
-      return headers[name];
+    if (Object.prototype.hasOwnProperty.call(headers, name)) {
+      const directValue = normalizeHeaderValue(headers[name]);
+      if (typeof directValue === 'string' && directValue.length > 0) {
+        return directValue;
+      }
     }
 
     const lowerName = typeof name === 'string' ? name.toLowerCase() : name;
-    if (lowerName !== name && headers[lowerName]) {
-      return headers[lowerName];
+    if (lowerName !== name && Object.prototype.hasOwnProperty.call(headers, lowerName)) {
+      const lowerValue = normalizeHeaderValue(headers[lowerName]);
+      if (typeof lowerValue === 'string' && lowerValue.length > 0) {
+        return lowerValue;
+      }
     }
 
     const upperName = typeof name === 'string' ? name.toUpperCase() : name;
-    if (upperName !== name && headers[upperName]) {
-      return headers[upperName];
+    if (upperName !== name && Object.prototype.hasOwnProperty.call(headers, upperName)) {
+      const upperValue = normalizeHeaderValue(headers[upperName]);
+      if (typeof upperValue === 'string' && upperValue.length > 0) {
+        return upperValue;
+      }
     }
   }
 
   if (typeof headers?.toJSON === 'function') {
     const serialized = headers.toJSON();
     if (serialized && typeof serialized === 'object') {
-      if (serialized[name]) {
-        return serialized[name];
+      if (Object.prototype.hasOwnProperty.call(serialized, name)) {
+        const directValue = normalizeHeaderValue(serialized[name]);
+        if (typeof directValue === 'string' && directValue.length > 0) {
+          return directValue;
+        }
       }
 
       const lowerName = typeof name === 'string' ? name.toLowerCase() : name;
-      if (lowerName !== name && serialized[lowerName]) {
-        return serialized[lowerName];
+      if (lowerName !== name && Object.prototype.hasOwnProperty.call(serialized, lowerName)) {
+        const lowerValue = normalizeHeaderValue(serialized[lowerName]);
+        if (typeof lowerValue === 'string' && lowerValue.length > 0) {
+          return lowerValue;
+        }
       }
 
       const upperName = typeof name === 'string' ? name.toUpperCase() : name;
-      if (upperName !== name && serialized[upperName]) {
-        return serialized[upperName];
+      if (upperName !== name && Object.prototype.hasOwnProperty.call(serialized, upperName)) {
+        const upperValue = normalizeHeaderValue(serialized[upperName]);
+        if (typeof upperValue === 'string' && upperValue.length > 0) {
+          return upperValue;
+        }
       }
     }
   }
