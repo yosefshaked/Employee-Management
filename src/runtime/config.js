@@ -9,6 +9,8 @@ let lastDiagnostics = {
   ok: false,
   error: null,
   timestamp: null,
+  accessToken: null,
+  accessTokenPreview: null,
 };
 
 export class MissingRuntimeConfigError extends Error {
@@ -66,7 +68,21 @@ function getStoredOrgId() {
   }
 }
 
-function updateDiagnostics({ orgId, status, scope, ok, error }) {
+function buildTokenPreview(token) {
+  if (!token) {
+    return null;
+  }
+  const trimmed = String(token).trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.length <= 8) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, 4)}…${trimmed.slice(-4)}`;
+}
+
+function updateDiagnostics({ orgId, status, scope, ok, error, accessToken }) {
   lastDiagnostics = {
     orgId: orgId || null,
     status: typeof status === 'number' ? status : null,
@@ -74,6 +90,8 @@ function updateDiagnostics({ orgId, status, scope, ok, error }) {
     ok,
     error: error || null,
     timestamp: Date.now(),
+    accessToken: accessToken || null,
+    accessTokenPreview: buildTokenPreview(accessToken),
   };
 }
 
@@ -88,7 +106,7 @@ function buildCacheKey(scope, orgId) {
   return 'app';
 }
 
-function ensureJsonResponse(response, orgId, scope) {
+function ensureJsonResponse(response, orgId, scope, accessToken) {
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.toLowerCase().includes('application/json')) {
     updateDiagnostics({
@@ -97,6 +115,7 @@ function ensureJsonResponse(response, orgId, scope) {
       scope,
       ok: false,
       error: 'response-not-json',
+      accessToken,
     });
     throw new MissingRuntimeConfigError(
       'הפונקציה לא מחזירה JSON תקין. ודא ש-/api/config מחזירה תשובה מסוג application/json.',
@@ -136,13 +155,14 @@ export async function loadRuntimeConfig(options = {}) {
       scope,
       ok: false,
       error: 'network-failure',
+      accessToken,
     });
     throw new MissingRuntimeConfigError(
       'לא ניתן ליצור קשר עם פונקציית /api/config. ודא שהיא פרוסה ופועלת.',
     );
   }
 
-  ensureJsonResponse(response, storedOrgId, scope);
+  ensureJsonResponse(response, storedOrgId, scope, accessToken);
 
   let payload;
   try {
@@ -154,6 +174,7 @@ export async function loadRuntimeConfig(options = {}) {
       scope,
       ok: false,
       error: 'invalid-json',
+      accessToken,
     });
     throw new MissingRuntimeConfigError(
       'לא ניתן לפענח את תשובת /api/config. ודא שהפונקציה מחזירה JSON תקין.',
@@ -170,6 +191,7 @@ export async function loadRuntimeConfig(options = {}) {
       scope,
       ok: false,
       error: serverMessage,
+      accessToken,
     });
     throw new MissingRuntimeConfigError(serverMessage);
   }
@@ -182,6 +204,7 @@ export async function loadRuntimeConfig(options = {}) {
       scope,
       ok: false,
       error: 'missing-keys',
+      accessToken,
     });
     throw new MissingRuntimeConfigError(
       'הפונקציה לא סיפקה supabase_url ו-anon_key. עדכן את /api/config.',
@@ -193,18 +216,19 @@ export async function loadRuntimeConfig(options = {}) {
     orgId: scope === 'org' ? storedOrgId || null : null,
   };
 
-  CACHE.set(cacheKey, normalized);
-  if (scope === 'app') {
-    setRuntimeConfig(normalized);
-  }
-
   updateDiagnostics({
     orgId: storedOrgId,
     status: response.status,
     scope,
     ok: true,
     error: null,
+    accessToken,
   });
+
+  CACHE.set(cacheKey, normalized);
+  if (scope === 'app') {
+    setRuntimeConfig(normalized);
+  }
 
   return normalized;
 }
