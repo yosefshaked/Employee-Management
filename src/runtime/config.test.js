@@ -40,7 +40,8 @@ describe('loadRuntimeConfig', () => {
     const request = calls[0];
     assert.equal(request.url, '/api/org/org-456/keys');
     assert.equal(request.options.method, 'GET');
-    assert.equal(request.options.headers.Authorization, 'Bearer token-123');
+    assert.equal(request.options.headers['X-Supabase-Authorization'], 'Bearer token-123');
+    assert.equal('Authorization' in request.options.headers, false);
     assert.equal('x-org-id' in request.options.headers, false);
     assert.equal(result.supabaseUrl, 'https://example-org.supabase.co');
     assert.equal(result.supabaseAnonKey, 'anon-key-123');

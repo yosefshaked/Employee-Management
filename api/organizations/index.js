@@ -20,6 +20,21 @@ function maskForLog(value) {
   return `${stringValue.slice(0, 2)}••••${stringValue.slice(-2)}`;
 }
 
+function extractBearerToken(rawValue) {
+  if (typeof rawValue !== 'string') {
+    return null;
+  }
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (!trimmed.toLowerCase().startsWith('bearer ')) {
+    return null;
+  }
+  const token = trimmed.slice('bearer '.length).trim();
+  return token || null;
+}
+
 function normalizePolicyLinks(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -74,13 +89,23 @@ export default async function (context, req) {
     return;
   }
 
-  const authorization = req.headers?.authorization || req.headers?.Authorization || '';
-  if (typeof authorization !== 'string' || !authorization.startsWith('Bearer ')) {
-    jsonResponse(context, 401, { error: 'missing_or_invalid_token' });
-    return;
+  const headers = req.headers || {};
+  const candidates = [
+    headers['x-supabase-authorization'],
+    headers['X-Supabase-Authorization'],
+    headers['x-supabase-auth'],
+    headers.authorization,
+    headers.Authorization,
+  ];
+
+  let token = null;
+  for (const value of candidates) {
+    token = extractBearerToken(value);
+    if (token) {
+      break;
+    }
   }
 
-  const token = authorization.slice('Bearer '.length).trim();
   if (!token) {
     jsonResponse(context, 401, { error: 'missing_or_invalid_token' });
     return;

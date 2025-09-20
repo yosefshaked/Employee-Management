@@ -19,16 +19,39 @@ function maskForLog(value) {
   return `${stringValue.slice(0, 2)}••••${stringValue.slice(-2)}`;
 }
 
-function readBearerToken(req) {
-  const authorization = req.headers?.authorization || req.headers?.Authorization || '';
-  if (typeof authorization !== 'string') {
+function extractBearerToken(rawValue) {
+  if (typeof rawValue !== 'string') {
     return null;
   }
-  if (!authorization.startsWith('Bearer ')) {
+  const trimmed = rawValue.trim();
+  if (!trimmed) {
     return null;
   }
-  const token = authorization.slice('Bearer '.length).trim();
+  if (!trimmed.toLowerCase().startsWith('bearer ')) {
+    return null;
+  }
+  const token = trimmed.slice('bearer '.length).trim();
   return token || null;
+}
+
+function readBearerToken(req) {
+  const headers = req.headers || {};
+  const candidates = [
+    headers['x-supabase-authorization'],
+    headers['X-Supabase-Authorization'],
+    headers['x-supabase-auth'],
+    headers.authorization,
+    headers.Authorization,
+  ];
+
+  for (const value of candidates) {
+    const token = extractBearerToken(value);
+    if (token) {
+      return token;
+    }
+  }
+
+  return null;
 }
 
 function ensureTrailingSlashRemoved(url) {
