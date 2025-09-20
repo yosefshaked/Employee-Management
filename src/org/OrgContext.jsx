@@ -11,60 +11,11 @@ import { toast } from 'sonner';
 import { coreSupabase, OrgSupabaseProvider } from '@/supabaseClient.js';
 import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
+import { createOrganization as createOrganizationRpc } from '@/api/organizations.js';
+import { mapSupabaseError } from '@/org/errors.js';
 
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const LEGACY_STORAGE_PREFIX = 'employee-management:last-org';
-
-function isSupabasePermissionError(error) {
-  if (!error) return false;
-  const statusCandidate =
-    typeof error.status === 'number' ? error.status : Number(error.statusCode);
-  if (Number.isFinite(statusCandidate) && statusCandidate === 403) {
-    return true;
-  }
-  if (typeof error.code === 'string' && error.code === '42501') {
-    return true;
-  }
-  const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
-  return message.includes('row-level security') || message.includes('permission denied');
-}
-
-function isSupabaseDuplicateError(error) {
-  if (!error) return false;
-  if (typeof error.code === 'string' && error.code === '23505') {
-    return true;
-  }
-  const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
-  return message.includes('duplicate key value') || message.includes('already exists');
-}
-
-function resolveSupabaseErrorMessage(error, {
-  duplicateMessage,
-  permissionMessage,
-  fallbackMessage,
-}) {
-  if (!error) {
-    return fallbackMessage || 'פעולה נכשלה. נסה שוב.';
-  }
-
-  if (isSupabaseDuplicateError(error) && duplicateMessage) {
-    return duplicateMessage;
-  }
-
-  if (isSupabasePermissionError(error) && permissionMessage) {
-    return permissionMessage;
-  }
-
-  if (typeof error.message === 'string' && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  if (typeof error.details === 'string' && error.details.trim()) {
-    return error.details.trim();
-  }
-
-  return fallbackMessage || 'פעולה נכשלה. נסה שוב.';
-}
 
 function maskForDebug(value) {
   if (!value) return '';
@@ -665,10 +616,12 @@ export function OrgProvider({ children }) {
         }
       }
 
-      const trimmedName = (name || '').trim();
-      if (!trimmedName) throw new Error('יש להזין שם ארגון.');
+      const trimmedName = typeof name === 'string' ? name.trim() : '';
+      if (!trimmedName) {
+        throw new Error('יש להזין שם ארגון.');
+      }
 
-      const payload = { name: trimmedName };
+      const payload = {};
 
       if (typeof supabaseUrl === 'string' && supabaseUrl.trim()) {
         payload.supabaseUrl = supabaseUrl.trim();
@@ -697,25 +650,7 @@ export function OrgProvider({ children }) {
       const now = new Date().toISOString();
 
       try {
-        const { data: rpcResult, error: rpcError } = await coreSupabase.rpc('create_organization', {
-          p_name: trimmedName,
-        });
-
-        if (rpcError) {
-          console.error('Supabase create_organization RPC failed', rpcError);
-          const message = resolveSupabaseErrorMessage(rpcError, {
-            duplicateMessage: 'ארגון עם שם זה כבר קיים.',
-            permissionMessage: 'אין לך הרשאות ליצור ארגון חדש.',
-            fallbackMessage: 'יצירת הארגון נכשלה. נסה שוב.',
-          });
-          throw new Error(message);
-        }
-
-        const effectiveOrgId = typeof rpcResult === 'string' ? rpcResult : rpcResult?.id || null;
-
-        if (!effectiveOrgId) {
-          throw new Error('שרת Supabase לא החזיר מזהה ארגון לאחר יצירה.');
-        }
+        const effectiveOrgId = await createOrganizationRpc(trimmedName);
 
         const updates = {};
 
@@ -745,11 +680,7 @@ export function OrgProvider({ children }) {
 
           if (updateError) {
             console.error('Failed to update organization metadata after creation', updateError);
-            const message = resolveSupabaseErrorMessage(updateError, {
-              permissionMessage: 'אין לך הרשאות לעדכן את הארגון החדש.',
-              fallbackMessage: 'עדכון פרטי הארגון נכשל לאחר היצירה.',
-            });
-            throw new Error(message);
+            throw updateError;
           }
         }
 
@@ -758,12 +689,11 @@ export function OrgProvider({ children }) {
         await refreshOrganizations({ keepSelection: false });
         await selectOrg(effectiveOrgId);
         toast.success('הארגון נוצר בהצלחה.');
+        return effectiveOrgId;
       } catch (error) {
         console.error('Failed to create organization', error);
-        if (error instanceof Error) {
-          throw error;
-        }
-        throw new Error('יצירת הארגון נכשלה. נסה שוב.');
+        const message = mapSupabaseError(error);
+        throw new Error(message);
       }
     },
     [user, session, refreshOrganizations, selectOrg, syncOrgSettings],
