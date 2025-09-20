@@ -8,7 +8,7 @@ import React, {
   useState,
 } from 'react';
 import { toast } from 'sonner';
-import { coreSupabase, OrgSupabaseProvider } from '@/supabaseClient.js';
+import { coreSupabase, OrgSupabaseProvider, maskSupabaseCredential } from '@/supabaseClient.js';
 import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { createOrganization as createOrganizationRpc } from '@/api/organizations.js';
@@ -411,6 +411,13 @@ export function OrgProvider({ children }) {
           return normalized;
         });
         setConfigStatus('success');
+        console.info('[OrgSupabase]', {
+          action: 'config-fetched',
+          orgId,
+          supabaseUrl: maskSupabaseCredential(config.supabaseUrl),
+          anonKey: maskSupabaseCredential(config.supabaseAnonKey),
+          source: config.source || 'unknown',
+        });
       } catch (error) {
         if (configRequestRef.current !== requestId) {
           return;

@@ -12,9 +12,47 @@ export const coreSupabase = createClient(runtimeConfig.supabaseUrl, runtimeConfi
 export const SUPABASE_URL = runtimeConfig.supabaseUrl;
 export const SUPABASE_ANON_KEY = runtimeConfig.supabaseAnonKey;
 
+const ORG_CLIENT_CACHE = new Map();
+
 let activeOrgConfig = null;
 let activeOrgClient = null;
 const listeners = new Set();
+
+export function maskSupabaseCredential(value) {
+  if (!value) return '';
+  const stringValue = String(value);
+  if (stringValue.length <= 6) return '••••';
+  return `${stringValue.slice(0, 3)}…${stringValue.slice(-3)}`;
+}
+
+function buildOrgCacheKey(config) {
+  return `${config.supabaseUrl}::${config.supabaseAnonKey}`;
+}
+
+function getOrCreateOrgClient(config) {
+  const cacheKey = buildOrgCacheKey(config);
+  if (ORG_CLIENT_CACHE.has(cacheKey)) {
+    return { client: ORG_CLIENT_CACHE.get(cacheKey), cached: true };
+  }
+
+  const client = createClient(config.supabaseUrl, config.supabaseAnonKey);
+  ORG_CLIENT_CACHE.set(cacheKey, client);
+  return { client, cached: false };
+}
+
+function logOrgClientUpdate(action, config, options = {}) {
+  const info = {
+    action,
+    supabaseUrl: maskSupabaseCredential(config?.supabaseUrl),
+    anonKey: maskSupabaseCredential(config?.supabaseAnonKey),
+  };
+
+  if (options.cached !== undefined) {
+    info.cached = options.cached;
+  }
+
+  console.info('[OrgSupabase]', info);
+}
 
 function normalizeOrgConfig(raw) {
   if (!raw) return null;
@@ -85,6 +123,7 @@ export function OrgSupabaseProvider({ config, children }) {
           return current;
         }
         updateActiveOrgState(null, null);
+        logOrgClientUpdate('cleared', current.config || null);
         return { client: null, config: null };
       });
       return;
@@ -97,11 +136,13 @@ export function OrgSupabaseProvider({ config, children }) {
         current.config.supabaseAnonKey === normalized.supabaseAnonKey
       ) {
         updateActiveOrgState(current.client, current.config);
+        logOrgClientUpdate('unchanged', normalized, { cached: true });
         return current;
       }
 
-      const nextClient = createClient(normalized.supabaseUrl, normalized.supabaseAnonKey);
+      const { client: nextClient, cached } = getOrCreateOrgClient(normalized);
       updateActiveOrgState(nextClient, normalized);
+      logOrgClientUpdate('activated', normalized, { cached });
       return { client: nextClient, config: normalized };
     });
   }, [config, config?.supabaseUrl, config?.supabaseAnonKey]);
