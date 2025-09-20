@@ -127,7 +127,7 @@ export default async function (context, req) {
 
   try {
     const { data: orgData, error: orgError } = await supabase
-      .from('app_organizations')
+      .from('organizations')
       .insert({
         name: trimmedName,
         supabase_url: incomingSupabaseUrl || null,
@@ -146,7 +146,7 @@ export default async function (context, req) {
     }
 
     const { error: membershipError } = await supabase
-      .from('app_org_memberships')
+      .from('org_memberships')
       .insert({
         org_id: orgData.id,
         user_id: userId,

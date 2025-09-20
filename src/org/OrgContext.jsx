@@ -170,10 +170,10 @@ export function OrgProvider({ children }) {
 
     try {
       const membershipPromise = coreSupabase
-        .from('app_org_memberships')
+        .from('org_memberships')
         .select(
           `id, role, org_id, user_id, created_at,
-           organizations:app_organizations (
+           organizations:organizations (
              id, name, slug, supabase_url, supabase_anon_key,
              policy_links, legal_settings, setup_completed, verified_at,
              created_at, updated_at
@@ -184,10 +184,10 @@ export function OrgProvider({ children }) {
 
       const invitesPromise = user.email
         ? coreSupabase
-            .from('app_org_invitations')
+            .from('org_invitations')
             .select(
               `id, org_id, email, status, invited_by, created_at, expires_at,
-               organizations:app_organizations (id, name)`,
+               organizations:organizations (id, name)`,
             )
             .eq('email', user.email.toLowerCase())
             .in('status', ['pending', 'sent'])
@@ -229,28 +229,83 @@ export function OrgProvider({ children }) {
       }
 
       try {
-        const membersPromise = coreSupabase
-          .from('app_org_memberships')
-          .select(
-            `id, org_id, user_id, role, created_at, invited_at, joined_at, status,
-             profiles:app_user_profiles (id, email, full_name)`,
-          )
-          .eq('org_id', orgId)
-          .order('created_at', { ascending: true });
-
-        const invitesPromise = coreSupabase
-          .from('app_org_invitations')
-          .select('id, org_id, email, status, invited_by, created_at, expires_at')
-          .eq('org_id', orgId)
-          .in('status', ['pending', 'sent'])
-          .order('created_at', { ascending: true });
-
-        const [membersResponse, invitesResponse] = await Promise.all([membersPromise, invitesPromise]);
+        const [membersResponse, invitesResponse] = await Promise.all([
+          coreSupabase
+            .from('org_memberships')
+            .select('id, org_id, user_id, role, created_at, invited_at, joined_at, status')
+            .eq('org_id', orgId)
+            .order('created_at', { ascending: true }),
+          coreSupabase
+            .from('org_invitations')
+            .select('id, org_id, email, status, invited_by, created_at, expires_at')
+            .eq('org_id', orgId)
+            .in('status', ['pending', 'sent'])
+            .order('created_at', { ascending: true }),
+        ]);
 
         if (membersResponse.error) throw membersResponse.error;
         if (invitesResponse.error) throw invitesResponse.error;
 
-        setOrgMembers((membersResponse.data || []).map(normalizeMember).filter(Boolean));
+        const membersData = membersResponse.data || [];
+        const userIds = membersData.map((member) => member.user_id).filter(Boolean);
+        const profileMap = new Map();
+
+        if (userIds.length) {
+          const profileTablesToTry = ['user_profiles', 'profiles'];
+
+          for (const tableName of profileTablesToTry) {
+            const { data: profileData, error: profileError } = await coreSupabase
+              .from(tableName)
+              .select('user_id, email, full_name')
+              .in('user_id', userIds);
+
+            if (profileError) {
+              const missingTableCodes = new Set(['PGRST204', 'PGRST205', '42P01']);
+              const missingTable =
+                missingTableCodes.has(profileError.code) ||
+                (typeof profileError.message === 'string' &&
+                  (profileError.message.includes('Could not find the table') ||
+                    profileError.message.includes('does not exist')));
+
+              if (missingTable) {
+                continue;
+              }
+
+              console.warn(`Failed to load user profiles from ${tableName}`, profileError);
+              break;
+            }
+
+            (profileData || []).forEach((profile) => {
+              profileMap.set(profile.user_id, {
+                id: profile.user_id,
+                email: profile.email || null,
+                full_name: profile.full_name || profile.email || null,
+                name: profile.full_name || profile.email || null,
+              });
+            });
+
+            if (profileMap.size) {
+              break;
+            }
+          }
+        }
+
+        const normalizedMembers = membersData
+          .map((member) => {
+            const profile = profileMap.get(member.user_id);
+            if (profile) {
+              return normalizeMember({
+                ...member,
+                profile,
+                profiles: profile,
+                user_profile: profile,
+              });
+            }
+            return normalizeMember(member);
+          })
+          .filter(Boolean);
+
+        setOrgMembers(normalizedMembers);
         setOrgInvites((invitesResponse.data || []).map(normalizeInvite).filter(Boolean));
       } catch (directoryError) {
         console.error('Failed to load organization directory', directoryError);
@@ -495,7 +550,6 @@ export function OrgProvider({ children }) {
   const createOrganization = useCallback(
     async ({ name, supabaseUrl, supabaseAnonKey, policyLinks = [], legalSettings = {} }) => {
       if (!user) throw new Error('אין משתמש מחובר.');
-      if (!accessToken) throw new Error('חיבור אימות חסר. היכנס מחדש.');
 
       const trimmedName = (name || '').trim();
       if (!trimmedName) throw new Error('יש להזין שם ארגון.');
@@ -526,49 +580,66 @@ export function OrgProvider({ children }) {
         payload.legalSettings = legalSettings;
       }
 
-      let response;
+      const now = new Date().toISOString();
+
       try {
-        response = await fetch('/api/organizations', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify(payload),
-        });
-      } catch (networkError) {
-        console.error('Failed to reach organization creation API', networkError);
-        throw new Error('יצירת הארגון נכשלה. בדוק את החיבור לרשת ונסה שוב.');
-      }
+        const { data: orgData, error: orgError } = await coreSupabase
+          .from('organizations')
+          .insert({
+            name: trimmedName,
+            supabase_url: payload.supabaseUrl || null,
+            supabase_anon_key: payload.supabaseAnonKey || null,
+            policy_links: payload.policyLinks || [],
+            legal_settings: payload.legalSettings || {},
+            created_by: user.id,
+            created_at: now,
+            updated_at: now,
+          })
+          .select('id')
+          .single();
 
-      let body;
-      try {
-        body = await response.json();
-      } catch (parseError) {
-        console.error('Organization creation API returned a non-JSON response', parseError);
-        throw new Error('שרת ה-API החזיר תגובה שגויה בעת יצירת הארגון.');
-      }
+        if (orgError) {
+          if (orgError.code === '23505') {
+            throw new Error('ארגון עם שם זה כבר קיים.');
+          }
+          if (orgError.code === '42501') {
+            throw new Error('אין לך הרשאות ליצור ארגון חדש.');
+          }
+          throw new Error(orgError.message || 'יצירת הארגון נכשלה. נסה שוב.');
+        }
 
-      if (!response.ok) {
-        console.error('Organization creation API responded with an error', {
-          status: response.status,
-          body,
-        });
-        const message = typeof body?.message === 'string'
-          ? body.message
-          : 'יצירת הארגון נכשלה. נסה שוב.';
-        throw new Error(message);
-      }
+        const orgId = orgData?.id;
+        if (!orgId) {
+          throw new Error('שרת Supabase לא החזיר מזהה ארגון לאחר יצירה.');
+        }
 
-      const orgId = body?.id || null;
+        const { error: membershipError } = await coreSupabase
+          .from('org_memberships')
+          .insert({
+            org_id: orgId,
+            user_id: user.id,
+            role: 'admin',
+            created_at: now,
+          });
 
-      await refreshOrganizations({ keepSelection: false });
-      if (orgId) {
+        if (membershipError && membershipError.code !== '23505') {
+          throw new Error(membershipError.message || 'שגיאה בשיוך המשתמש לארגון החדש.');
+        }
+
+        await syncOrgSettings(orgId, payload.supabaseUrl, payload.supabaseAnonKey);
+
+        await refreshOrganizations({ keepSelection: false });
         await selectOrg(orgId);
+        toast.success('הארגון נוצר בהצלחה.');
+      } catch (error) {
+        console.error('Failed to create organization', error);
+        if (error instanceof Error) {
+          throw error;
+        }
+        throw new Error('יצירת הארגון נכשלה. נסה שוב.');
       }
-      toast.success('הארגון נוצר בהצלחה.');
     },
-    [user, accessToken, refreshOrganizations, selectOrg],
+    [user, refreshOrganizations, selectOrg, syncOrgSettings],
   );
 
   const updateOrganizationMetadata = useCallback(
@@ -576,7 +647,7 @@ export function OrgProvider({ children }) {
       if (!orgId) throw new Error('זיהוי ארגון חסר.');
       const payload = { ...updates, updated_at: new Date().toISOString() };
       const { error } = await coreSupabase
-        .from('app_organizations')
+        .from('organizations')
         .update(payload)
         .eq('id', orgId);
       if (error) throw error;
@@ -620,7 +691,7 @@ export function OrgProvider({ children }) {
       if (!normalizedEmail) throw new Error('יש להזין כתובת אימייל תקינה.');
 
       const { data, error } = await coreSupabase
-        .from('app_org_invitations')
+        .from('org_invitations')
         .insert({
           org_id: orgId,
           email: normalizedEmail,
@@ -642,7 +713,7 @@ export function OrgProvider({ children }) {
     async (inviteId) => {
       if (!inviteId) return;
       const { error } = await coreSupabase
-        .from('app_org_invitations')
+        .from('org_invitations')
         .update({ status: 'revoked', revoked_at: new Date().toISOString() })
         .eq('id', inviteId);
       if (error) throw error;
@@ -655,7 +726,7 @@ export function OrgProvider({ children }) {
     async (membershipId) => {
       if (!membershipId) return;
       const { error } = await coreSupabase
-        .from('app_org_memberships')
+        .from('org_memberships')
         .delete()
         .eq('id', membershipId);
       if (error) throw error;
@@ -672,7 +743,7 @@ export function OrgProvider({ children }) {
       if (!inviteId || !user) throw new Error('הזמנה אינה זמינה.');
 
       const { data: inviteData, error: inviteError } = await coreSupabase
-        .from('app_org_invitations')
+        .from('org_invitations')
         .select('id, org_id, status')
         .eq('id', inviteId)
         .maybeSingle();
@@ -687,7 +758,7 @@ export function OrgProvider({ children }) {
       const now = new Date().toISOString();
 
       const { error: membershipError } = await coreSupabase
-        .from('app_org_memberships')
+        .from('org_memberships')
         .insert({
           org_id: inviteData.org_id,
           user_id: user.id,
@@ -700,7 +771,7 @@ export function OrgProvider({ children }) {
       }
 
       const { error: updateError } = await coreSupabase
-        .from('app_org_invitations')
+        .from('org_invitations')
         .update({ status: 'accepted', accepted_at: now })
         .eq('id', inviteId);
 

@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { Plus, Save, Trash2, PlugZap, Sparkles } from 'lucide-react';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/supabaseClient';
 import SetupAssistant from '@/components/settings/SetupAssistant.jsx';
 import OrgMembersCard from '@/components/settings/OrgMembersCard.jsx';
@@ -378,6 +378,12 @@ export default function Settings() {
             wide
             className="max-w-5xl w-[min(100vw-2rem,1080px)] p-0 bg-transparent shadow-none"
           >
+            <DialogHeader className="sr-only">
+              <DialogTitle>אשף הגדרת חיבור Supabase</DialogTitle>
+              <DialogDescription>
+                השלם את ההגדרות והבדיקות כדי לחבר את הארגון הפעיל ל-Supabase.
+              </DialogDescription>
+            </DialogHeader>
             <div className="max-h-[85vh] overflow-y-auto p-2 sm:p-4">
               <SetupAssistant />
             </div>

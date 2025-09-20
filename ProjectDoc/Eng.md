@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.5.2**
-**Last Updated: 2025-10-07**
+**Version: 1.5.3**
+**Last Updated: 2025-10-08**
 
 ## 1. Vision & Purpose
 
@@ -43,7 +43,7 @@ The system is built on a modern client-server architecture, packaged as a standa
 
 ### 2.1. Organization & Membership Model
 
-- The desktop shell keeps a dedicated Supabase project for application metadata. Core tables include `app_organizations`, `app_org_memberships`, and `app_org_invitations`.
+- The desktop shell keeps a dedicated Supabase project for application metadata. Core tables include `organizations`, `org_memberships`, and `org_invitations`.
 - Each organization row stores the Supabase connection (`supabase_url`, `supabase_anon_key`), optional `policy_links` (array of URLs), `legal_settings` (JSON payload for contact email, terms, privacy policy), and lifecycle markers (`setup_completed`, `verified_at`).
 - Membership rows link Supabase Auth `user_id` values to an organization with a `role` (`admin` or `member`). Each user currently belongs to a single organization; switching orgs rewires the runtime Supabase client to the selected connection.
 - Invitation rows record pending emails. Admins can issue invites from **Settings → Org Members**, revoke pending ones, or remove existing members (except themselves).
