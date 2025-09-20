@@ -5,22 +5,22 @@ import { getRuntimeConfigDiagnostics, setRuntimeConfig } from './config.js';
 const ACTION_SUGGESTIONS = {
   'network-failure': [
     'ודא ששרת הפונקציות פועל (למשל באמצעות ‎swa start --api-location api‎ או פריסת Azure פעילה).',
-    'בדוק שאין חסימה ברשת או ב-VPN שמונעת גישה אל ‎/api/config‎.',
+    'בדוק שאין חסימה ברשת או ב-VPN שמונעת גישה אל ‎/api/config‎ או ‎/api/org/:id/keys‎.',
   ],
   'response-not-json': [
-    'הוסף כותרת ‎Content-Type: application/json‎ לתשובת ‎/api/config‎.',
+    'הוסף כותרת ‎Content-Type: application/json‎ לתשובת הפונקציה (‎/api/config‎ או ‎/api/org/:id/keys‎).',
     'ודא שהפונקציה אינה מחזירה HTML של שגיאת שרת במקום JSON.',
   ],
   'invalid-json': [
     'בדוק שאין תווים מודפסים לפני/אחרי ה-JSON (‎console.log‎ או BOM).',
-    'הרץ את הפונקציה ידנית (‎node api/config/index.js‎) כדי לראות את הפלט המדויק.',
+    'הרץ את הפונקציה הרלוונטית (‎node api/config/index.js‎ או ‎node api/org-keys/index.js‎) כדי לראות את הפלט המדויק.',
   ],
   'missing-keys': [
-    'הגדר את ‎APP_SUPABASE_URL‎ ו-‎APP_SUPABASE_ANON_KEY‎ (וכנדרש ‎APP_SUPABASE_SERVICE_ROLE‎) בסביבה.',
+    'הגדר את ‎APP_SUPABASE_URL‎ ו-‎APP_SUPABASE_ANON_KEY‎ בסביבה.',
     'עדכן את ערכי ‎supabase_url‎ ו-‎anon_key‎ בטבלת ‎org_settings‎ או במסך ההגדרות לאחר עליית המערכת.',
   ],
   default: [
-    'בדוק את לוגי הפונקציה ‎/api/config‎ וודא שהיא מחזירה תשובה תקינה.',
+    'בדוק את לוגי הפונקציות ‎/api/config‎ ו-‎/api/org/:id/keys‎ וודא שהן מחזירות תשובה תקינה.',
     'ודא שלמשתמש המחובר יש הרשאות לגשת לפונקציה (JWT בתוקף ומדיניות מתאימה).',
   ],
 };
@@ -50,7 +50,7 @@ function formatTimestamp(timestamp) {
 
 function formatScope(scope) {
   if (scope === 'org') {
-    return 'בקשת ארגון (עם טוקן משתמש ו-‎x-org-id‎)';
+    return 'בקשת ארגון (‎/api/org/:id/keys עם טוקן משתמש‎)';
   }
   return 'בקשת אפליקציה (ללא טוקן)';
 }
@@ -72,7 +72,7 @@ function buildActions({ error, status, scope }, manualToken, manualOrgId) {
   }
 
   if (!manualOrgId.trim() && scope === 'org') {
-    items.push('וודא שכותרת ‎x-org-id‎ נשלחת עם מזהה ארגון תקף בעת הקריאה ל-‎/api/config‎.');
+    items.push('הזן את מזהה הארגון בנתיב ‎/api/org/<org-id>/keys‎ כדי לבדוק את הקריאה הידנית.');
   }
 
   return Array.from(new Set(items));
@@ -121,12 +121,12 @@ function ConfigErrorScreen({ error }) {
   const tokenPreview = hasToken ? (showToken ? trimmedToken : maskToken(trimmedToken)) : diagnostics.accessTokenPreview || 'לא נשלח אסימון';
 
   const curlCommand = useMemo(() => {
-    const baseUrl = `${window.location.origin}/api/config`;
-    const parts = ['curl', '-i', '-H "Accept: application/json"'];
     const trimmedOrg = manualOrgId.trim();
-    if (trimmedOrg) {
-      parts.push(`-H "x-org-id: ${escapeDoubleQuotes(trimmedOrg)}"`);
-    }
+    const endpoint = trimmedOrg
+      ? `/api/org/${encodeURIComponent(trimmedOrg)}/keys`
+      : '/api/config';
+    const baseUrl = `${window.location.origin}${endpoint}`;
+    const parts = ['curl', '-i', '-H "Accept: application/json"'];
     if (trimmedToken) {
       parts.push(`-H "Authorization: Bearer ${escapeDoubleQuotes(trimmedToken)}"`);
     }
@@ -174,14 +174,13 @@ function ConfigErrorScreen({ error }) {
     try {
       const headers = { Accept: 'application/json' };
       const orgId = manualOrgId.trim();
-      if (orgId) {
-        headers['x-org-id'] = orgId;
-      }
       if (trimmedToken) {
         headers.Authorization = `Bearer ${trimmedToken}`;
       }
 
-      const response = await fetch('/api/config', {
+      const endpoint = orgId ? `/api/org/${encodeURIComponent(orgId)}/keys` : '/api/config';
+
+      const response = await fetch(endpoint, {
         method: 'GET',
         headers,
         cache: 'no-store',
@@ -302,7 +301,7 @@ function ConfigErrorScreen({ error }) {
             <code style={styles.tokenValue}>{tokenPreview}</code>
             <div style={styles.tokenActions}>
               <div style={styles.fieldGroup}>
-                <label style={styles.label} htmlFor="org-id-input">x-org-id</label>
+                <label style={styles.label} htmlFor="org-id-input">מזהה ארגון</label>
                 <input
                   id="org-id-input"
                   style={styles.input}
@@ -356,7 +355,7 @@ function ConfigErrorScreen({ error }) {
         </section>
 
         <section style={styles.section}>
-          <h2 style={styles.sectionTitle}>בדיקה ידנית של ‎/api/config‎</h2>
+          <h2 style={styles.sectionTitle}>בדיקה ידנית של פונקציות התצורה</h2>
           <p style={styles.helperText}>
             הפעל את הבדיקה לאחר עדכון ההגדרות. אם הפונקציה חוזרת תקין ניתן לטעון את המערכת כאן ללא ריענון.
           </p>

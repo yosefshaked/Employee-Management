@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.5.3**
-**Last Updated: 2025-10-08**
+**Version: 1.5.4**
+**Last Updated: 2025-10-09**
 
 ## 1. Vision & Purpose
 
@@ -39,7 +39,7 @@ The system is built on a modern client-server architecture, packaged as a standa
 
 *   **Configuration Management:**
     *   Runtime credentials load exclusively from the `/api/config` Azure Function. Without a bearer token the function returns the core Supabase URL and anon key defined by `APP_SUPABASE_URL` and `APP_SUPABASE_ANON_KEY`.
-    *   Organization-specific Supabase URLs and anon keys are resolved on demand through the same endpoint once the client supplies `Authorization: Bearer <token>` and `x-org-id` headers. The function validates membership using `APP_SUPABASE_SERVICE_ROLE` before returning secrets.
+    *   Organization-specific Supabase URLs and anon keys are retrieved via `GET /api/org/<org-id>/keys`, which forwards the caller’s JWT to the Supabase RPC `public.get_org_public_keys` to verify membership before returning secrets.
 
 ### 2.1. Organization & Membership Model
 

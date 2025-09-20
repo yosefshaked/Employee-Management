@@ -106,7 +106,7 @@ function buildCacheKey(scope, orgId) {
   return 'app';
 }
 
-function ensureJsonResponse(response, orgId, scope, accessToken) {
+function ensureJsonResponse(response, orgId, scope, accessToken, endpoint) {
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.toLowerCase().includes('application/json')) {
     updateDiagnostics({
@@ -117,8 +117,9 @@ function ensureJsonResponse(response, orgId, scope, accessToken) {
       error: 'response-not-json',
       accessToken,
     });
+    const endpointLabel = endpoint || '/api/config';
     throw new MissingRuntimeConfigError(
-      'הפונקציה לא מחזירה JSON תקין. ודא ש-/api/config מחזירה תשובה מסוג application/json.',
+      `הפונקציה ${endpointLabel} לא מחזירה JSON תקין. ודא שהיא מחזירה תשובה מסוג application/json.`,
     );
   }
 }
@@ -126,31 +127,55 @@ function ensureJsonResponse(response, orgId, scope, accessToken) {
 export async function loadRuntimeConfig(options = {}) {
   const { accessToken = null, orgId: explicitOrgId = undefined, force = false } = options;
   const scope = accessToken ? 'org' : 'app';
-  const storedOrgId = explicitOrgId ?? getStoredOrgId();
-  const cacheKey = buildCacheKey(scope, storedOrgId);
+  const targetOrgId = scope === 'org' ? explicitOrgId ?? getStoredOrgId() : null;
+  const cacheKey = buildCacheKey(scope, targetOrgId);
 
   if (!force && CACHE.has(cacheKey)) {
     return CACHE.get(cacheKey);
   }
 
   const headers = { Accept: 'application/json' };
-  if (storedOrgId) {
-    headers['x-org-id'] = storedOrgId;
-  }
-  if (accessToken) {
+  let endpoint = '/api/config';
+
+  if (scope === 'org') {
+    if (!targetOrgId) {
+      updateDiagnostics({
+        orgId: null,
+        status: null,
+        scope,
+        ok: false,
+        error: 'missing-org',
+        accessToken,
+      });
+      throw new MissingRuntimeConfigError('לא נמצא ארגון פעיל לטעינת מפתחות Supabase.');
+    }
+
+    if (!accessToken) {
+      updateDiagnostics({
+        orgId: targetOrgId,
+        status: null,
+        scope,
+        ok: false,
+        error: 'missing-token',
+        accessToken,
+      });
+      throw new MissingRuntimeConfigError('נדרשת כניסה מחדש כדי לאמת את בקשת מפתחות הארגון.');
+    }
+
     headers.Authorization = `Bearer ${accessToken}`;
+    endpoint = `/api/org/${encodeURIComponent(targetOrgId)}/keys`;
   }
 
   let response;
   try {
-    response = await fetch('/api/config', {
+    response = await fetch(endpoint, {
       method: 'GET',
       headers,
       cache: 'no-store',
     });
   } catch {
     updateDiagnostics({
-      orgId: storedOrgId,
+      orgId: targetOrgId,
       status: null,
       scope,
       ok: false,
@@ -158,18 +183,18 @@ export async function loadRuntimeConfig(options = {}) {
       accessToken,
     });
     throw new MissingRuntimeConfigError(
-      'לא ניתן ליצור קשר עם פונקציית /api/config. ודא שהיא פרוסה ופועלת.',
+      `לא ניתן ליצור קשר עם הפונקציה ${endpoint}. ודא שהיא פרוסה ופועלת.`,
     );
   }
 
-  ensureJsonResponse(response, storedOrgId, scope, accessToken);
+  ensureJsonResponse(response, targetOrgId, scope, accessToken, endpoint);
 
   let payload;
   try {
     payload = await response.json();
   } catch {
     updateDiagnostics({
-      orgId: storedOrgId,
+      orgId: targetOrgId,
       status: response.status,
       scope,
       ok: false,
@@ -177,16 +202,29 @@ export async function loadRuntimeConfig(options = {}) {
       accessToken,
     });
     throw new MissingRuntimeConfigError(
-      'לא ניתן לפענח את תשובת /api/config. ודא שהפונקציה מחזירה JSON תקין.',
+      `לא ניתן לפענח את תשובת ${endpoint}. ודא שהפונקציה מחזירה JSON תקין.`,
     );
   }
 
   if (!response.ok) {
-    const serverMessage = typeof payload?.error === 'string'
-      ? payload.error
-      : `טעינת ההגדרות נכשלה (סטטוס ${response.status}).`;
+    let serverMessage;
+
+    if (scope === 'org') {
+      if (response.status === 404) {
+        serverMessage = 'לא נמצאו מפתחות Supabase עבור הארגון שנבחר.';
+      } else if (response.status === 401 || response.status === 403) {
+        serverMessage = 'אין הרשאה לצפות במפתחות הארגון. ודא שהחשבון משויך לארגון.';
+      } else {
+        serverMessage = `טעינת מפתחות הארגון נכשלה (סטטוס ${response.status}).`;
+      }
+    } else {
+      serverMessage = typeof payload?.error === 'string'
+        ? payload.error
+        : `טעינת ההגדרות נכשלה (סטטוס ${response.status}).`;
+    }
+
     updateDiagnostics({
-      orgId: storedOrgId,
+      orgId: targetOrgId,
       status: response.status,
       scope,
       ok: false,
@@ -199,7 +237,7 @@ export async function loadRuntimeConfig(options = {}) {
   const sanitized = sanitizeConfig(payload, scope === 'org' ? 'org-api' : 'api');
   if (!sanitized) {
     updateDiagnostics({
-      orgId: storedOrgId,
+      orgId: targetOrgId,
       status: response.status,
       scope,
       ok: false,
@@ -207,17 +245,17 @@ export async function loadRuntimeConfig(options = {}) {
       accessToken,
     });
     throw new MissingRuntimeConfigError(
-      'הפונקציה לא סיפקה supabase_url ו-anon_key. עדכן את /api/config.',
+      `הפונקציה ${endpoint} לא סיפקה supabase_url ו-anon_key.`,
     );
   }
 
   const normalized = {
     ...sanitized,
-    orgId: scope === 'org' ? storedOrgId || null : null,
+    orgId: scope === 'org' ? targetOrgId || null : null,
   };
 
   updateDiagnostics({
-    orgId: storedOrgId,
+    orgId: targetOrgId,
     status: response.status,
     scope,
     ok: true,

@@ -27,7 +27,7 @@ export default function Diagnostics() {
       case 'api':
         return '‎/api/config (תצורת הליבה)';
       case 'org-api':
-        return '‎/api/config (חיבור ארגוני)';
+        return '‎/api/org/:id/keys (חיבור ארגוני)';
       default:
         return 'מקור לא ידוע';
     }
@@ -53,7 +53,9 @@ export default function Diagnostics() {
   const isDev = Boolean(import.meta?.env?.DEV);
   const diagnosticsOrgId = diagnostics.orgId || '—';
   const diagnosticsStatus = diagnostics.status !== null ? diagnostics.status : '—';
-  const diagnosticsScope = diagnostics.scope === 'org' ? 'בקשת ארגון' : 'בקשת אפליקציה';
+  const diagnosticsScope = diagnostics.scope === 'org'
+    ? 'בקשת ארגון (‎/api/org/:id/keys‎)'
+    : 'בקשת אפליקציה (‎/api/config‎)';
 
   return (
     <div className="max-w-2xl mx-auto mt-16 bg-white shadow-xl rounded-2xl p-8 space-y-6" dir="rtl">
@@ -97,7 +99,7 @@ export default function Diagnostics() {
         {isDev ? (
           <>
             <div className="border border-dashed border-slate-300 rounded-xl p-4 bg-slate-50">
-              <dt className="text-sm text-slate-500">org-id בבקשת ‎/api/config האחרונה</dt>
+              <dt className="text-sm text-slate-500">org-id בבקשת התצורה האחרונה</dt>
               <dd className="text-lg font-semibold text-slate-900">{diagnosticsOrgId}</dd>
             </div>
             <div className="border border-dashed border-slate-300 rounded-xl p-4 bg-slate-50">
