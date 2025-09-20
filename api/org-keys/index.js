@@ -34,17 +34,71 @@ function extractBearerToken(rawValue) {
   return token || null;
 }
 
+function resolveHeaderValue(headers, name) {
+  if (!headers || !name) {
+    return undefined;
+  }
+
+  if (typeof headers.get === 'function') {
+    const directValue = headers.get(name);
+    if (directValue) {
+      return directValue;
+    }
+
+    const lowerValue = headers.get(name.toLowerCase());
+    if (lowerValue) {
+      return lowerValue;
+    }
+  }
+
+  if (typeof headers === 'object') {
+    if (headers[name]) {
+      return headers[name];
+    }
+
+    const lowerName = typeof name === 'string' ? name.toLowerCase() : name;
+    if (lowerName !== name && headers[lowerName]) {
+      return headers[lowerName];
+    }
+
+    const upperName = typeof name === 'string' ? name.toUpperCase() : name;
+    if (upperName !== name && headers[upperName]) {
+      return headers[upperName];
+    }
+  }
+
+  if (typeof headers?.toJSON === 'function') {
+    const serialized = headers.toJSON();
+    if (serialized && typeof serialized === 'object') {
+      if (serialized[name]) {
+        return serialized[name];
+      }
+
+      const lowerName = typeof name === 'string' ? name.toLowerCase() : name;
+      if (lowerName !== name && serialized[lowerName]) {
+        return serialized[lowerName];
+      }
+
+      const upperName = typeof name === 'string' ? name.toUpperCase() : name;
+      if (upperName !== name && serialized[upperName]) {
+        return serialized[upperName];
+      }
+    }
+  }
+
+  return undefined;
+}
+
 function readBearerToken(req) {
-  const headers = req.headers || {};
+  const headers = req?.headers;
   const candidates = [
-    headers['x-supabase-authorization'],
-    headers['X-Supabase-Authorization'],
-    headers['x-supabase-auth'],
-    headers.authorization,
-    headers.Authorization,
+    'X-Supabase-Authorization',
+    'x-supabase-auth',
+    'Authorization',
   ];
 
-  for (const value of candidates) {
+  for (const headerName of candidates) {
+    const value = resolveHeaderValue(headers, headerName);
     const token = extractBearerToken(value);
     if (token) {
       return token;
