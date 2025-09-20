@@ -50,18 +50,27 @@ export default async function (context, req) {
     const orgId = readOrgId(request);
     const authorization =
       request.headers?.authorization || request.headers?.Authorization || '';
+    const hasAuthorizationHeader =
+      typeof authorization === 'string' && authorization.trim().length > 0;
 
-    if (!orgId && (!authorization || typeof authorization !== 'string')) {
+    if (!orgId) {
       if (!anonKey) {
         context.log.error('Supabase anon key is missing for base config.');
         jsonResponse(context, 500, { error: 'server_misconfigured' });
         return;
       }
 
-      context.log.info('Issued base app config.', {
-        supabaseUrl: maskForLog(supabaseUrl),
-        anonKey: maskForLog(anonKey),
-      });
+      if (hasAuthorizationHeader) {
+        context.log.info('Ignoring authorization header without x-org-id. Falling back to base config.', {
+          supabaseUrl: maskForLog(supabaseUrl),
+          anonKey: maskForLog(anonKey),
+        });
+      } else {
+        context.log.info('Issued base app config.', {
+          supabaseUrl: maskForLog(supabaseUrl),
+          anonKey: maskForLog(anonKey),
+        });
+      }
 
       jsonResponse(
         context,
@@ -75,12 +84,6 @@ export default async function (context, req) {
     if (!serviceRoleKey) {
       context.log.error('Supabase service role key is missing.');
       jsonResponse(context, 500, { error: 'server_misconfigured' });
-      return;
-    }
-
-    if (!orgId) {
-      context.log.warn('Missing x-org-id header on config request.');
-      jsonResponse(context, 400, { error: 'missing_org_id' });
       return;
     }
 
