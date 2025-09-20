@@ -602,7 +602,17 @@ export function OrgProvider({ children }) {
 
   const createOrganization = useCallback(
     async ({ name, supabaseUrl, supabaseAnonKey, policyLinks = [], legalSettings = {} }) => {
-      const userId = user?.id || session?.user?.id || null;
+      let userId = user?.id || session?.user?.id || null;
+
+      if (!userId) {
+        const { data: authUser, error: authError } = await coreSupabase.auth.getUser();
+        if (authError) {
+          console.error('Failed to resolve authenticated user for organization creation', authError);
+          throw new Error('לא ניתן היה לאמת את המשתמש. נסה להתחבר מחדש.');
+        }
+        userId = authUser?.user?.id || null;
+      }
+
       if (!userId) throw new Error('אין משתמש מחובר.');
 
       const trimmedName = (name || '').trim();
@@ -667,23 +677,20 @@ export function OrgProvider({ children }) {
           throw new Error('שרת Supabase לא החזיר מזהה ארגון לאחר יצירה.');
         }
 
-        const { error: membershipError } = await coreSupabase
-          .from('org_memberships')
-          .upsert(
-            {
-              org_id: orgId,
-              user_id: userId,
-              role: 'admin',
-              created_at: now,
-            },
-            { onConflict: 'org_id,user_id' },
-          );
+        const { error: membershipError } = await coreSupabase.from('org_memberships').insert({
+          org_id: orgId,
+          user_id: userId,
+          role: 'admin',
+          created_at: now,
+        });
 
         if (membershipError) {
           if (membershipError.code === '42501') {
             throw new Error('אין לך הרשאות לשייך משתמש לארגון החדש.');
           }
-          if (membershipError.code !== '23505') {
+          if (membershipError.code === '23505') {
+            console.info('Creator already had a membership for the new organization; continuing.');
+          } else {
             throw new Error(membershipError.message || 'שגיאה בשיוך המשתמש לארגון החדש.');
           }
         }
