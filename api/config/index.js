@@ -32,155 +32,157 @@ function readOrgId(req) {
   return headerId ? String(headerId) : null;
 }
 
-function respondWithBaseConfig(context, supabaseUrl, anonKey) {
-  jsonResponse(
-    context,
-    200,
-    {
-      supabase_url: supabaseUrl,
-      anon_key: anonKey,
-    },
-    {
-      'X-Config-Scope': 'app',
-    },
-  );
-}
-
 export default async function (context, req) {
   const request = req || context.req;
   const env = context.env ?? globalThis.process?.env ?? {};
 
-  const supabaseUrl = env.APP_SUPABASE_URL;
-  const anonKey = env.APP_SUPABASE_ANON_KEY;
-  const serviceRoleKey = env.APP_SUPABASE_SERVICE_ROLE;
+  try {
+    const supabaseUrl = env.APP_SUPABASE_URL;
+    const serviceRoleKey = env.APP_SUPABASE_SERVICE_ROLE;
 
-  if (!supabaseUrl || !anonKey) {
-    context.log.error('APP Supabase public credentials are missing.');
-    jsonResponse(context, 500, { error: 'חסרה תצורת שרת. פנה למנהל המערכת.' });
-    return;
-  }
+    if (!supabaseUrl || !serviceRoleKey) {
+      context.log.error('Supabase server credentials are missing.');
+      jsonResponse(context, 500, { error: 'server_misconfigured' });
+      return;
+    }
 
-  const orgId = readOrgId(request);
-  const authorization = request.headers?.authorization || request.headers?.Authorization || '';
-  const isBearer = authorization.startsWith('Bearer ');
+    const orgId = readOrgId(request);
 
-  if (!orgId || !isBearer) {
-    if (orgId && !isBearer) {
-      context.log.warn('Ignoring organization config request without bearer token', {
+    if (!orgId) {
+      context.log.warn('Missing x-org-id header on config request.');
+      jsonResponse(context, 400, { error: 'missing_org_id' });
+      return;
+    }
+
+    const authorization =
+      request.headers?.authorization || request.headers?.Authorization || '';
+
+    if (typeof authorization !== 'string' || !authorization.startsWith('Bearer ')) {
+      context.log.warn('Missing or invalid bearer token for config request.', {
         orgId,
       });
+      jsonResponse(context, 401, { error: 'missing_or_invalid_token' });
+      return;
     }
-    respondWithBaseConfig(context, supabaseUrl, anonKey);
-    return;
-  }
 
-  if (!serviceRoleKey) {
-    context.log.error('APP Supabase service role is missing for org config request.');
-    jsonResponse(context, 500, { error: 'שגיאת שרת בבדיקת ההרשאות.' });
-    return;
-  }
+    const token = authorization.slice('Bearer '.length).trim();
 
-  const token = authorization.slice('Bearer '.length).trim();
-  if (!token) {
-    jsonResponse(context, 401, { error: 'פג תוקף ההתחברות. התחבר שוב ונסה מחדש.' });
-    return;
-  }
+    if (!token) {
+      context.log.warn('Empty bearer token for config request.', { orgId });
+      jsonResponse(context, 401, { error: 'missing_or_invalid_token' });
+      return;
+    }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
-
-  let userId;
-  try {
-    const { data, error } = await supabase.auth.getUser(token);
-    if (error) throw error;
-    userId = data?.user?.id;
-  } catch (error) {
-    context.log.warn('Failed to authenticate token for org request', {
-      orgId,
-      message: error?.message,
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
     });
-    jsonResponse(context, 401, { error: 'פג תוקף ההתחברות. התחבר שוב ונסה מחדש.' });
-    return;
-  }
 
-  if (!userId) {
-    jsonResponse(context, 401, { error: 'פג תוקף ההתחברות. התחבר שוב ונסה מחדש.' });
-    return;
-  }
+    let userId;
+    try {
+      const { data, error } = await supabase.auth.getUser(token);
+      if (error) throw error;
+      userId = data?.user?.id;
+    } catch (authError) {
+      context.log.warn('Failed to authenticate token for org request.', {
+        orgId,
+        message: authError?.message,
+      });
+      jsonResponse(context, 401, { error: 'missing_or_invalid_token' });
+      return;
+    }
 
-  try {
-    const { data: membership, error: membershipError } = await supabase
-      .from('org_memberships')
-      .select('id')
-      .eq('org_id', orgId)
-      .eq('user_id', userId)
-      .maybeSingle();
+    if (!userId) {
+      jsonResponse(context, 401, { error: 'missing_or_invalid_token' });
+      return;
+    }
 
-    if (membershipError) {
-      throw membershipError;
+    let membership;
+    try {
+      const membershipResponse = await supabase
+        .from('org_memberships')
+        .select('id')
+        .eq('org_id', orgId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (membershipResponse.error) {
+        throw membershipResponse.error;
+      }
+
+      membership = membershipResponse.data;
+    } catch (membershipError) {
+      context.log.error('Failed to verify membership.', {
+        orgId,
+        userId: maskForLog(userId),
+        message: membershipError?.message,
+      });
+      jsonResponse(context, 500, { error: 'server_error' });
+      return;
     }
 
     if (!membership) {
-      context.log.warn('User is not a member of requested organization', {
+      context.log.warn('User is not a member of requested organization.', {
         orgId,
         userId: maskForLog(userId),
       });
-      jsonResponse(context, 403, { error: 'אין לך הרשאה לארגון שנבחר.' });
-      return;
-    }
-  } catch (membershipError) {
-    context.log.error('Failed to verify membership', {
-      orgId,
-      userId: maskForLog(userId),
-      message: membershipError?.message,
-    });
-    jsonResponse(context, 500, { error: 'שגיאת שרת בבדיקת ההרשאות.' });
-    return;
-  }
-
-  try {
-    const settingsResponse = await supabase
-      .from('org_settings')
-      .select('supabase_url, anon_key')
-      .eq('org_id', orgId)
-      .maybeSingle();
-
-    if (settingsResponse.error) {
-      throw settingsResponse.error;
-    }
-
-    const settings = settingsResponse.data;
-    if (!settings?.supabase_url || !settings?.anon_key) {
-      jsonResponse(context, 404, { error: 'הארגון לא הושלם או שחסרים פרטי חיבור.' });
+      jsonResponse(context, 403, { error: 'forbidden' });
       return;
     }
 
-    context.log.info('Issued org config', {
-      orgId,
-      supabaseUrl: maskForLog(settings.supabase_url),
-      anonKey: maskForLog(settings.anon_key),
-    });
+    try {
+      const settingsResponse = await supabase
+        .from('org_settings')
+        .select('supabase_url, anon_key')
+        .eq('org_id', orgId)
+        .maybeSingle();
 
-    jsonResponse(
-      context,
-      200,
-      {
-        supabase_url: settings.supabase_url,
-        anon_key: settings.anon_key,
-      },
-      {
-        'X-Config-Scope': 'org',
-      },
-    );
-  } catch (settingsError) {
-    context.log.error('Failed to load org config', {
-      orgId,
-      message: settingsError?.message,
+      if (settingsResponse.error) {
+        throw settingsResponse.error;
+      }
+
+      const settings = settingsResponse.data;
+
+      if (!settings?.supabase_url || !settings?.anon_key) {
+        context.log.error('Organization settings missing Supabase credentials.', {
+          orgId,
+        });
+        jsonResponse(context, 500, { error: 'server_misconfigured' });
+        return;
+      }
+
+      context.log.info('Issued org config.', {
+        orgId,
+        userId: maskForLog(userId),
+        supabaseUrl: maskForLog(settings.supabase_url),
+        anonKey: maskForLog(settings.anon_key),
+      });
+
+      jsonResponse(
+        context,
+        200,
+        {
+          supabase_url: settings.supabase_url,
+          anon_key: settings.anon_key,
+        },
+        {
+          'X-Config-Scope': 'org',
+        },
+      );
+    } catch (settingsError) {
+      context.log.error('Failed to load org config.', {
+        orgId,
+        userId: maskForLog(userId),
+        message: settingsError?.message,
+      });
+      jsonResponse(context, 500, { error: 'server_error' });
+    }
+  } catch (error) {
+    context.log.error('Unhandled configuration error.', {
+      message: error?.message,
     });
-    jsonResponse(context, 500, { error: 'שגיאת שרת בטעינת הגדרות הארגון.' });
+    jsonResponse(context, 500, { error: 'server_error' });
   }
 }
