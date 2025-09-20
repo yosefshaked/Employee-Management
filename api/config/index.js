@@ -33,29 +33,56 @@ function readOrgId(req) {
 }
 
 export default async function (context, req) {
-  const request = req || context.req;
   const env = context.env ?? globalThis.process?.env ?? {};
 
   try {
     const supabaseUrl = env.APP_SUPABASE_URL;
+    const anonKey = env.APP_SUPABASE_ANON_KEY;
     const serviceRoleKey = env.APP_SUPABASE_SERVICE_ROLE;
 
-    if (!supabaseUrl || !serviceRoleKey) {
-      context.log.error('Supabase server credentials are missing.');
+    if (!supabaseUrl) {
+      context.log.error('Supabase URL is missing.');
       jsonResponse(context, 500, { error: 'server_misconfigured' });
       return;
     }
 
+    const request = req || context.req;
     const orgId = readOrgId(request);
+    const authorization =
+      request.headers?.authorization || request.headers?.Authorization || '';
+
+    if (!orgId && (!authorization || typeof authorization !== 'string')) {
+      if (!anonKey) {
+        context.log.error('Supabase anon key is missing for base config.');
+        jsonResponse(context, 500, { error: 'server_misconfigured' });
+        return;
+      }
+
+      context.log.info('Issued base app config.', {
+        supabaseUrl: maskForLog(supabaseUrl),
+        anonKey: maskForLog(anonKey),
+      });
+
+      jsonResponse(
+        context,
+        200,
+        { supabase_url: supabaseUrl, anon_key: anonKey },
+        { 'X-Config-Scope': 'app' },
+      );
+      return;
+    }
+
+    if (!serviceRoleKey) {
+      context.log.error('Supabase service role key is missing.');
+      jsonResponse(context, 500, { error: 'server_misconfigured' });
+      return;
+    }
 
     if (!orgId) {
       context.log.warn('Missing x-org-id header on config request.');
       jsonResponse(context, 400, { error: 'missing_org_id' });
       return;
     }
-
-    const authorization =
-      request.headers?.authorization || request.headers?.Authorization || '';
 
     if (typeof authorization !== 'string' || !authorization.startsWith('Bearer ')) {
       context.log.warn('Missing or invalid bearer token for config request.', {
