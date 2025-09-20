@@ -697,7 +697,11 @@ export default function SetupAssistant() {
       setNewOrgName('');
     } catch (error) {
       console.error('Failed to create organization from setup assistant', error);
-      toast.error('יצירת הארגון נכשלה. נסה שוב.');
+      const message = error instanceof Error && error.message
+        ? error.message
+        : 'יצירת הארגון נכשלה. נסה שוב.';
+      setCreateOrgError(message);
+      toast.error(message);
     } finally {
       setIsCreatingOrg(false);
     }

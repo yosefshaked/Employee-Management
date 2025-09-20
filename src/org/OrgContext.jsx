@@ -495,54 +495,80 @@ export function OrgProvider({ children }) {
   const createOrganization = useCallback(
     async ({ name, supabaseUrl, supabaseAnonKey, policyLinks = [], legalSettings = {} }) => {
       if (!user) throw new Error('אין משתמש מחובר.');
+      if (!accessToken) throw new Error('חיבור אימות חסר. היכנס מחדש.');
+
       const trimmedName = (name || '').trim();
       if (!trimmedName) throw new Error('יש להזין שם ארגון.');
 
-      const insertPayload = {
-        name: trimmedName,
-        supabase_url: supabaseUrl ? supabaseUrl.trim() : null,
-        supabase_anon_key: supabaseAnonKey ? supabaseAnonKey.trim() : null,
-        policy_links: policyLinks,
-        legal_settings: legalSettings,
-        created_by: user.id,
-      };
+      const payload = { name: trimmedName };
 
-      const membershipPayload = {
-        role: 'admin',
-      };
+      if (typeof supabaseUrl === 'string' && supabaseUrl.trim()) {
+        payload.supabaseUrl = supabaseUrl.trim();
+      }
 
-      const now = new Date().toISOString();
+      if (typeof supabaseAnonKey === 'string' && supabaseAnonKey.trim()) {
+        payload.supabaseAnonKey = supabaseAnonKey.trim();
+      }
 
-      const { data: orgData, error: orgError } = await coreSupabase
-        .from('app_organizations')
-        .insert({
-          ...insertPayload,
-          created_at: now,
-          updated_at: now,
-        })
-        .select('id')
-        .single();
+      if (Array.isArray(policyLinks)) {
+        payload.policyLinks = policyLinks
+          .map((item) => {
+            if (!item) return '';
+            if (typeof item === 'string') return item.trim();
+            if (typeof item.url === 'string') return item.url.trim();
+            if (typeof item.href === 'string') return item.href.trim();
+            return '';
+          })
+          .filter(Boolean);
+      }
 
-      if (orgError) throw orgError;
+      if (legalSettings && typeof legalSettings === 'object' && !Array.isArray(legalSettings)) {
+        payload.legalSettings = legalSettings;
+      }
 
-      const { error: membershipError } = await coreSupabase
-        .from('app_org_memberships')
-        .insert({
-          ...membershipPayload,
-          org_id: orgData.id,
-          user_id: user.id,
-          created_at: now,
+      let response;
+      try {
+        response = await fetch('/api/organizations', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify(payload),
         });
+      } catch (networkError) {
+        console.error('Failed to reach organization creation API', networkError);
+        throw new Error('יצירת הארגון נכשלה. בדוק את החיבור לרשת ונסה שוב.');
+      }
 
-      if (membershipError) throw membershipError;
+      let body;
+      try {
+        body = await response.json();
+      } catch (parseError) {
+        console.error('Organization creation API returned a non-JSON response', parseError);
+        throw new Error('שרת ה-API החזיר תגובה שגויה בעת יצירת הארגון.');
+      }
 
-      await syncOrgSettings(orgData.id, supabaseUrl, supabaseAnonKey);
+      if (!response.ok) {
+        console.error('Organization creation API responded with an error', {
+          status: response.status,
+          body,
+        });
+        const message = typeof body?.message === 'string'
+          ? body.message
+          : 'יצירת הארגון נכשלה. נסה שוב.';
+        throw new Error(message);
+      }
+
+      const orgId = body?.id || null;
 
       await refreshOrganizations({ keepSelection: false });
-      await selectOrg(orgData.id);
+      if (orgId) {
+        await selectOrg(orgId);
+      }
       toast.success('הארגון נוצר בהצלחה.');
     },
-    [user, refreshOrganizations, selectOrg, syncOrgSettings],
+    [user, accessToken, refreshOrganizations, selectOrg],
   );
 
   const updateOrganizationMetadata = useCallback(
