@@ -15,6 +15,66 @@ import { useAuth } from '@/auth/AuthContext.jsx';
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const LEGACY_STORAGE_PREFIX = 'employee-management:last-org';
 
+function isSupabasePermissionError(error) {
+  if (!error) return false;
+  const statusCandidate =
+    typeof error.status === 'number' ? error.status : Number(error.statusCode);
+  if (Number.isFinite(statusCandidate) && statusCandidate === 403) {
+    return true;
+  }
+  if (typeof error.code === 'string' && error.code === '42501') {
+    return true;
+  }
+  const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
+  return message.includes('row-level security') || message.includes('permission denied');
+}
+
+function isSupabaseDuplicateError(error) {
+  if (!error) return false;
+  if (typeof error.code === 'string' && error.code === '23505') {
+    return true;
+  }
+  const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
+  return message.includes('duplicate key value') || message.includes('already exists');
+}
+
+function isSupabaseRecursionError(error) {
+  if (!error) return false;
+  if (typeof error.code === 'string' && error.code === '42P17') {
+    return true;
+  }
+  const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
+  return message.includes('infinite recursion detected');
+}
+
+function resolveSupabaseErrorMessage(error, {
+  duplicateMessage,
+  permissionMessage,
+  fallbackMessage,
+}) {
+  if (!error) {
+    return fallbackMessage || 'פעולה נכשלה. נסה שוב.';
+  }
+
+  if (isSupabaseDuplicateError(error) && duplicateMessage) {
+    return duplicateMessage;
+  }
+
+  if (isSupabasePermissionError(error) && permissionMessage) {
+    return permissionMessage;
+  }
+
+  if (typeof error.message === 'string' && error.message.trim()) {
+    return error.message.trim();
+  }
+
+  if (typeof error.details === 'string' && error.details.trim()) {
+    return error.details.trim();
+  }
+
+  return fallbackMessage || 'פעולה נכשלה. נסה שוב.';
+}
+
 function generateUuid() {
   if (typeof crypto !== 'undefined') {
     if (typeof crypto.randomUUID === 'function') {
@@ -696,34 +756,32 @@ export function OrgProvider({ children }) {
         let effectiveOrgId = orgData?.id || null;
 
         if (orgError) {
-          if (orgError.code === '23505') {
-            throw new Error('ארגון עם שם זה כבר קיים.');
-          }
-          if (orgError.code === '42501') {
-            throw new Error('אין לך הרשאות ליצור ארגון חדש.');
-          }
-
-          const recursionDetected =
-            orgError.code === '42P17' ||
-            (typeof orgError.message === 'string' &&
-              orgError.message.includes('infinite recursion detected'));
+          console.error('Supabase rejected organization insert', orgError);
+          const recursionDetected = isSupabaseRecursionError(orgError);
 
           if (!recursionDetected) {
-            throw new Error(orgError.message || 'יצירת הארגון נכשלה. נסה שוב.');
+            const message = resolveSupabaseErrorMessage(orgError, {
+              duplicateMessage: 'ארגון עם שם זה כבר קיים.',
+              permissionMessage: 'אין לך הרשאות ליצור ארגון חדש.',
+              fallbackMessage: 'יצירת הארגון נכשלה. נסה שוב.',
+            });
+            throw new Error(message);
           }
+
+          console.warn('Retrying organization insert without returning due to recursive policy error.');
 
           const { error: minimalError } = await coreSupabase
             .from('organizations')
             .insert({ ...insertPayload }, { returning: 'minimal' });
 
           if (minimalError) {
-            if (minimalError.code === '23505') {
-              throw new Error('ארגון עם שם זה כבר קיים.');
-            }
-            if (minimalError.code === '42501') {
-              throw new Error('אין לך הרשאות ליצור ארגון חדש.');
-            }
-            throw new Error(minimalError.message || 'יצירת הארגון נכשלה. נסה שוב.');
+            console.error('Supabase rejected organization insert without returning data', minimalError);
+            const message = resolveSupabaseErrorMessage(minimalError, {
+              duplicateMessage: 'ארגון עם שם זה כבר קיים.',
+              permissionMessage: 'אין לך הרשאות ליצור ארגון חדש.',
+              fallbackMessage: 'יצירת הארגון נכשלה. נסה שוב.',
+            });
+            throw new Error(message);
           }
 
           effectiveOrgId = orgId;
@@ -741,13 +799,15 @@ export function OrgProvider({ children }) {
         });
 
         if (membershipError) {
-          if (membershipError.code === '42501') {
-            throw new Error('אין לך הרשאות לשייך משתמש לארגון החדש.');
-          }
-          if (membershipError.code === '23505') {
+          if (isSupabaseDuplicateError(membershipError)) {
             console.info('Creator already had a membership for the new organization; continuing.');
           } else {
-            throw new Error(membershipError.message || 'שגיאה בשיוך המשתמש לארגון החדש.');
+            console.error('Failed to insert creator membership for new organization', membershipError);
+            const message = resolveSupabaseErrorMessage(membershipError, {
+              permissionMessage: 'אין לך הרשאות לשייך משתמש לארגון החדש.',
+              fallbackMessage: 'שגיאה בשיוך המשתמש לארגון החדש.',
+            });
+            throw new Error(message);
           }
         }
 
