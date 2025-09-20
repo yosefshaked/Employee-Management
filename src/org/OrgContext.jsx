@@ -602,7 +602,8 @@ export function OrgProvider({ children }) {
 
   const createOrganization = useCallback(
     async ({ name, supabaseUrl, supabaseAnonKey, policyLinks = [], legalSettings = {} }) => {
-      if (!user) throw new Error('אין משתמש מחובר.');
+      const userId = user?.id || session?.user?.id || null;
+      if (!userId) throw new Error('אין משתמש מחובר.');
 
       const trimmedName = (name || '').trim();
       if (!trimmedName) throw new Error('יש להזין שם ארגון.');
@@ -644,7 +645,7 @@ export function OrgProvider({ children }) {
             supabase_anon_key: payload.supabaseAnonKey || null,
             policy_links: payload.policyLinks || [],
             legal_settings: payload.legalSettings || {},
-            created_by: user.id,
+            created_by: userId,
             created_at: now,
             updated_at: now,
           })
@@ -671,7 +672,7 @@ export function OrgProvider({ children }) {
           .upsert(
             {
               org_id: orgId,
-              user_id: user.id,
+              user_id: userId,
               role: 'admin',
               created_at: now,
             },
@@ -700,7 +701,7 @@ export function OrgProvider({ children }) {
         throw new Error('יצירת הארגון נכשלה. נסה שוב.');
       }
     },
-    [user, refreshOrganizations, selectOrg, syncOrgSettings],
+    [user, session, refreshOrganizations, selectOrg, syncOrgSettings],
   );
 
   const updateOrganizationMetadata = useCallback(
