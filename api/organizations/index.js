@@ -147,12 +147,15 @@ export default async function (context, req) {
 
     const { error: membershipError } = await supabase
       .from('org_memberships')
-      .insert({
-        org_id: orgData.id,
-        user_id: userId,
-        role: 'admin',
-        created_at: now,
-      });
+      .upsert(
+        {
+          org_id: orgData.id,
+          user_id: userId,
+          role: 'admin',
+          created_at: now,
+        },
+        { onConflict: 'org_id,user_id' },
+      );
 
     if (membershipError && membershipError.code !== '23505') {
       throw membershipError;

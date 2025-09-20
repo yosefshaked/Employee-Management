@@ -199,9 +199,46 @@ export function OrgProvider({ children }) {
       if (membershipResponse.error) throw membershipResponse.error;
       if (inviteResponse.error) throw inviteResponse.error;
 
-      const normalizedOrganizations = (membershipResponse.data || [])
+      let normalizedOrganizations = (membershipResponse.data || [])
         .map(normalizeOrgRecord)
         .filter(Boolean);
+
+      const orgIds = normalizedOrganizations.map((org) => org.id).filter(Boolean);
+
+      if (orgIds.length) {
+        const { data: settingsData, error: settingsError } = await coreSupabase
+          .from('org_settings')
+          .select('org_id, supabase_url, anon_key, metadata, updated_at')
+          .in('org_id', orgIds);
+
+        if (settingsError) {
+          console.warn('Failed to load org settings snapshot', settingsError);
+        } else if (settingsData?.length) {
+          const settingsMap = new Map(
+            settingsData.map((item) => [
+              item.org_id,
+              {
+                supabase_url: item.supabase_url || '',
+                supabase_anon_key: item.anon_key || '',
+                org_settings_metadata: item.metadata || null,
+                org_settings_updated_at: item.updated_at || null,
+              },
+            ]),
+          );
+
+          normalizedOrganizations = normalizedOrganizations.map((org) => {
+            const settings = settingsMap.get(org.id);
+            if (!settings) return org;
+            return {
+              ...org,
+              supabase_url: org.supabase_url || settings.supabase_url || '',
+              supabase_anon_key: org.supabase_anon_key || settings.supabase_anon_key || '',
+              org_settings_metadata: settings.org_settings_metadata,
+              org_settings_updated_at: settings.org_settings_updated_at,
+            };
+          });
+        }
+      }
 
       const normalizedInvites = (inviteResponse.data || []).map(normalizeInvite).filter(Boolean);
 
@@ -232,7 +269,7 @@ export function OrgProvider({ children }) {
         const [membersResponse, invitesResponse] = await Promise.all([
           coreSupabase
             .from('org_memberships')
-            .select('id, org_id, user_id, role, created_at, invited_at, joined_at, status')
+            .select('id, org_id, user_id, role, created_at')
             .eq('org_id', orgId)
             .order('created_at', { ascending: true }),
           coreSupabase
@@ -615,15 +652,23 @@ export function OrgProvider({ children }) {
 
         const { error: membershipError } = await coreSupabase
           .from('org_memberships')
-          .insert({
-            org_id: orgId,
-            user_id: user.id,
-            role: 'admin',
-            created_at: now,
-          });
+          .upsert(
+            {
+              org_id: orgId,
+              user_id: user.id,
+              role: 'admin',
+              created_at: now,
+            },
+            { onConflict: 'org_id,user_id' },
+          );
 
-        if (membershipError && membershipError.code !== '23505') {
-          throw new Error(membershipError.message || 'שגיאה בשיוך המשתמש לארגון החדש.');
+        if (membershipError) {
+          if (membershipError.code === '42501') {
+            throw new Error('אין לך הרשאות לשייך משתמש לארגון החדש.');
+          }
+          if (membershipError.code !== '23505') {
+            throw new Error(membershipError.message || 'שגיאה בשיוך המשתמש לארגון החדש.');
+          }
         }
 
         await syncOrgSettings(orgId, payload.supabaseUrl, payload.supabaseAnonKey);
@@ -804,7 +849,10 @@ export function OrgProvider({ children }) {
       revokeInvite,
       removeMember,
       acceptInvite,
-      activeOrgHasConnection: Boolean(activeOrg?.supabase_url && activeOrg?.supabase_anon_key),
+      activeOrgHasConnection: Boolean(
+        (activeOrg?.supabase_url || activeOrgConfig?.supabaseUrl) &&
+          (activeOrg?.supabase_anon_key || activeOrgConfig?.supabaseAnonKey),
+      ),
       activeOrgConfig,
       configStatus,
     }),
