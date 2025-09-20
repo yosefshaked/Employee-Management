@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { toast } from 'sonner';
 import { supabase } from '@/supabaseClient.js';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { mapSupabaseError } from '@/org/errors.js';
 import {
   Building2,
   AlertCircle,
@@ -697,9 +698,7 @@ export default function SetupAssistant() {
       setNewOrgName('');
     } catch (error) {
       console.error('Failed to create organization from setup assistant', error);
-      const message = error instanceof Error && error.message
-        ? error.message
-        : 'יצירת הארגון נכשלה. נסה שוב.';
+      const message = mapSupabaseError(error);
       setCreateOrgError(message);
       toast.error(message);
     } finally {
@@ -741,7 +740,7 @@ export default function SetupAssistant() {
             <Button type="button" variant="ghost" onClick={() => setIsCreateDialogOpen(false)} disabled={isCreatingOrg}>
               ביטול
             </Button>
-            <Button type="submit" disabled={isCreatingOrg} className="gap-2">
+            <Button type="submit" disabled={isCreatingOrg || !newOrgName.trim()} className="gap-2">
               {isCreatingOrg ? 'יוצר...' : 'צור ארגון'}
             </Button>
           </div>
