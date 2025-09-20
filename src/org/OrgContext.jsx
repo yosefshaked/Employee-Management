@@ -15,6 +15,33 @@ import { useAuth } from '@/auth/AuthContext.jsx';
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const LEGACY_STORAGE_PREFIX = 'employee-management:last-org';
 
+function generateUuid() {
+  if (typeof crypto !== 'undefined') {
+    if (typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    if (typeof crypto.getRandomValues === 'function') {
+      const array = new Uint8Array(16);
+      crypto.getRandomValues(array);
+      array[6] = (array[6] & 0x0f) | 0x40;
+      array[8] = (array[8] & 0x3f) | 0x80;
+      const hex = Array.from(array, (byte) => byte.toString(16).padStart(2, '0'));
+      return `${hex.slice(0, 4).join('')}-${hex.slice(4, 6).join('')}-${hex.slice(6, 8).join('')}-${hex
+        .slice(8, 10)
+        .join('')}-${hex.slice(10, 16).join('')}`;
+    }
+  }
+  let timestamp = Date.now();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = (timestamp + Math.random() * 16) % 16 | 0;
+    timestamp = Math.floor(timestamp / 16);
+    if (char === 'x') {
+      return random.toString(16);
+    }
+    return ((random & 0x3) | 0x8).toString(16);
+  });
+}
+
 function maskForDebug(value) {
   if (!value) return '';
   const trimmed = String(value);
@@ -647,20 +674,26 @@ export function OrgProvider({ children }) {
       const now = new Date().toISOString();
 
       try {
+        const orgId = generateUuid();
+        const insertPayload = {
+          id: orgId,
+          name: trimmedName,
+          supabase_url: payload.supabaseUrl || null,
+          supabase_anon_key: payload.supabaseAnonKey || null,
+          policy_links: payload.policyLinks || [],
+          legal_settings: payload.legalSettings || {},
+          created_by: userId,
+          created_at: now,
+          updated_at: now,
+        };
+
         const { data: orgData, error: orgError } = await coreSupabase
           .from('organizations')
-          .insert({
-            name: trimmedName,
-            supabase_url: payload.supabaseUrl || null,
-            supabase_anon_key: payload.supabaseAnonKey || null,
-            policy_links: payload.policyLinks || [],
-            legal_settings: payload.legalSettings || {},
-            created_by: userId,
-            created_at: now,
-            updated_at: now,
-          })
+          .insert(insertPayload)
           .select('id')
           .single();
+
+        let effectiveOrgId = orgData?.id || null;
 
         if (orgError) {
           if (orgError.code === '23505') {
@@ -669,16 +702,39 @@ export function OrgProvider({ children }) {
           if (orgError.code === '42501') {
             throw new Error('אין לך הרשאות ליצור ארגון חדש.');
           }
-          throw new Error(orgError.message || 'יצירת הארגון נכשלה. נסה שוב.');
+
+          const recursionDetected =
+            orgError.code === '42P17' ||
+            (typeof orgError.message === 'string' &&
+              orgError.message.includes('infinite recursion detected'));
+
+          if (!recursionDetected) {
+            throw new Error(orgError.message || 'יצירת הארגון נכשלה. נסה שוב.');
+          }
+
+          const { error: minimalError } = await coreSupabase
+            .from('organizations')
+            .insert({ ...insertPayload }, { returning: 'minimal' });
+
+          if (minimalError) {
+            if (minimalError.code === '23505') {
+              throw new Error('ארגון עם שם זה כבר קיים.');
+            }
+            if (minimalError.code === '42501') {
+              throw new Error('אין לך הרשאות ליצור ארגון חדש.');
+            }
+            throw new Error(minimalError.message || 'יצירת הארגון נכשלה. נסה שוב.');
+          }
+
+          effectiveOrgId = orgId;
         }
 
-        const orgId = orgData?.id;
-        if (!orgId) {
+        if (!effectiveOrgId) {
           throw new Error('שרת Supabase לא החזיר מזהה ארגון לאחר יצירה.');
         }
 
         const { error: membershipError } = await coreSupabase.from('org_memberships').insert({
-          org_id: orgId,
+          org_id: effectiveOrgId,
           user_id: userId,
           role: 'admin',
           created_at: now,
@@ -695,10 +751,10 @@ export function OrgProvider({ children }) {
           }
         }
 
-        await syncOrgSettings(orgId, payload.supabaseUrl, payload.supabaseAnonKey);
+        await syncOrgSettings(effectiveOrgId, payload.supabaseUrl, payload.supabaseAnonKey);
 
         await refreshOrganizations({ keepSelection: false });
-        await selectOrg(orgId);
+        await selectOrg(effectiveOrgId);
         toast.success('הארגון נוצר בהצלחה.');
       } catch (error) {
         console.error('Failed to create organization', error);
