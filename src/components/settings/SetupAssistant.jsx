@@ -707,6 +707,7 @@ export default function SetupAssistant() {
   const [isSavingConnection, setIsSavingConnection] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [verificationStatus, setVerificationStatus] = useState(activeOrg?.setup_completed ? 'success' : 'idle');
+  const [configStatus, setConfigStatus] = useState('idle');
   const [verifyResults, setVerifyResults] = useState([]);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState('');
@@ -806,6 +807,7 @@ export default function SetupAssistant() {
       setVerifyResults([]);
       setVerifyError('');
       setVerifyErrorInfo(null);
+      setConfigStatus('idle');
       return;
     }
 
@@ -883,10 +885,58 @@ export default function SetupAssistant() {
         clearConfig();
         clearedRuntimeConfigRef.current = true;
       }
+      setConfigStatus('cleared');
     } else {
       clearedRuntimeConfigRef.current = false;
     }
   }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    if (!activeOrg) {
+      return;
+    }
+    if (!hasSavedConnection) {
+      setConfigStatus('idle');
+      return;
+    }
+    if (hasUnsavedChanges) {
+      return;
+    }
+
+    const supabaseUrl = originalConnection.supabase_url?.trim();
+    const supabaseAnonKey = originalConnection.anon_key?.trim();
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      setConfigStatus('cleared');
+      return;
+    }
+
+    let cancelled = false;
+
+    const applyConfig = () => {
+      setConfigStatus('activating');
+      try {
+        activateConfig(
+          { supabaseUrl, supabaseAnonKey },
+          { source: 'org-api', orgId: activeOrg.id },
+        );
+        if (!cancelled) {
+          setConfigStatus('activated');
+        }
+      } catch (error) {
+        console.error('Failed to activate connection while syncing setup assistant', error);
+        if (!cancelled) {
+          setConfigStatus('cleared');
+        }
+      }
+    };
+
+    applyConfig();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrg, hasSavedConnection, hasUnsavedChanges, originalConnection.supabase_url, originalConnection.anon_key]);
 
   const hasConnectionValues = Boolean(connection.supabase_url.trim() && connection.anon_key.trim());
   const hasSavedConnection = Boolean(
@@ -1001,6 +1051,7 @@ export default function SetupAssistant() {
 
       const config = await loadRuntimeConfig({ accessToken, orgId: activeOrg.id, force: true });
       resetRuntimeSupabase();
+      setConfigStatus('activating');
       activateConfig(
         {
           supabaseUrl: config.supabaseUrl,
@@ -1008,6 +1059,7 @@ export default function SetupAssistant() {
         },
         { source: config?.source || 'org-api', orgId: activeOrg.id },
       );
+      setConfigStatus('activated');
       await verifyConnection();
       const diagnostics = getRuntimeConfigDiagnostics();
 
@@ -1040,6 +1092,7 @@ export default function SetupAssistant() {
         completedAt: new Date().toISOString(),
       });
       toast.error(message);
+      setConfigStatus('cleared');
 
       if (error?.status === 401) {
         try {
@@ -1567,7 +1620,7 @@ export default function SetupAssistant() {
                 <Button
                   type="button"
                   onClick={handleVerify}
-                  disabled={isVerifying || !hasSavedConnection}
+                  disabled={isVerifying || !hasSavedConnection || configStatus !== 'activated'}
                   className="gap-2"
                 >
                   {isVerifying ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}
