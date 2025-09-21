@@ -18,6 +18,7 @@ import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.j
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { createOrganization as createOrganizationRpc } from '@/api/organizations.js';
 import { mapSupabaseError } from '@/org/errors.js';
+import { fetchCurrentUser } from '@/shared/api/user.ts';
 
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const LEGACY_STORAGE_PREFIX = 'employee-management:last-org';
@@ -127,6 +128,40 @@ function normalizeMember(record) {
     joined_at: record.joined_at || record.created_at || null,
     status: record.status || 'active',
   };
+}
+
+function isPlainObject(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function deriveNameFromMetadata(metadata) {
+  if (!isPlainObject(metadata)) {
+    return null;
+  }
+
+  const trimmedFullName = typeof metadata.full_name === 'string' ? metadata.full_name.trim() : '';
+  if (trimmedFullName) {
+    return trimmedFullName;
+  }
+
+  const trimmedName = typeof metadata.name === 'string' ? metadata.name.trim() : '';
+  if (trimmedName) {
+    return trimmedName;
+  }
+
+  const given = typeof metadata.given_name === 'string' ? metadata.given_name.trim() : '';
+  const family = typeof metadata.family_name === 'string' ? metadata.family_name.trim() : '';
+  const combined = [given, family].filter(Boolean).join(' ');
+  if (combined) {
+    return combined;
+  }
+
+  const preferred = typeof metadata.preferred_username === 'string' ? metadata.preferred_username.trim() : '';
+  if (preferred) {
+    return preferred;
+  }
+
+  return null;
 }
 
 export function OrgProvider({ children }) {
@@ -318,111 +353,23 @@ export function OrgProvider({ children }) {
         const profileMap = new Map();
 
         if (userIds.length) {
-          const missingTableCodes = new Set(['PGRST204', 'PGRST205', 'PGRST301', '42P01']);
-          const unauthorizedCodes = new Set(['42501', 'PGRST401', 'PGRST403']);
+          const idSet = new Set(userIds);
 
-          const profileLoaders = [
-            {
-              label: 'public.user_profiles',
-              load: () =>
-                coreSupabase
-                  .from('user_profiles')
-                  .select('user_id, email, full_name')
-                  .in('user_id', userIds),
-              map: (profile) => ({
-                userId: profile.user_id,
-                email: profile.email || null,
-                fullName: profile.full_name || null,
-              }),
-            },
-            {
-              label: 'public.profiles',
-              load: () =>
-                coreSupabase
-                  .from('profiles')
-                  .select('user_id, email, full_name')
-                  .in('user_id', userIds),
-              map: (profile) => ({
-                userId: profile.user_id,
-                email: profile.email || null,
-                fullName: profile.full_name || null,
-              }),
-            },
-            {
-              label: 'auth.users',
-              load: () =>
-                coreSupabase
-                  .schema('auth')
-                  .from('users')
-                  .select('id, email, raw_user_meta_data')
-                  .in('id', userIds),
-              map: (profile) => ({
-                userId: profile.id,
-                email: profile.email || null,
-                fullName:
-                  (profile.raw_user_meta_data &&
-                    (profile.raw_user_meta_data.full_name || profile.raw_user_meta_data.name)) ||
-                  null,
-              }),
-            },
-          ];
+          try {
+            const currentProfile = await fetchCurrentUser();
+            if (currentProfile?.id && idSet.has(currentProfile.id)) {
+              const metadata = currentProfile.raw_user_meta_data;
+              const derivedName = deriveNameFromMetadata(metadata) || currentProfile.email || null;
 
-          for (const loader of profileLoaders) {
-            let result;
-            try {
-              result = await loader.load();
-            } catch (unexpectedError) {
-              console.warn(`Failed to load user profiles from ${loader.label}`, unexpectedError);
-              continue;
-            }
-
-            const { data: profileData, error: profileError } = result || {};
-
-            if (profileError) {
-              const message = typeof profileError.message === 'string' ? profileError.message : '';
-              const missingTable =
-                missingTableCodes.has(profileError.code) ||
-                message.includes('Could not find the table') ||
-                message.includes('does not exist');
-              const unauthorized =
-                unauthorizedCodes.has(profileError.code) ||
-                message.includes('permission denied');
-
-              if (missingTable) {
-                continue;
-              }
-
-              if (unauthorized) {
-                console.warn(`Missing permission to read ${loader.label}`, profileError);
-                continue;
-              }
-
-              console.warn(`Failed to load user profiles from ${loader.label}`, profileError);
-              continue;
-            }
-
-            (profileData || []).forEach((profile) => {
-              const normalized = loader.map(profile) || {};
-              const userId = normalized.userId;
-
-              if (!userId) {
-                return;
-              }
-
-              const email = normalized.email || null;
-              const fullName = normalized.fullName || email || null;
-
-              profileMap.set(userId, {
-                id: userId,
-                email,
-                full_name: fullName,
-                name: fullName,
+              profileMap.set(currentProfile.id, {
+                id: currentProfile.id,
+                email: currentProfile.email || null,
+                full_name: derivedName,
+                name: derivedName,
               });
-            });
-
-            if (profileMap.size) {
-              break;
             }
+          } catch (profileError) {
+            console.warn('Failed to load current user profile via /api/users/me', profileError);
           }
         }
 
