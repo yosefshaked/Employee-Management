@@ -283,144 +283,143 @@ grant execute on function public.setup_assistant_diagnostics() to authenticated;
 
 
 const RLS_SQL = `-- שלב 2: הפעלת RLS והוספת מדיניות מאובטחת
-alter table public."Employees" enable row level security;
+ALTER TABLE public."Employees" ENABLE ROW LEVEL SECURITY;
 
-drop policy if exists "Authenticated select Employees" on public."Employees";
-create policy "Authenticated select Employees" on public."Employees"
-  for select to authenticated
-  using (true);
+DROP POLICY IF EXISTS "Authenticated select Employees" ON public."Employees";
+CREATE POLICY "Authenticated select Employees" ON public."Employees"
+  FOR SELECT TO authenticated
+  USING (true);
 
-drop policy if exists "Authenticated insert Employees" on public."Employees";
-create policy "Authenticated insert Employees" on public."Employees"
-  for insert to authenticated
-  with check (true);
+DROP POLICY IF EXISTS "Authenticated insert Employees" ON public."Employees";
+CREATE POLICY "Authenticated insert Employees" ON public."Employees"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
 
-drop policy if exists "Authenticated update Employees" on public."Employees";
-create policy "Authenticated update Employees" on public."Employees"
-  for update to authenticated
-  using (true)
-  with check (true);
+DROP POLICY IF EXISTS "Authenticated update Employees" ON public."Employees";
+CREATE POLICY "Authenticated update Employees" ON public."Employees"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
 
-drop policy if exists "Authenticated delete Employees" on public."Employees";
-create policy "Authenticated delete Employees" on public."Employees"
-  for delete to authenticated
-  using (true);
+DROP POLICY IF EXISTS "Authenticated delete Employees" ON public."Employees";
+CREATE POLICY "Authenticated delete Employees" ON public."Employees"
+  FOR DELETE TO authenticated
+  USING (true);
 
-alter table public."WorkSessions" enable row level security;
+ALTER TABLE public."WorkSessions" ENABLE ROW LEVEL SECURITY;
 
-drop policy if exists "Authenticated select WorkSessions" on public."WorkSessions";
-create policy "Authenticated select WorkSessions" on public."WorkSessions"
-  for select to authenticated
-  using (true);
+DROP POLICY IF EXISTS "Authenticated select WorkSessions" ON public."WorkSessions";
+CREATE POLICY "Authenticated select WorkSessions" ON public."WorkSessions"
+  FOR SELECT TO authenticated
+  USING (true);
 
-drop policy if exists "Authenticated insert WorkSessions" on public."WorkSessions";
-create policy "Authenticated insert WorkSessions" on public."WorkSessions"
-  for insert to authenticated
-  with check (true);
+DROP POLICY IF EXISTS "Authenticated insert WorkSessions" ON public."WorkSessions";
+CREATE POLICY "Authenticated insert WorkSessions" ON public."WorkSessions"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
 
-drop policy if exists "Authenticated update WorkSessions" on public."WorkSessions";
-create policy "Authenticated update WorkSessions" on public."WorkSessions"
-  for update to authenticated
-  using (true)
-  with check (true);
+DROP POLICY IF EXISTS "Authenticated update WorkSessions" ON public."WorkSessions";
+CREATE POLICY "Authenticated update WorkSessions" ON public."WorkSessions"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
 
-drop policy if exists "Authenticated delete WorkSessions" on public."WorkSessions";
-create policy "Authenticated delete WorkSessions" on public."WorkSessions"
-  for delete to authenticated
-  using (true);
+DROP POLICY IF EXISTS "Authenticated delete WorkSessions" ON public."WorkSessions";
+CREATE POLICY "Authenticated delete WorkSessions" ON public."WorkSessions"
+  FOR DELETE TO authenticated
+  USING (true);
 
-alter table public."LeaveBalances" enable row level security;
+ALTER TABLE public."LeaveBalances" ENABLE ROW LEVEL SECURITY;
 
-drop policy if exists "Authenticated select LeaveBalances" on public."LeaveBalances";
-create policy "Authenticated select LeaveBalances" on public."LeaveBalances"
-  for select to authenticated
-  using (true);
+DROP POLICY IF EXISTS "Authenticated select LeaveBalances" ON public."LeaveBalances";
+CREATE POLICY "Authenticated select LeaveBalances" ON public."LeaveBalances"
+  FOR SELECT TO authenticated
+  USING (true);
 
-drop policy if exists "Authenticated insert LeaveBalances" on public."LeaveBalances";
-create policy "Authenticated insert LeaveBalances" on public."LeaveBalances"
-  for insert to authenticated
-  with check (true);
+DROP POLICY IF EXISTS "Authenticated insert LeaveBalances" ON public."LeaveBalances";
+CREATE POLICY "Authenticated insert LeaveBalances" ON public."LeaveBalances"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
 
-drop policy if exists "Authenticated update LeaveBalances" on public."LeaveBalances";
-create policy "Authenticated update LeaveBalances" on public."LeaveBalances"
-  for update to authenticated
-  using (true)
-  with check (true);
+DROP POLICY IF EXISTS "Authenticated update LeaveBalances" ON public."LeaveBalances";
+CREATE POLICY "Authenticated update LeaveBalances" ON public."LeaveBalances"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
 
-drop policy if exists "Authenticated delete LeaveBalances" on public."LeaveBalances";
-create policy "Authenticated delete LeaveBalances" on public."LeaveBalances"
-  for delete to authenticated
-  using (true);
+DROP POLICY IF EXISTS "Authenticated delete LeaveBalances" ON public."LeaveBalances";
+CREATE POLICY "Authenticated delete LeaveBalances" ON public."LeaveBalances"
+  FOR DELETE TO authenticated
+  USING (true);
 
-alter table public."RateHistory" enable row level security;
+ALTER TABLE public."RateHistory" ENABLE ROW LEVEL SECURITY;
 
-drop policy if exists "Authenticated select RateHistory" on public."RateHistory";
-create policy "Authenticated select RateHistory" on public."RateHistory"
-  for select to authenticated
-  using (true);
+DROP POLICY IF EXISTS "Authenticated select RateHistory" ON public."RateHistory";
+CREATE POLICY "Authenticated select RateHistory" ON public."RateHistory"
+  FOR SELECT TO authenticated
+  USING (true);
 
-drop policy if exists "Authenticated insert RateHistory" on public."RateHistory";
-create policy "Authenticated insert RateHistory" on public."RateHistory"
-  for insert to authenticated
-  with check (true);
+DROP POLICY IF EXISTS "Authenticated insert RateHistory" ON public."RateHistory";
+CREATE POLICY "Authenticated insert RateHistory" ON public."RateHistory"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
 
-drop policy if exists "Authenticated update RateHistory" on public."RateHistory";
-create policy "Authenticated update RateHistory" on public."RateHistory"
-  for update to authenticated
-  using (true)
-  with check (true);
+DROP POLICY IF EXISTS "Authenticated update RateHistory" ON public."RateHistory";
+CREATE POLICY "Authenticated update RateHistory" ON public."RateHistory"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
 
-drop policy if exists "Authenticated delete RateHistory" on public."RateHistory";
-create policy "Authenticated delete RateHistory" on public."RateHistory"
-  for delete to authenticated
-  using (true);
+DROP POLICY IF EXISTS "Authenticated delete RateHistory" ON public."RateHistory";
+CREATE POLICY "Authenticated delete RateHistory" ON public."RateHistory"
+  FOR DELETE TO authenticated
+  USING (true);
 
-alter table public."Services" enable row level security;
+ALTER TABLE public."Services" ENABLE ROW LEVEL SECURITY;
 
-drop policy if exists "Authenticated select Services" on public."Services";
-create policy "Authenticated select Services" on public."Services"
-  for select to authenticated
-  using (true);
+DROP POLICY IF EXISTS "Authenticated select Services" ON public."Services";
+CREATE POLICY "Authenticated select Services" ON public."Services"
+  FOR SELECT TO authenticated
+  USING (true);
 
-drop policy if exists "Authenticated insert Services" on public."Services";
-create policy "Authenticated insert Services" on public."Services"
-  for insert to authenticated
-  with check (true);
+DROP POLICY IF EXISTS "Authenticated insert Services" ON public."Services";
+CREATE POLICY "Authenticated insert Services" ON public."Services"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
 
-drop policy if exists "Authenticated update Services" on public."Services";
-create policy "Authenticated update Services" on public."Services"
-  for update to authenticated
-  using (true)
-  with check (true);
+DROP POLICY IF EXISTS "Authenticated update Services" ON public."Services";
+CREATE POLICY "Authenticated update Services" ON public."Services"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
 
-drop policy if exists "Authenticated delete Services" on public."Services";
-create policy "Authenticated delete Services" on public."Services"
-  for delete to authenticated
-  using (true);
+DROP POLICY IF EXISTS "Authenticated delete Services" ON public."Services";
+CREATE POLICY "Authenticated delete Services" ON public."Services"
+  FOR DELETE TO authenticated
+  USING (true);
 
-alter table public."Settings" enable row level security;
+ALTER TABLE public."Settings" ENABLE ROW LEVEL SECURITY;
 
-drop policy if exists "Authenticated select Settings" on public."Settings";
-create policy "Authenticated select Settings" on public."Settings"
-  for select to authenticated
-  using (true);
+DROP POLICY IF EXISTS "Authenticated select Settings" ON public."Settings";
+CREATE POLICY "Authenticated select Settings" ON public."Settings"
+  FOR SELECT TO authenticated
+  USING (true);
 
-drop policy if exists "Authenticated insert Settings" on public."Settings";
-create policy "Authenticated insert Settings" on public."Settings"
-  for insert to authenticated
-  with check (true);
+DROP POLICY IF EXISTS "Authenticated insert Settings" ON public."Settings";
+CREATE POLICY "Authenticated insert Settings" ON public."Settings"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
 
-drop policy if exists "Authenticated update Settings" on public."Settings";
-create policy "Authenticated update Settings" on public."Settings"
-  for update to authenticated
-  using (true)
-  with check (true);
+DROP POLICY IF EXISTS "Authenticated update Settings" ON public."Settings";
+CREATE POLICY "Authenticated update Settings" ON public."Settings"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
 
-drop policy if exists "Authenticated delete Settings" on public."Settings";
-create policy "Authenticated delete Settings" on public."Settings"
-  for delete to authenticated
-  using (true);
-`;
+DROP POLICY IF EXISTS "Authenticated delete Settings" ON public."Settings";
+CREATE POLICY "Authenticated delete Settings" ON public."Settings"
+  FOR DELETE TO authenticated
+  USING (true);`;
 
 function formatDateTime(isoString) {
   if (!isoString) return '';
@@ -1443,7 +1442,7 @@ export default function SetupAssistant() {
             <CodeBlock title="בלוק סכימה מלא" code={SCHEMA_SQL} ariaLabel="העתק את בלוק הסכימה" />
             <CodeBlock title="בלוק RLS ומדיניות" code={RLS_SQL} ariaLabel="העתק את בלוק ה-RLS" />
             <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
-              לאחר הרצת שני הבלוקים, עבור לשלב האימות כדי לוודא שהטבלאות, המדיניות ופונקציית הבדיקה קיימות. ניתן להפעיל את ה-SQL כמה פעמים – כל הפקודות ממוסגרות עם IF NOT EXISTS כדי למנוע שגיאות כפולות.
+              לאחר הרצת שני הבלוקים, עבור לשלב האימות כדי לוודא שהטבלאות, המדיניות ופונקציית הבדיקה קיימות. ניתן להפעיל את ה-SQL כמה פעמים – כל המדיניות נמחקות עם DROP POLICY IF EXISTS לפני יצירתן מחדש כדי לאפס תצורות שגויות ללא שגיאות כפולות.
             </p>
           </div>
         </StepSection>
