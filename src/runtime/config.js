@@ -90,6 +90,15 @@ export function activateConfig(rawConfig, options = {}) {
     orgId: normalized.orgId,
   };
 
+  if (typeof window !== 'undefined') {
+    window.__RUNTIME_CONFIG__ = {
+      supabaseUrl: currentConfig.supabaseUrl,
+      supabaseAnonKey: currentConfig.supabaseAnonKey,
+      source: currentConfig.source,
+      orgId: currentConfig.orgId,
+    };
+  }
+
   CACHE.set('app', { ...normalized });
   notifyListeners(activatedListeners, {
     supabaseUrl: currentConfig.supabaseUrl,
@@ -106,6 +115,9 @@ export function clearConfig() {
   CACHE.delete('app');
   readyPromise = createReadyPromise();
   notifyListeners(clearedListeners);
+  if (typeof window !== 'undefined') {
+    window.__RUNTIME_CONFIG__ = null;
+  }
 }
 
 export function getConfigOrThrow() {
@@ -436,4 +448,26 @@ export async function loadRuntimeConfig(options = {}) {
   }
 
   return normalized;
+}
+
+function hasPreloadedConfig(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return false;
+  }
+  const supabaseUrl = raw.supabaseUrl || raw.supabase_url;
+  const supabaseAnonKey = raw.supabaseAnonKey || raw.supabase_anon_key || raw.anon_key;
+  return Boolean(
+    typeof supabaseUrl === 'string' && supabaseUrl.trim() &&
+    typeof supabaseAnonKey === 'string' && supabaseAnonKey.trim(),
+  );
+}
+
+if (typeof window !== 'undefined' && hasPreloadedConfig(window.__RUNTIME_CONFIG__)) {
+  try {
+    const preloaded = window.__RUNTIME_CONFIG__;
+    const orgId = preloaded.orgId ?? preloaded.org_id ?? null;
+    activateConfig(preloaded, { source: preloaded.source || 'preload', orgId });
+  } catch (error) {
+    console.warn('failed to activate preloaded runtime config', error);
+  }
 }
