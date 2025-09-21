@@ -445,16 +445,20 @@ export function OrgProvider({ children }) {
 
       setActiveOrgConfig((current) => {
         const normalized = {
+          orgId,
           supabaseUrl: config.supabaseUrl,
           supabaseAnonKey: config.supabaseAnonKey,
         };
+
         if (
           current &&
+          current.orgId === normalized.orgId &&
           current.supabaseUrl === normalized.supabaseUrl &&
           current.supabaseAnonKey === normalized.supabaseAnonKey
         ) {
           return current;
         }
+
         return normalized;
       });
       setConfigStatus('success');

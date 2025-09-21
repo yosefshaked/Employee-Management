@@ -65,11 +65,34 @@ export function onConfigCleared(listener) {
 const DEFAULT_MISSING_CONFIG_MESSAGE =
   'טעינת ההגדרות נכשלה. ודא שפונקציית /api/config זמינה ומחזירה JSON תקין.';
 
+function applyErrorName(error, name) {
+  if (!error || (typeof error !== 'object' && typeof error !== 'function')) {
+    return error;
+  }
+
+  try {
+    Object.defineProperty(error, 'name', {
+      value: name,
+      configurable: true,
+      enumerable: false,
+      writable: true,
+    });
+  } catch {
+    try {
+      error.name = name;
+    } catch {
+      // ignore read-only name assignments
+    }
+  }
+
+  return error;
+}
+
 export function MissingRuntimeConfigError(message = DEFAULT_MISSING_CONFIG_MESSAGE) {
   const target = new.target || MissingRuntimeConfigError;
   const finalMessage = message === undefined ? DEFAULT_MISSING_CONFIG_MESSAGE : message;
   const error = Reflect.construct(Error, [finalMessage], target);
-  error.name = 'MissingRuntimeConfigError';
+  applyErrorName(error, 'MissingRuntimeConfigError');
 
   if (typeof Error.captureStackTrace === 'function') {
     Error.captureStackTrace(error, MissingRuntimeConfigError);
