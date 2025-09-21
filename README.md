@@ -42,7 +42,7 @@ The command outputs static assets to the `dist/` directory. Configure Azure Stat
 
 At bootstrap the SPA calls the Azure Function `GET /api/config`. Without credentials the function returns the core Supabase URL and anon key defined by `APP_SUPABASE_URL` and `APP_SUPABASE_ANON_KEY`.
 
-After the user signs in and selects an organization the client issues `GET /api/org/<org-id>/keys` with `Authorization: Bearer <supabase_access_token>`. The API forwards the token to the Control database RPC `public.get_org_public_keys`, which verifies the caller’s membership before returning the organization’s `supabase_url` and `anon_key`. Missing or invalid tokens yield `401`, while users outside the organization receive `403` or `404`.
+After the user signs in and selects an organization the client issues `GET /api/org/<org-id>/keys` with the header `X-Supabase-Authorization: Bearer <supabase_access_token>`. The API forwards the token to the Control database RPC `public.get_org_public_keys`, which verifies the caller’s membership before returning the organization’s `supabase_url` and `anon_key`. Missing or invalid tokens yield `401`, while users outside the organization receive `403` or `404`.
 
 Visit `/#/diagnostics` in development to review the last configuration request (endpoint, org id, HTTP status, and request scope). Secrets are masked except for the last four characters.
 

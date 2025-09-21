@@ -1,6 +1,6 @@
 import { createContext, createElement, useContext, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { getRuntimeConfig } from './runtime/config.js';
+import { getRuntimeConfig, MissingRuntimeConfigError } from './runtime/config.js';
 
 const runtimeConfig = getRuntimeConfig();
 
@@ -98,15 +98,11 @@ export function getActiveOrgConfig() {
 
 export function getOrgSupabase() {
   if (!activeOrgClient) {
-    throw new Error('לא נבחרה עדיין סביבה ארגונית. בחר ארגון כדי להמשיך.');
+    throw new MissingRuntimeConfigError('לא נבחר ארגון פעיל או שהחיבור שלו טרם הוגדר.');
   }
   return activeOrgClient;
 }
 
-export function subscribeOrgClientChange(listener) {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
 
 const OrgSupabaseContext = createContext(undefined);
 
@@ -158,7 +154,7 @@ export function useOrgSupabase() {
     throw new Error('OrgSupabaseProvider is missing from the React tree.');
   }
   if (!context.client) {
-    throw new Error('לא נבחר ארגון פעיל או שהחיבור שלו טרם הוגדר.');
+    throw new MissingRuntimeConfigError('לא נבחר ארגון פעיל או שהחיבור שלו טרם הוגדר.');
   }
   return context.client;
 }
@@ -176,10 +172,20 @@ export const supabase = new Proxy(
   {
     get(_target, prop) {
       if (!activeOrgClient) {
-        throw new Error('לא נבחר ארגון פעיל או שהחיבור שלו טרם הוגדר.');
+        throw new MissingRuntimeConfigError('לא נבחר ארגון פעיל או שהחיבור שלו טרם הוגדר.');
       }
       const value = activeOrgClient[prop];
       return typeof value === 'function' ? value.bind(activeOrgClient) : value;
     },
   },
 );
+
+export function subscribeOrgClientChange(listener) {
+  listeners.add(listener);
+  try {
+    listener(activeOrgClient, activeOrgConfig);
+  } catch (error) {
+    console.error('Org Supabase listener failed during subscription', error);
+  }
+  return () => listeners.delete(listener);
+}

@@ -19,8 +19,8 @@ function maskValue(value) {
 export default function Diagnostics() {
   const config = useRuntimeConfig();
   const diagnostics = getRuntimeConfigDiagnostics();
-  const { user } = useAuth();
-  const { activeOrgId, configStatus, activeOrgConfig } = useOrg();
+  const { user, session } = useAuth();
+  const { activeOrgId, configStatus, activeOrgConfig, tenantClientReady } = useOrg();
 
   const runtimeSourceLabel = useMemo(() => {
     switch (config?.source) {
@@ -56,6 +56,14 @@ export default function Diagnostics() {
   const diagnosticsScope = diagnostics.scope === 'org'
     ? 'בקשת ארגון (‎/api/org/:id/keys‎)'
     : 'בקשת אפליקציה (‎/api/config‎)';
+  const controlSessionLabel = session ? 'כן' : 'לא';
+  const tenantClientLabel = tenantClientReady ? 'כן' : 'לא';
+  const lastKeysStatus = diagnostics.scope === 'org'
+    ? (diagnostics.status !== null ? diagnostics.status : '—')
+    : '—';
+  const lastKeysBody = diagnostics.scope === 'org' && diagnostics.bodyIsJson
+    ? JSON.stringify(diagnostics.body, null, 2)
+    : '—';
 
   return (
     <div className="max-w-2xl mx-auto mt-16 bg-white shadow-xl rounded-2xl p-8 space-y-6" dir="rtl">
@@ -113,6 +121,33 @@ export default function Diagnostics() {
           </>
         ) : null}
       </dl>
+      <div className="border border-slate-200 rounded-xl p-4 space-y-4">
+        <h2 className="text-xl font-semibold text-slate-900">חיבור Supabase ארגוני</h2>
+        <dl className="grid grid-cols-1 gap-4">
+          <div className="border border-slate-200 rounded-lg p-4 bg-slate-50">
+            <dt className="text-sm text-slate-500">סשן ניהול (control) זמין</dt>
+            <dd className="text-lg font-semibold text-slate-900">{controlSessionLabel}</dd>
+          </div>
+          <div className="border border-slate-200 rounded-lg p-4">
+            <dt className="text-sm text-slate-500">מזהה ארגון פעיל</dt>
+            <dd className="text-lg font-semibold text-slate-900">{activeOrgLabel}</dd>
+          </div>
+          <div className="border border-slate-200 rounded-lg p-4">
+            <dt className="text-sm text-slate-500">לקוח Supabase ארגוני מאותחל</dt>
+            <dd className="text-lg font-semibold text-slate-900">{tenantClientLabel}</dd>
+          </div>
+          <div className="border border-slate-200 rounded-lg p-4">
+            <dt className="text-sm text-slate-500">סטטוס אחרון של ‎/api/org/:id/keys‎</dt>
+            <dd className="text-lg font-semibold text-slate-900">{lastKeysStatus}</dd>
+          </div>
+          <div className="border border-slate-200 rounded-lg p-4">
+            <dt className="text-sm text-slate-500">תוכן תשובת ‎/api/org/:id/keys‎</dt>
+            <dd className="text-sm font-mono text-left whitespace-pre-wrap break-words text-slate-800 bg-white border border-slate-200 rounded-lg p-3">
+              {lastKeysBody}
+            </dd>
+          </div>
+        </dl>
+      </div>
     </div>
   );
 }

@@ -11,6 +11,8 @@ let lastDiagnostics = {
   timestamp: null,
   accessToken: null,
   accessTokenPreview: null,
+  body: null,
+  bodyIsJson: false,
 };
 
 export class MissingRuntimeConfigError extends Error {
@@ -82,7 +84,7 @@ function buildTokenPreview(token) {
   return `${trimmed.slice(0, 4)}…${trimmed.slice(-4)}`;
 }
 
-function updateDiagnostics({ orgId, status, scope, ok, error, accessToken }) {
+function updateDiagnostics({ orgId, status, scope, ok, error, accessToken, body, bodyIsJson }) {
   lastDiagnostics = {
     orgId: orgId || null,
     status: typeof status === 'number' ? status : null,
@@ -92,6 +94,8 @@ function updateDiagnostics({ orgId, status, scope, ok, error, accessToken }) {
     timestamp: Date.now(),
     accessToken: accessToken || null,
     accessTokenPreview: buildTokenPreview(accessToken),
+    body: bodyIsJson ? body ?? null : null,
+    bodyIsJson: Boolean(bodyIsJson && body !== undefined),
   };
 }
 
@@ -116,11 +120,16 @@ function ensureJsonResponse(response, orgId, scope, accessToken, endpoint) {
       ok: false,
       error: 'response-not-json',
       accessToken,
+      body: null,
+      bodyIsJson: false,
     });
     const endpointLabel = endpoint || '/api/config';
-    throw new MissingRuntimeConfigError(
+    const error = new MissingRuntimeConfigError(
       `הפונקציה ${endpointLabel} לא מחזירה JSON תקין. ודא שהיא מחזירה תשובה מסוג application/json.`,
     );
+    error.status = response.status;
+    error.endpoint = endpointLabel;
+    throw error;
   }
 }
 
@@ -146,6 +155,8 @@ export async function loadRuntimeConfig(options = {}) {
         ok: false,
         error: 'missing-org',
         accessToken,
+        body: null,
+        bodyIsJson: false,
       });
       throw new MissingRuntimeConfigError('לא נמצא ארגון פעיל לטעינת מפתחות Supabase.');
     }
@@ -158,11 +169,17 @@ export async function loadRuntimeConfig(options = {}) {
         ok: false,
         error: 'missing-token',
         accessToken,
+        body: null,
+        bodyIsJson: false,
       });
       throw new MissingRuntimeConfigError('נדרשת כניסה מחדש כדי לאמת את בקשת מפתחות הארגון.');
     }
 
-    headers.Authorization = `Bearer ${accessToken}`;
+    const bearerHeader = `Bearer ${accessToken}`;
+    headers.authorization = bearerHeader;
+    headers.Authorization = bearerHeader;
+    headers['x-supabase-authorization'] = bearerHeader;
+    headers['X-Supabase-Authorization'] = bearerHeader;
     endpoint = `/api/org/${encodeURIComponent(targetOrgId)}/keys`;
   }
 
@@ -181,6 +198,8 @@ export async function loadRuntimeConfig(options = {}) {
       ok: false,
       error: 'network-failure',
       accessToken,
+      body: null,
+      bodyIsJson: false,
     });
     throw new MissingRuntimeConfigError(
       `לא ניתן ליצור קשר עם הפונקציה ${endpoint}. ודא שהיא פרוסה ופועלת.`,
@@ -200,10 +219,15 @@ export async function loadRuntimeConfig(options = {}) {
       ok: false,
       error: 'invalid-json',
       accessToken,
+      body: null,
+      bodyIsJson: false,
     });
-    throw new MissingRuntimeConfigError(
+    const parsingError = new MissingRuntimeConfigError(
       `לא ניתן לפענח את תשובת ${endpoint}. ודא שהפונקציה מחזירה JSON תקין.`,
     );
+    parsingError.status = response.status;
+    parsingError.endpoint = endpoint;
+    throw parsingError;
   }
 
   if (!response.ok) {
@@ -211,9 +235,11 @@ export async function loadRuntimeConfig(options = {}) {
 
     if (scope === 'org') {
       if (response.status === 404) {
-        serverMessage = 'לא נמצאו מפתחות Supabase עבור הארגון שנבחר.';
+        serverMessage = 'לא נמצא ארגון או שאין הרשאה';
       } else if (response.status === 401 || response.status === 403) {
-        serverMessage = 'אין הרשאה לצפות במפתחות הארגון. ודא שהחשבון משויך לארגון.';
+        serverMessage = 'פג תוקף כניסה/חסר Bearer';
+      } else if (response.status >= 500) {
+        serverMessage = 'שגיאת שרת בעת טעינת מפתחות הארגון.';
       } else {
         serverMessage = `טעינת מפתחות הארגון נכשלה (סטטוס ${response.status}).`;
       }
@@ -230,8 +256,14 @@ export async function loadRuntimeConfig(options = {}) {
       ok: false,
       error: serverMessage,
       accessToken,
+      body: payload,
+      bodyIsJson: typeof payload === 'object' && payload !== null,
     });
-    throw new MissingRuntimeConfigError(serverMessage);
+    const error = new MissingRuntimeConfigError(serverMessage);
+    error.status = response.status;
+    error.body = payload;
+    error.endpoint = endpoint;
+    throw error;
   }
 
   const sanitized = sanitizeConfig(payload, scope === 'org' ? 'org-api' : 'api');
@@ -243,10 +275,16 @@ export async function loadRuntimeConfig(options = {}) {
       ok: false,
       error: 'missing-keys',
       accessToken,
+      body: payload,
+      bodyIsJson: typeof payload === 'object' && payload !== null,
     });
-    throw new MissingRuntimeConfigError(
+    const error = new MissingRuntimeConfigError(
       `הפונקציה ${endpoint} לא סיפקה supabase_url ו-anon_key.`,
     );
+    error.status = response.status;
+    error.body = payload;
+    error.endpoint = endpoint;
+    throw error;
   }
 
   const normalized = {
@@ -261,6 +299,8 @@ export async function loadRuntimeConfig(options = {}) {
     ok: true,
     error: null,
     accessToken,
+    body: payload,
+    bodyIsJson: typeof payload === 'object' && payload !== null,
   });
 
   CACHE.set(cacheKey, normalized);

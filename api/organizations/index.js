@@ -20,6 +20,183 @@ function maskForLog(value) {
   return `${stringValue.slice(0, 2)}••••${stringValue.slice(-2)}`;
 }
 
+function normalizeHeaderValue(rawValue) {
+  if (!rawValue) {
+    return undefined;
+  }
+
+  if (typeof rawValue === 'string') {
+    return rawValue;
+  }
+
+  if (Array.isArray(rawValue)) {
+    for (const entry of rawValue) {
+      const normalized = normalizeHeaderValue(entry);
+      if (typeof normalized === 'string' && normalized.length > 0) {
+        return normalized;
+      }
+    }
+    return undefined;
+  }
+
+  if (typeof rawValue === 'object') {
+    if (typeof rawValue.value === 'string') {
+      return rawValue.value;
+    }
+
+    if (Array.isArray(rawValue.value)) {
+      const normalized = normalizeHeaderValue(rawValue.value);
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    if (typeof rawValue[0] === 'string') {
+      return rawValue[0];
+    }
+
+    if (typeof rawValue.toString === 'function' && rawValue.toString !== Object.prototype.toString) {
+      const candidate = rawValue.toString();
+      if (typeof candidate === 'string' && candidate && candidate !== '[object Object]') {
+        return candidate;
+      }
+    }
+
+    if (typeof rawValue[Symbol.iterator] === 'function') {
+      for (const entry of rawValue) {
+        const normalized = normalizeHeaderValue(entry);
+        if (typeof normalized === 'string' && normalized.length > 0) {
+          return normalized;
+        }
+      }
+    }
+  }
+
+  if (typeof rawValue === 'number' || typeof rawValue === 'boolean') {
+    return String(rawValue);
+  }
+
+  return undefined;
+}
+
+function extractBearerToken(rawValue) {
+  const normalized = normalizeHeaderValue(rawValue);
+  if (typeof normalized !== 'string') {
+    return null;
+  }
+  const trimmed = normalized.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (!trimmed.toLowerCase().startsWith('bearer ')) {
+    return null;
+  }
+  const token = trimmed.slice('bearer '.length).trim();
+  return token || null;
+}
+
+function resolveHeaderValue(headers, name) {
+  if (!headers || !name) {
+    return undefined;
+  }
+
+  const targetName = typeof name === 'string' ? name : String(name || '');
+
+  if (typeof headers.get === 'function') {
+    const directValue = normalizeHeaderValue(headers.get(name));
+    if (typeof directValue === 'string' && directValue.length > 0) {
+      return directValue;
+    }
+
+    const lowerValue = normalizeHeaderValue(headers.get(name.toLowerCase()));
+    if (typeof lowerValue === 'string' && lowerValue.length > 0) {
+      return lowerValue;
+    }
+  }
+
+  if (typeof headers === 'object') {
+    if (Object.prototype.hasOwnProperty.call(headers, name)) {
+      const directValue = normalizeHeaderValue(headers[name]);
+      if (typeof directValue === 'string' && directValue.length > 0) {
+        return directValue;
+      }
+    }
+
+    const lowerName = typeof name === 'string' ? name.toLowerCase() : name;
+    if (lowerName !== name && Object.prototype.hasOwnProperty.call(headers, lowerName)) {
+      const lowerValue = normalizeHeaderValue(headers[lowerName]);
+      if (typeof lowerValue === 'string' && lowerValue.length > 0) {
+        return lowerValue;
+      }
+    }
+
+    const upperName = typeof name === 'string' ? name.toUpperCase() : name;
+    if (upperName !== name && Object.prototype.hasOwnProperty.call(headers, upperName)) {
+      const upperValue = normalizeHeaderValue(headers[upperName]);
+      if (typeof upperValue === 'string' && upperValue.length > 0) {
+        return upperValue;
+      }
+    }
+  }
+
+  if (typeof headers?.toJSON === 'function') {
+    const serialized = headers.toJSON();
+    if (serialized && typeof serialized === 'object') {
+      if (Object.prototype.hasOwnProperty.call(serialized, name)) {
+        const directValue = normalizeHeaderValue(serialized[name]);
+        if (typeof directValue === 'string' && directValue.length > 0) {
+          return directValue;
+        }
+      }
+
+      const lowerName = typeof name === 'string' ? name.toLowerCase() : name;
+      if (lowerName !== name && Object.prototype.hasOwnProperty.call(serialized, lowerName)) {
+        const lowerValue = normalizeHeaderValue(serialized[lowerName]);
+        if (typeof lowerValue === 'string' && lowerValue.length > 0) {
+          return lowerValue;
+        }
+      }
+
+      const upperName = typeof name === 'string' ? name.toUpperCase() : name;
+      if (upperName !== name && Object.prototype.hasOwnProperty.call(serialized, upperName)) {
+        const upperValue = normalizeHeaderValue(serialized[upperName]);
+        if (typeof upperValue === 'string' && upperValue.length > 0) {
+          return upperValue;
+        }
+      }
+    }
+  }
+
+  const rawHeaders = headers?.rawHeaders;
+  if (Array.isArray(rawHeaders)) {
+    for (let index = 0; index < rawHeaders.length - 1; index += 2) {
+      const rawName = rawHeaders[index];
+      if (typeof rawName !== 'string') {
+        continue;
+      }
+
+      if (rawName.toLowerCase() !== targetName.toLowerCase()) {
+        continue;
+      }
+
+      const rawValue = normalizeHeaderValue(rawHeaders[index + 1]);
+      if (typeof rawValue === 'string' && rawValue.length > 0) {
+        return rawValue;
+      }
+    }
+  }
+
+  const nestedHeaders = headers?.headers;
+  if (nestedHeaders && nestedHeaders !== headers) {
+    const nestedValue = resolveHeaderValue(nestedHeaders, name);
+    if (nestedValue) {
+      return nestedValue;
+    }
+  }
+
+  return undefined;
+}
+
 function normalizePolicyLinks(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -74,13 +251,21 @@ export default async function (context, req) {
     return;
   }
 
-  const authorization = req.headers?.authorization || req.headers?.Authorization || '';
-  if (typeof authorization !== 'string' || !authorization.startsWith('Bearer ')) {
-    jsonResponse(context, 401, { error: 'missing_or_invalid_token' });
-    return;
+  const headerCandidates = [
+    'X-Supabase-Authorization',
+    'x-supabase-auth',
+    'Authorization',
+  ];
+
+  let token = null;
+  for (const headerName of headerCandidates) {
+    const value = resolveHeaderValue(req.headers, headerName);
+    token = extractBearerToken(value);
+    if (token) {
+      break;
+    }
   }
 
-  const token = authorization.slice('Bearer '.length).trim();
   if (!token) {
     jsonResponse(context, 401, { error: 'missing_or_invalid_token' });
     return;

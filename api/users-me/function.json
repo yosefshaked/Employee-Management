@@ -5,7 +5,7 @@
       "type": "httpTrigger",
       "direction": "in",
       "methods": [ "get" ],
-      "route": "org/{orgId}/keys"
+      "route": "users/me"
     },
     {
       "type": "http",

@@ -128,7 +128,7 @@ function ConfigErrorScreen({ error }) {
     const baseUrl = `${window.location.origin}${endpoint}`;
     const parts = ['curl', '-i', '-H "Accept: application/json"'];
     if (trimmedToken) {
-      parts.push(`-H "Authorization: Bearer ${escapeDoubleQuotes(trimmedToken)}"`);
+      parts.push(`-H "X-Supabase-Authorization: Bearer ${escapeDoubleQuotes(trimmedToken)}"`);
     }
     parts.push(`"${baseUrl}"`);
     return parts.join(' ');
@@ -175,7 +175,7 @@ function ConfigErrorScreen({ error }) {
       const headers = { Accept: 'application/json' };
       const orgId = manualOrgId.trim();
       if (trimmedToken) {
-        headers.Authorization = `Bearer ${trimmedToken}`;
+        headers['X-Supabase-Authorization'] = `Bearer ${trimmedToken}`;
       }
 
       const endpoint = orgId ? `/api/org/${encodeURIComponent(orgId)}/keys` : '/api/config';
@@ -291,7 +291,7 @@ function ConfigErrorScreen({ error }) {
           <h2 style={styles.sectionTitle}>אסימון וזיהוי ארגון</h2>
           <div style={styles.tokenBox}>
             <div style={styles.tokenHeader}>
-              <span style={styles.tokenLabel}>Authorization header</span>
+              <span style={styles.tokenLabel}>X-Supabase-Authorization header</span>
               {hasToken ? (
                 <button type="button" style={styles.linkButton} onClick={() => setShowToken(value => !value)}>
                   {showToken ? 'הסתר ערך' : 'הצג ערך מלא'}
