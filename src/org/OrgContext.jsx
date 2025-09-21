@@ -8,7 +8,12 @@ import React, {
   useState,
 } from 'react';
 import { toast } from 'sonner';
-import { coreSupabase, OrgSupabaseProvider, maskSupabaseCredential } from '@/supabaseClient.js';
+import {
+  coreSupabase,
+  OrgSupabaseProvider,
+  maskSupabaseCredential,
+  subscribeOrgClientChange,
+} from '@/supabaseClient.js';
 import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { createOrganization as createOrganizationRpc } from '@/api/organizations.js';
@@ -137,11 +142,17 @@ export function OrgProvider({ children }) {
   const [error, setError] = useState(null);
   const [configStatus, setConfigStatus] = useState('idle');
   const [activeOrgConfig, setActiveOrgConfig] = useState(null);
+  const [tenantClientReady, setTenantClientReady] = useState(false);
   const loadingRef = useRef(false);
   const lastUserIdRef = useRef(null);
   const configRequestRef = useRef(0);
 
-  const accessToken = session?.access_token || null;
+  useEffect(() => {
+    const unsubscribe = subscribeOrgClientChange((client) => {
+      setTenantClientReady(Boolean(client));
+    });
+    return unsubscribe;
+  }, []);
 
   const resetState = useCallback(() => {
     setStatus('idle');
@@ -441,69 +452,95 @@ export function OrgProvider({ children }) {
     [],
   );
 
-  const fetchOrgRuntimeConfig = useCallback(
-    async (orgId) => {
-      if (!orgId) {
-        setActiveOrgConfig(null);
-        setConfigStatus('idle');
+  const fetchOrgRuntimeConfig = useCallback(async (orgId) => {
+    if (!orgId) {
+      setActiveOrgConfig(null);
+      setConfigStatus('idle');
+      return;
+    }
+
+    const requestId = configRequestRef.current + 1;
+    configRequestRef.current = requestId;
+    setConfigStatus('loading');
+
+    try {
+      const { data: sessionData, error: sessionError } = await coreSupabase.auth.getSession();
+
+      if (configRequestRef.current !== requestId) {
         return;
       }
+
+      if (sessionError) {
+        const authError = new MissingRuntimeConfigError('פג תוקף כניסה/חסר Bearer');
+        authError.status = 401;
+        authError.cause = sessionError;
+        throw authError;
+      }
+
+      const accessToken = sessionData?.session?.access_token || null;
 
       if (!accessToken) {
-        setConfigStatus('idle');
+        const missingTokenError = new MissingRuntimeConfigError('פג תוקף כניסה/חסר Bearer');
+        missingTokenError.status = 401;
+        throw missingTokenError;
+      }
+
+      const config = await loadRuntimeConfig({ accessToken, orgId, force: true });
+
+      if (configRequestRef.current !== requestId) {
         return;
       }
 
-      const requestId = configRequestRef.current + 1;
-      configRequestRef.current = requestId;
-      setConfigStatus('loading');
-
-      try {
-        const config = await loadRuntimeConfig({ accessToken, orgId, force: true });
-
-        if (configRequestRef.current !== requestId) {
-          return;
+      setActiveOrgConfig((current) => {
+        const normalized = {
+          supabaseUrl: config.supabaseUrl,
+          supabaseAnonKey: config.supabaseAnonKey,
+        };
+        if (
+          current &&
+          current.supabaseUrl === normalized.supabaseUrl &&
+          current.supabaseAnonKey === normalized.supabaseAnonKey
+        ) {
+          return current;
         }
-
-        setActiveOrgConfig((current) => {
-          const normalized = {
-            supabaseUrl: config.supabaseUrl,
-            supabaseAnonKey: config.supabaseAnonKey,
-          };
-          if (
-            current &&
-            current.supabaseUrl === normalized.supabaseUrl &&
-            current.supabaseAnonKey === normalized.supabaseAnonKey
-          ) {
-            return current;
-          }
-          return normalized;
-        });
-        setConfigStatus('success');
-        console.info('[OrgSupabase]', {
-          action: 'config-fetched',
-          orgId,
-          supabaseUrl: maskSupabaseCredential(config.supabaseUrl),
-          anonKey: maskSupabaseCredential(config.supabaseAnonKey),
-          source: config.source || 'unknown',
-        });
-      } catch (error) {
-        if (configRequestRef.current !== requestId) {
-          return;
-        }
-
-        const message = error instanceof MissingRuntimeConfigError
-          ? error.message
-          : 'לא ניתן היה לטעון את הגדרות הארגון. נסה שוב בעוד מספר רגעים.';
-
-        console.error('Failed to fetch organization config', error);
-        toast.error(message);
-        setActiveOrgConfig(null);
-        setConfigStatus('error');
+        return normalized;
+      });
+      setConfigStatus('success');
+      console.info('[OrgSupabase]', {
+        action: 'config-fetched',
+        orgId,
+        supabaseUrl: maskSupabaseCredential(config.supabaseUrl),
+        anonKey: maskSupabaseCredential(config.supabaseAnonKey),
+        source: config.source || 'unknown',
+      });
+    } catch (error) {
+      if (configRequestRef.current !== requestId) {
+        return;
       }
-    },
-    [accessToken],
-  );
+
+      console.error('Failed to fetch organization config', error);
+
+      if (error?.status === 401) {
+        toast.error('פג תוקף כניסה/חסר Bearer');
+        try {
+          await coreSupabase.auth.refreshSession();
+        } catch (refreshError) {
+          console.error('Failed to refresh Supabase session after 401', refreshError);
+        }
+      } else if (error?.status === 404) {
+        toast.error('לא נמצא ארגון או שאין הרשאה');
+      } else if (typeof error?.status === 'number' && error.status >= 500) {
+        toast.error('שגיאת שרת בעת טעינת מפתחות הארגון.');
+      } else if (error instanceof MissingRuntimeConfigError) {
+        toast.error(error.message);
+      } else {
+        toast.error('לא ניתן היה לטעון את הגדרות הארגון. נסה שוב בעוד מספר רגעים.');
+      }
+
+      setActiveOrgConfig(null);
+      setConfigStatus('error');
+    }
+  }, []);
 
   const determineStatus = useCallback(
     (orgList) => {
@@ -590,12 +627,8 @@ export function OrgProvider({ children }) {
 
   useEffect(() => {
     if (!activeOrgId) return;
-    if (!accessToken) {
-      setActiveOrgConfig(null);
-      return;
-    }
     void fetchOrgRuntimeConfig(activeOrgId);
-  }, [activeOrgId, accessToken, fetchOrgRuntimeConfig]);
+  }, [activeOrgId, fetchOrgRuntimeConfig]);
 
   const selectOrg = useCallback(
     async (orgId) => {
@@ -1011,6 +1044,7 @@ export function OrgProvider({ children }) {
       activeOrgConfig,
       configStatus,
       activeOrgConnection,
+      tenantClientReady,
     }),
     [
       status,
@@ -1034,6 +1068,7 @@ export function OrgProvider({ children }) {
       configStatus,
       activeOrgConfig,
       activeOrgConnection,
+      tenantClientReady,
     ],
   );
 
