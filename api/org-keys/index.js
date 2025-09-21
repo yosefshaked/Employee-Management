@@ -176,6 +176,12 @@ export default async function (context, req) {
   const orgId = context.bindingData?.orgId;
   const diagnostics = createDiagnostics(context, req);
 
+  function respond(status, body, extraHeaders) {
+    const response = json(status, diagnostics.attach(body), diagnostics.headers(extraHeaders));
+    context.res = response;
+    return response;
+  }
+
   diagnostics.record('request.received', { orgIdPresent: Boolean(orgId) });
 
   if (!orgId) {
@@ -277,14 +283,13 @@ export default async function (context, req) {
 
   diagnostics.record('rpc.success', { orgHasConfig: true });
 
-  function respond(status, body, extraHeaders) {
-    const response = json(status, diagnostics.attach(body), diagnostics.headers(extraHeaders));
-    context.res = response;
-    return response;
-  }
+  const supabaseUrlValue = record.supabase_url;
+  const anonKeyValue = record.anon_key;
 
   return respond(200, {
-    supabaseUrl: record.supabase_url,
-    anonKey: record.anon_key,
+    supabaseUrl: supabaseUrlValue,
+    supabase_url: supabaseUrlValue,
+    anonKey: anonKeyValue,
+    anon_key: anonKeyValue,
   });
 }
