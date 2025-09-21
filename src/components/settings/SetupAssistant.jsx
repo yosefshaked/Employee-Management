@@ -17,6 +17,8 @@ import {
   getRuntimeConfigDiagnostics,
   MissingRuntimeConfigError,
 } from '@/runtime/config.js';
+import { verifyConnection } from '@/runtime/verification.js';
+import { resetSupabase as resetRuntimeSupabase } from '@/runtime/supabase-client.js';
 import { mapSupabaseError } from '@/org/errors.js';
 import {
   Building2,
@@ -41,6 +43,7 @@ const INITIAL_CONNECTION_TEST = {
   status: 'idle',
   message: '',
   diagnostics: null,
+  supabaseError: null,
   completedAt: null,
 };
 
@@ -792,6 +795,7 @@ export default function SetupAssistant() {
 
   useEffect(() => {
     if (!activeOrg) {
+      resetRuntimeSupabase();
       clearConfig();
       setConnection({ ...INITIAL_CONNECTION_VALUES });
       setOriginalConnection({ ...INITIAL_CONNECTION_VALUES });
@@ -875,6 +879,7 @@ export default function SetupAssistant() {
   useEffect(() => {
     if (hasUnsavedChanges) {
       if (!clearedRuntimeConfigRef.current) {
+        resetRuntimeSupabase();
         clearConfig();
         clearedRuntimeConfigRef.current = true;
       }
@@ -907,6 +912,37 @@ export default function SetupAssistant() {
       console.error('Failed to resolve access token for connection test', error);
       return null;
     }
+  };
+
+  const extractSupabaseError = (error) => {
+    if (!error || typeof error !== 'object') {
+      return null;
+    }
+
+    const message = typeof error.message === 'string' ? error.message : '';
+    const code = typeof error.code === 'string' ? error.code : null;
+    const hint = typeof error.hint === 'string' ? error.hint : null;
+    const rawDetails = error.details;
+    const details = Array.isArray(rawDetails)
+      ? rawDetails.map((detail) => String(detail)).filter(Boolean)
+      : typeof rawDetails === 'string'
+        ? rawDetails.trim()
+          ? [rawDetails.trim()]
+          : []
+        : rawDetails && typeof rawDetails === 'object'
+          ? [JSON.stringify(rawDetails)]
+          : [];
+
+    if (!message && !code && !hint && details.length === 0) {
+      return null;
+    }
+
+    return {
+      message,
+      code,
+      hint,
+      details,
+    };
   };
 
   const handleSaveConnection = async (event) => {
@@ -964,6 +1000,7 @@ export default function SetupAssistant() {
       }
 
       const config = await loadRuntimeConfig({ accessToken, orgId: activeOrg.id, force: true });
+      resetRuntimeSupabase();
       activateConfig(
         {
           supabaseUrl: config.supabaseUrl,
@@ -971,12 +1008,14 @@ export default function SetupAssistant() {
         },
         { source: config?.source || 'org-api', orgId: activeOrg.id },
       );
+      await verifyConnection();
       const diagnostics = getRuntimeConfigDiagnostics();
 
       setConnectionTest({
         status: 'success',
-        message: 'חיבור Supabase אומת בהצלחה.',
+        message: 'חיבור Supabase אומת בהצלחה והטבלה Employees נגישה.',
         diagnostics,
+        supabaseError: null,
         completedAt: new Date().toISOString(),
       });
       toast.success('חיבור הארגון אומת בהצלחה.');
@@ -984,15 +1023,20 @@ export default function SetupAssistant() {
       console.error('Setup assistant connection test failed', error);
       const diagnostics = getRuntimeConfigDiagnostics();
       const interpretation = interpretDiagnostics(diagnostics);
+      const supabaseErrorInfo = extractSupabaseError(error);
       const defaultMessage = error instanceof MissingRuntimeConfigError
         ? error.message
-        : error?.message || 'בדיקת החיבור נכשלה. ודא שהפונקציה /api/org/{orgId}/keys זמינה ומחזירה JSON תקין.';
+        : supabaseErrorInfo?.message
+          || (typeof error?.message === 'string' && error.message.trim()
+            ? error.message
+            : 'בדיקת החיבור נכשלה. ודא שהפונקציה /api/org/{orgId}/keys זמינה ומחזירה JSON תקין.');
       const message = interpretation?.message || defaultMessage;
 
       setConnectionTest({
         status: 'error',
         message,
         diagnostics,
+        supabaseError: supabaseErrorInfo,
         completedAt: new Date().toISOString(),
       });
       toast.error(message);
@@ -1147,6 +1191,7 @@ export default function SetupAssistant() {
     ];
 
     const interpretation = interpretDiagnostics(diagnostics);
+    const supabaseError = connectionTest.supabaseError;
     const rawBodyText = typeof diagnostics.bodyText === 'string' ? diagnostics.bodyText : '';
     const hasRawBodyText = Boolean(rawBodyText.trim());
     const shouldShowRawError = diagnostics.error
@@ -1170,6 +1215,37 @@ export default function SetupAssistant() {
               <ul className="list-disc pr-4 text-xs text-slate-500 space-y-1">
                 {interpretation.suggestions.map((suggestion, index) => (
                   <li key={`${suggestion}-${index}`}>{suggestion}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+        {supabaseError ? (
+          <div className="space-y-2">
+            <p className="text-sm text-slate-700 font-medium">שגיאת Supabase</p>
+            {supabaseError.message ? (
+              <p className="text-xs sm:text-sm text-slate-600">{supabaseError.message}</p>
+            ) : null}
+            {(supabaseError.code || supabaseError.hint) ? (
+              <div className="flex flex-wrap gap-4">
+                {supabaseError.code ? (
+                  <div className="flex gap-1">
+                    <span className="font-medium">קוד:</span>
+                    <span>{supabaseError.code}</span>
+                  </div>
+                ) : null}
+                {supabaseError.hint ? (
+                  <div className="flex gap-1">
+                    <span className="font-medium">רמז:</span>
+                    <span>{supabaseError.hint}</span>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {Array.isArray(supabaseError.details) && supabaseError.details.length ? (
+              <ul className="list-disc pr-4 text-xs text-slate-500 space-y-1">
+                {supabaseError.details.map((detail, index) => (
+                  <li key={`${detail}-${index}`}>{detail}</li>
                 ))}
               </ul>
             ) : null}

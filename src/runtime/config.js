@@ -19,10 +19,47 @@ let lastDiagnostics = {
   bodyText: null,
 };
 
+const activatedListeners = new Set();
+const clearedListeners = new Set();
+
+function notifyListeners(collection, payload) {
+  if (!collection || collection.size === 0) {
+    return;
+  }
+
+  for (const listener of Array.from(collection)) {
+    try {
+      listener(payload);
+    } catch (error) {
+      console.error('runtime config listener failed', error);
+    }
+  }
+}
+
 function createReadyPromise() {
   return new Promise((resolve) => {
     readyResolve = resolve;
   });
+}
+
+export function onConfigActivated(listener) {
+  if (typeof listener !== 'function') {
+    return () => {};
+  }
+  activatedListeners.add(listener);
+  return () => {
+    activatedListeners.delete(listener);
+  };
+}
+
+export function onConfigCleared(listener) {
+  if (typeof listener !== 'function') {
+    return () => {};
+  }
+  clearedListeners.add(listener);
+  return () => {
+    clearedListeners.delete(listener);
+  };
 }
 
 export class MissingRuntimeConfigError extends Error {
@@ -54,6 +91,12 @@ export function activateConfig(rawConfig, options = {}) {
   };
 
   CACHE.set('app', { ...normalized });
+  notifyListeners(activatedListeners, {
+    supabaseUrl: currentConfig.supabaseUrl,
+    supabaseAnonKey: currentConfig.supabaseAnonKey,
+    source: currentConfig.source,
+    orgId: currentConfig.orgId,
+  });
   readyResolve();
   return { supabaseUrl: currentConfig.supabaseUrl, supabaseAnonKey: currentConfig.supabaseAnonKey };
 }
@@ -62,6 +105,7 @@ export function clearConfig() {
   currentConfig = null;
   CACHE.delete('app');
   readyPromise = createReadyPromise();
+  notifyListeners(clearedListeners);
 }
 
 export function getConfigOrThrow() {
