@@ -354,22 +354,27 @@ export function OrgProvider({ children }) {
 
         if (userIds.length) {
           const idSet = new Set(userIds);
+          const accessToken = session?.access_token || null;
 
-          try {
-            const currentProfile = await fetchCurrentUser();
-            if (currentProfile?.id && idSet.has(currentProfile.id)) {
-              const metadata = currentProfile.raw_user_meta_data;
-              const derivedName = deriveNameFromMetadata(metadata) || currentProfile.email || null;
+          if (accessToken) {
+            try {
+              const currentProfile = await fetchCurrentUser({ accessToken });
+              if (currentProfile?.id && idSet.has(currentProfile.id)) {
+                const metadata = currentProfile.raw_user_meta_data;
+                const derivedName = deriveNameFromMetadata(metadata) || currentProfile.email || null;
 
-              profileMap.set(currentProfile.id, {
-                id: currentProfile.id,
-                email: currentProfile.email || null,
-                full_name: derivedName,
-                name: derivedName,
-              });
+                profileMap.set(currentProfile.id, {
+                  id: currentProfile.id,
+                  email: currentProfile.email || null,
+                  full_name: derivedName,
+                  name: derivedName,
+                });
+              }
+            } catch (profileError) {
+              console.warn('Failed to load current user profile via /api/users/me', profileError);
             }
-          } catch (profileError) {
-            console.warn('Failed to load current user profile via /api/users/me', profileError);
+          } else {
+            console.warn('Skipped /api/users/me profile fetch due to missing access token.');
           }
         }
 
@@ -396,7 +401,7 @@ export function OrgProvider({ children }) {
         setOrgInvites([]);
       }
     },
-    [],
+    [session],
   );
 
   const fetchOrgRuntimeConfig = useCallback(async (orgId) => {

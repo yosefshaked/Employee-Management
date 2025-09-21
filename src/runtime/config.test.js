@@ -42,6 +42,8 @@ describe('loadRuntimeConfig', () => {
     assert.equal(request.options.method, 'GET');
     assert.equal(request.options.headers.authorization, 'Bearer token-123');
     assert.equal(request.options.headers.Authorization, 'Bearer token-123');
+    assert.equal(request.options.headers['x-supabase-authorization'], 'Bearer token-123');
+    assert.equal(request.options.headers['X-Supabase-Authorization'], 'Bearer token-123');
     assert.equal('x-org-id' in request.options.headers, false);
     assert.equal(result.supabaseUrl, 'https://example-org.supabase.co');
     assert.equal(result.supabaseAnonKey, 'anon-key-123');

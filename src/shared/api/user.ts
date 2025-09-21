@@ -6,6 +6,7 @@ export type CurrentUserProfile = {
 
 type FetchCurrentUserOptions = {
   signal?: AbortSignal
+  accessToken?: string | null
 }
 
 function ensureJsonResponse(response: Response, body: unknown) {
@@ -26,13 +27,31 @@ function extractErrorMessage(body: unknown) {
   return 'אירעה שגיאה בעת טעינת פרטי המשתמש.'
 }
 
+function buildHeaders(options: FetchCurrentUserOptions) {
+  const headers: Record<string, string> = {
+    accept: 'application/json',
+  }
+
+  if (options.accessToken) {
+    const token = options.accessToken.startsWith('Bearer ')
+      ? options.accessToken.slice('Bearer '.length)
+      : options.accessToken
+    const bearer = `Bearer ${token}`
+    headers.authorization = bearer
+    headers.Authorization = bearer
+    headers['x-supabase-authorization'] = bearer
+    headers['X-Supabase-Authorization'] = bearer
+  }
+
+  return headers
+}
+
 export async function fetchCurrentUser(options: FetchCurrentUserOptions = {}): Promise<CurrentUserProfile> {
   const response = await fetch('/api/users/me', {
     method: 'GET',
-    headers: {
-      accept: 'application/json',
-    },
+    headers: buildHeaders(options),
     signal: options.signal,
+    cache: 'no-store',
   })
 
   const contentType = response.headers.get('content-type') || ''

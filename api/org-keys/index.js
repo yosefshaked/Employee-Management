@@ -1,73 +1,107 @@
 /* eslint-env node */
-import process from 'node:process'
-import { createClient } from '@supabase/supabase-js'
+import process from 'node:process';
+import { json, resolveBearerAuthorization } from '../_shared/http.js';
 
-const { CONTROL_SUPABASE_URL, CONTROL_SUPABASE_SERVICE_ROLE } = process.env
+function readEnv(context) {
+  return context?.env ?? process.env ?? {};
+}
 
-function ensure(value, name) {
-  if (!value) {
-    throw new Error(`Missing environment variable ${name}`)
+async function parseJsonResponse(response) {
+  const contentType = response.headers?.get?.('content-type') ?? response.headers?.get?.('Content-Type') ?? '';
+  if (typeof contentType === 'string' && contentType.toLowerCase().includes('application/json')) {
+    try {
+      return await response.json();
+    } catch {
+      return {};
+    }
   }
-  return value
+
+  try {
+    const text = await response.text();
+    if (!text) {
+      return {};
+    }
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
 }
 
 export default async function (context, req) {
-  try {
-    const orgId = context?.bindingData?.orgId
-    if (!orgId) {
-      return {
-        status: 400,
-        headers: { 'content-type': 'application/json' },
-        body: { error: 'Missing orgId in route' }
-      }
-    }
+  const env = readEnv(context);
+  const orgId = context?.bindingData?.orgId;
 
-    const header = req?.headers?.authorization ?? req?.headers?.Authorization
-    const value = typeof header === 'string' ? header : header?.toString()
-
-    if (!value || !value.startsWith('Bearer ')) {
-      return {
-        status: 401,
-        headers: { 'content-type': 'application/json' },
-        body: { error: 'Missing or invalid Authorization header' }
-      }
-    }
-
-    const url = ensure(CONTROL_SUPABASE_URL, 'CONTROL_SUPABASE_URL')
-    const key = ensure(CONTROL_SUPABASE_SERVICE_ROLE, 'CONTROL_SUPABASE_SERVICE_ROLE')
-
-    const supabase = createClient(url, key, { auth: { persistSession: false } })
-    const { data, error } = await supabase.rpc('get_org_public_keys', { p_org_id: orgId })
-
-    if (error) {
-      context.log?.error?.('get_org_public_keys error', error)
-      const status = error.code === 'P0002' ? 404 : 500
-      return {
-        status,
-        headers: { 'content-type': 'application/json' },
-        body: { error: error.message }
-      }
-    }
-
-    if (!data?.supabase_url || !data?.anon_key) {
-      return {
-        status: 404,
-        headers: { 'content-type': 'application/json' },
-        body: { error: 'org not found or no access' }
-      }
-    }
-
-    return {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-      body: data
-    }
-  } catch (error) {
-    context.log?.error?.('org-keys handler failure', error)
-    return {
-      status: 500,
-      headers: { 'content-type': 'application/json' },
-      body: { error: 'Internal error' }
-    }
+  if (!orgId) {
+    context.log?.warn?.('org-keys missing orgId');
+    return json(400, { message: 'missing org id' });
   }
+
+  const authorization = resolveBearerAuthorization(req);
+  const hasBearer = Boolean(authorization?.token);
+
+  if (!hasBearer) {
+    context.log?.warn?.('org-keys missing bearer', { orgId });
+    return json(401, { message: 'missing bearer' });
+  }
+
+  const supabaseUrl = env.APP_SUPABASE_URL;
+  const anonKey = env.APP_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !anonKey) {
+    context.log?.error?.('org-keys missing Supabase environment values');
+    return json(500, { message: 'server_misconfigured' });
+  }
+
+  const rpcUrl = `${supabaseUrl.replace(/\/$/, '')}/rest/v1/rpc/get_org_public_keys`;
+  let rpcResponse;
+
+  try {
+    rpcResponse = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        apikey: anonKey,
+        authorization: authorization.header,
+      },
+      body: JSON.stringify({ p_org_id: orgId }),
+    });
+  } catch (error) {
+    context.log?.error?.('org-keys rpc request failed', {
+      orgId,
+      hasBearer,
+      message: error?.message,
+    });
+    return json(502, { message: 'failed to reach control database' });
+  }
+
+  const payload = await parseJsonResponse(rpcResponse);
+
+  if (!rpcResponse.ok) {
+    context.log?.info?.('org-keys rpc error', {
+      orgId,
+      hasBearer,
+      status: rpcResponse.status,
+    });
+    return json(rpcResponse.status, payload && typeof payload === 'object' ? payload : {});
+  }
+
+  if (!payload || typeof payload !== 'object' || !payload.supabase_url || !payload.anon_key) {
+    context.log?.info?.('org-keys missing configuration', {
+      orgId,
+      hasBearer,
+      status: 404,
+    });
+    return json(404, { message: 'org not found or no access' });
+  }
+
+  context.log?.info?.('org-keys success', {
+    orgId,
+    hasBearer,
+    status: 200,
+  });
+
+  return json(200, {
+    supabase_url: payload.supabase_url,
+    anon_key: payload.anon_key,
+  });
 }

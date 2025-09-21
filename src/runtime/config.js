@@ -178,6 +178,8 @@ export async function loadRuntimeConfig(options = {}) {
     const bearerHeader = `Bearer ${accessToken}`;
     headers.authorization = bearerHeader;
     headers.Authorization = bearerHeader;
+    headers['x-supabase-authorization'] = bearerHeader;
+    headers['X-Supabase-Authorization'] = bearerHeader;
     endpoint = `/api/org/${encodeURIComponent(targetOrgId)}/keys`;
   }
 
