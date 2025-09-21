@@ -91,7 +91,11 @@ export default async function (context, req) {
     return respond(context, rpcResponse.status, payload && typeof payload === 'object' ? payload : {});
   }
 
-  if (!payload || typeof payload !== 'object' || !payload.supabase_url || !payload.anon_key) {
+  const record = Array.isArray(payload)
+    ? payload.find((entry) => entry && typeof entry === 'object' && entry.supabase_url && entry.anon_key)
+    : (payload && typeof payload === 'object' ? payload : null);
+
+  if (!record || typeof record.supabase_url !== 'string' || typeof record.anon_key !== 'string') {
     context.log?.info?.('org-keys missing configuration', {
       orgId,
       hasBearer,
@@ -107,7 +111,7 @@ export default async function (context, req) {
   });
 
   return respond(context, 200, {
-    supabaseUrl: payload.supabase_url,
-    anonKey: payload.anon_key,
+    supabaseUrl: record.supabase_url,
+    anonKey: record.anon_key,
   });
 }
