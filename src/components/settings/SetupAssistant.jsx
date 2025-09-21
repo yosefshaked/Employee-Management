@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +10,13 @@ import { toast } from 'sonner';
 import { supabase, coreSupabase, maskSupabaseCredential } from '@/supabaseClient.js';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
-import { loadRuntimeConfig, getRuntimeConfigDiagnostics, MissingRuntimeConfigError } from '@/runtime/config.js';
+import {
+  activateConfig,
+  clearConfig,
+  loadRuntimeConfig,
+  getRuntimeConfigDiagnostics,
+  MissingRuntimeConfigError,
+} from '@/runtime/config.js';
 import { mapSupabaseError } from '@/org/errors.js';
 import {
   Building2,
@@ -709,6 +715,7 @@ export default function SetupAssistant() {
   const [isCreatingOrg, setIsCreatingOrg] = useState(false);
   const [connectionTest, setConnectionTest] = useState(INITIAL_CONNECTION_TEST);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const clearedRuntimeConfigRef = useRef(false);
 
   const handleOpenCreateDialog = () => {
     setCreateOrgError('');
@@ -785,6 +792,7 @@ export default function SetupAssistant() {
 
   useEffect(() => {
     if (!activeOrg) {
+      clearConfig();
       setConnection({ ...INITIAL_CONNECTION_VALUES });
       setOriginalConnection({ ...INITIAL_CONNECTION_VALUES });
       setLastSavedAt(null);
@@ -863,6 +871,17 @@ export default function SetupAssistant() {
       || connection.legal_privacy_url !== originalConnection.legal_privacy_url
     );
   }, [connection, originalConnection]);
+
+  useEffect(() => {
+    if (hasUnsavedChanges) {
+      if (!clearedRuntimeConfigRef.current) {
+        clearConfig();
+        clearedRuntimeConfigRef.current = true;
+      }
+    } else {
+      clearedRuntimeConfigRef.current = false;
+    }
+  }, [hasUnsavedChanges]);
 
   const hasConnectionValues = Boolean(connection.supabase_url.trim() && connection.anon_key.trim());
   const hasSavedConnection = Boolean(
@@ -944,7 +963,14 @@ export default function SetupAssistant() {
         throw new MissingRuntimeConfigError('לא אותר אסימון כניסה. התחבר מחדש ונסה שוב.');
       }
 
-      await loadRuntimeConfig({ accessToken, orgId: activeOrg.id, force: true });
+      const config = await loadRuntimeConfig({ accessToken, orgId: activeOrg.id, force: true });
+      activateConfig(
+        {
+          supabaseUrl: config.supabaseUrl,
+          supabaseAnonKey: config.supabaseAnonKey,
+        },
+        { source: config?.source || 'org-api', orgId: activeOrg.id },
+      );
       const diagnostics = getRuntimeConfigDiagnostics();
 
       setConnectionTest({

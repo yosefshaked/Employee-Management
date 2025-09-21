@@ -1,7 +1,9 @@
-const GLOBAL_CONFIG_KEY = '__EMPLOYEE_MANAGEMENT_PUBLIC_CONFIG__';
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const CACHE = new Map();
 
+let currentConfig = null;
+let readyResolve = () => {};
+let readyPromise = createReadyPromise();
 let lastDiagnostics = {
   orgId: null,
   status: null,
@@ -17,6 +19,12 @@ let lastDiagnostics = {
   bodyText: null,
 };
 
+function createReadyPromise() {
+  return new Promise((resolve) => {
+    readyResolve = resolve;
+  });
+}
+
 export class MissingRuntimeConfigError extends Error {
   constructor(message = 'טעינת ההגדרות נכשלה. ודא שפונקציית /api/config זמינה ומחזירה JSON תקין.') {
     super(message);
@@ -24,21 +32,50 @@ export class MissingRuntimeConfigError extends Error {
   }
 }
 
-export function setRuntimeConfig(config) {
-  CACHE.set('app', config);
-  if (typeof window !== 'undefined') {
-    window[GLOBAL_CONFIG_KEY] = config;
+export function activateConfig(rawConfig, options = {}) {
+  const sanitized = sanitizeConfig(rawConfig, options.source || rawConfig?.source || 'manual');
+
+  if (!sanitized) {
+    throw new MissingRuntimeConfigError('supabase_url ו-anon_key נדרשים להפעלת החיבור.');
   }
+
+  const normalized = {
+    supabaseUrl: sanitized.supabaseUrl,
+    supabaseAnonKey: sanitized.supabaseAnonKey,
+    source: sanitized.source || options.source || 'manual',
+    orgId: options.orgId ?? null,
+  };
+
+  currentConfig = {
+    supabaseUrl: normalized.supabaseUrl,
+    supabaseAnonKey: normalized.supabaseAnonKey,
+    source: normalized.source,
+    orgId: normalized.orgId,
+  };
+
+  CACHE.set('app', { ...normalized });
+  readyResolve();
+  return { supabaseUrl: currentConfig.supabaseUrl, supabaseAnonKey: currentConfig.supabaseAnonKey };
 }
 
-export function getRuntimeConfig() {
-  if (CACHE.has('app')) {
-    return CACHE.get('app');
+export function clearConfig() {
+  currentConfig = null;
+  CACHE.delete('app');
+  readyPromise = createReadyPromise();
+}
+
+export function getConfigOrThrow() {
+  if (!currentConfig?.supabaseUrl || !currentConfig?.supabaseAnonKey) {
+    throw new MissingRuntimeConfigError();
   }
-  if (typeof window === 'undefined') {
-    return undefined;
-  }
-  return window[GLOBAL_CONFIG_KEY];
+  return {
+    supabaseUrl: currentConfig.supabaseUrl,
+    supabaseAnonKey: currentConfig.supabaseAnonKey,
+  };
+}
+
+export async function waitConfigReady() {
+  return readyPromise;
 }
 
 function sanitizeConfig(raw, source = 'api') {
@@ -351,7 +388,7 @@ export async function loadRuntimeConfig(options = {}) {
 
   CACHE.set(cacheKey, normalized);
   if (scope === 'app') {
-    setRuntimeConfig(normalized);
+    activateConfig(normalized, { source: normalized.source || 'api', orgId: null });
   }
 
   return normalized;

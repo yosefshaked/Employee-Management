@@ -1,10 +1,11 @@
 import { createContext, createElement, useContext, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { getRuntimeConfig, MissingRuntimeConfigError } from './runtime/config.js';
+import { getConfigOrThrow, MissingRuntimeConfigError } from './runtime/config.js';
 
-const runtimeConfig = getRuntimeConfig();
-
-if (!runtimeConfig?.supabaseUrl || !runtimeConfig?.supabaseAnonKey) {
+let runtimeConfig;
+try {
+  runtimeConfig = getConfigOrThrow();
+} catch {
   throw new Error('Supabase configuration missing. ודא שפונקציית /api/config זמינה ומחזירה supabase_url ו-anon_key.');
 }
 
