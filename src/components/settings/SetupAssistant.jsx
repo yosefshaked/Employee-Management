@@ -17,7 +17,7 @@ import {
   getRuntimeConfigDiagnostics,
   MissingRuntimeConfigError,
 } from '@/runtime/config.js';
-import { verifyConnection } from '@/runtime/verification.js';
+import { verifyOrgConnection } from '@/runtime/verification.js';
 import { resetSupabase as resetRuntimeSupabase } from '@/runtime/supabase-client.js';
 import { mapSupabaseError } from '@/org/errors.js';
 import {
@@ -1085,12 +1085,12 @@ export default function SetupAssistant() {
         supabaseAnonKey: config.supabaseAnonKey,
       });
       setConfigStatus('activated');
-      await verifyConnection();
+      await verifyOrgConnection();
       const diagnostics = getRuntimeConfigDiagnostics();
 
       setConnectionTest({
         status: 'success',
-        message: 'חיבור Supabase אומת בהצלחה והטבלה Employees נגישה.',
+        message: 'חיבור Supabase אומת בהצלחה וטבלת Settings (leave_policy) נגישה.',
         diagnostics,
         supabaseError: null,
         completedAt: new Date().toISOString(),
