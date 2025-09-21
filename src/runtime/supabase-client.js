@@ -1,55 +1,76 @@
 import { createClient } from '@supabase/supabase-js';
-import {
-  getConfigOrThrow,
-  waitConfigReady,
-  onConfigActivated,
-  onConfigCleared,
-} from './config.js';
+import { getOrgOrThrow, waitOrgReady } from './org-runtime.js';
 
-let cachedClient = null;
-let pendingClient = null;
+const clients = new Map();
+const pendingClients = new Map();
 
-async function createSupabaseClient() {
-  await waitConfigReady();
-  const { supabaseUrl, supabaseAnonKey } = getConfigOrThrow();
+function buildSupabaseClient({ orgId, supabaseUrl, supabaseAnonKey }) {
   return createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
+      storageKey: `sb-${orgId}`,
       persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      headers: { Accept: 'application/json' },
     },
   });
 }
 
-function resetClient() {
-  cachedClient = null;
-  pendingClient = null;
+function resolveCurrentOrgId() {
+  try {
+    const { orgId } = getOrgOrThrow();
+    return orgId || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function getSupabase() {
-  if (cachedClient) {
-    return cachedClient;
+  await waitOrgReady();
+  const config = getOrgOrThrow();
+  const orgId = config.orgId;
+
+  if (clients.has(orgId)) {
+    return clients.get(orgId);
   }
 
-  if (!pendingClient) {
-    pendingClient = createSupabaseClient()
+  if (!pendingClients.has(orgId)) {
+    const creation = Promise.resolve()
+      .then(() => buildSupabaseClient(config))
       .then((client) => {
-        cachedClient = client;
+        clients.set(orgId, client);
+        pendingClients.delete(orgId);
         return client;
       })
-      .finally(() => {
-        pendingClient = null;
+      .catch((error) => {
+        pendingClients.delete(orgId);
+        throw error;
       });
+
+    pendingClients.set(orgId, creation);
   }
 
-  return pendingClient;
+  return pendingClients.get(orgId);
 }
 
-export function getCachedSupabase() {
-  return cachedClient;
+export function getCachedSupabase(orgId) {
+  const targetOrgId = orgId || resolveCurrentOrgId();
+  if (!targetOrgId) {
+    return null;
+  }
+  return clients.get(targetOrgId) || null;
 }
 
-export function resetSupabase() {
-  resetClient();
-}
+export function resetSupabase(orgId) {
+  const targetOrgId = orgId || resolveCurrentOrgId();
 
-onConfigCleared(resetClient);
-onConfigActivated(resetClient);
+  if (targetOrgId) {
+    clients.delete(targetOrgId);
+    pendingClients.delete(targetOrgId);
+    return;
+  }
+
+  clients.clear();
+  pendingClients.clear();
+}
