@@ -4,9 +4,8 @@
       "authLevel": "anonymous",
       "type": "httpTrigger",
       "direction": "in",
-      "name": "req",
-      "methods": ["get"],
-      "route": "org/{id}/keys"
+      "methods": [ "get" ],
+      "route": "org/{orgId}/keys"
     },
     {
       "type": "http",
