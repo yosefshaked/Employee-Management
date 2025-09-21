@@ -287,8 +287,12 @@ export default async function (context, req) {
   const anonKeyValue = record.anon_key;
 
   return respond(200, {
+    orgId,
+    source: 'org-api',
     supabaseUrl: supabaseUrlValue,
     supabase_url: supabaseUrlValue,
+    supabaseAnonKey: anonKeyValue,
+    supabase_anon_key: anonKeyValue,
     anonKey: anonKeyValue,
     anon_key: anonKeyValue,
   });
