@@ -62,12 +62,36 @@ export function onConfigCleared(listener) {
   };
 }
 
-export class MissingRuntimeConfigError extends Error {
-  constructor(message = 'טעינת ההגדרות נכשלה. ודא שפונקציית /api/config זמינה ומחזירה JSON תקין.') {
-    super(message);
-    this.name = 'MissingRuntimeConfigError';
+const DEFAULT_MISSING_CONFIG_MESSAGE =
+  'טעינת ההגדרות נכשלה. ודא שפונקציית /api/config זמינה ומחזירה JSON תקין.';
+
+export function MissingRuntimeConfigError(message = DEFAULT_MISSING_CONFIG_MESSAGE) {
+  const target = new.target || MissingRuntimeConfigError;
+  const finalMessage = message === undefined ? DEFAULT_MISSING_CONFIG_MESSAGE : message;
+  const error = Reflect.construct(Error, [finalMessage], target);
+  error.name = 'MissingRuntimeConfigError';
+
+  if (typeof Error.captureStackTrace === 'function') {
+    Error.captureStackTrace(error, MissingRuntimeConfigError);
   }
+
+  return error;
 }
+
+MissingRuntimeConfigError.prototype = Object.create(Error.prototype, {
+  constructor: {
+    value: MissingRuntimeConfigError,
+    writable: true,
+    configurable: true,
+  },
+});
+
+Object.defineProperty(MissingRuntimeConfigError.prototype, 'name', {
+  value: 'MissingRuntimeConfigError',
+  configurable: true,
+});
+
+Object.setPrototypeOf(MissingRuntimeConfigError, Error);
 
 export function activateConfig(rawConfig, options = {}) {
   const sanitized = sanitizeConfig(rawConfig, options.source || rawConfig?.source || 'manual');
