@@ -216,7 +216,10 @@ begin
         if array_position(missing_policies, required_policy_names[idx]) is not null then
           if required_commands[idx] = 'SELECT' then
             delta_sql := delta_sql || format(
-              'CREATE POLICY "%s" ON public."%s"%s  FOR SELECT TO authenticated%s  USING (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR SELECT TO authenticated%s  USING (true);%s',
+              required_policy_names[idx],
+              table_name,
+              E'\n',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -225,7 +228,10 @@ begin
             );
           elsif required_commands[idx] = 'INSERT' then
             delta_sql := delta_sql || format(
-              'CREATE POLICY "%s" ON public."%s"%s  FOR INSERT TO authenticated%s  WITH CHECK (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR INSERT TO authenticated%s  WITH CHECK (true);%s',
+              required_policy_names[idx],
+              table_name,
+              E'\n',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -234,7 +240,10 @@ begin
             );
           elsif required_commands[idx] = 'UPDATE' then
             delta_sql := delta_sql || format(
-              'CREATE POLICY "%s" ON public."%s"%s  FOR UPDATE TO authenticated%s  USING (true)%s  WITH CHECK (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR UPDATE TO authenticated%s  USING (true)%s  WITH CHECK (true);%s',
+              required_policy_names[idx],
+              table_name,
+              E'\n',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -244,7 +253,10 @@ begin
             );
           elsif required_commands[idx] = 'DELETE' then
             delta_sql := delta_sql || format(
-              'CREATE POLICY "%s" ON public."%s"%s  FOR DELETE TO authenticated%s  USING (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR DELETE TO authenticated%s  USING (true);%s',
+              required_policy_names[idx],
+              table_name,
+              E'\n',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -269,313 +281,147 @@ $$;
 grant execute on function public.setup_assistant_diagnostics() to authenticated;
 `;
 
+
 const RLS_SQL = `-- שלב 2: הפעלת RLS והוספת מדיניות מאובטחת
 alter table public."Employees" enable row level security;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Employees'
-      and policyname = 'Authenticated select Employees'
-  ) then
-    create policy "Authenticated select Employees" on public."Employees"
-      for select to authenticated
-      using (true);
-  end if;
+drop policy if exists "Authenticated select Employees" on public."Employees";
+create policy "Authenticated select Employees" on public."Employees"
+  for select to authenticated
+  using (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Employees'
-      and policyname = 'Authenticated insert Employees'
-  ) then
-    create policy "Authenticated insert Employees" on public."Employees"
-      for insert to authenticated
-      with check (true);
-  end if;
+drop policy if exists "Authenticated insert Employees" on public."Employees";
+create policy "Authenticated insert Employees" on public."Employees"
+  for insert to authenticated
+  with check (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Employees'
-      and policyname = 'Authenticated update Employees'
-  ) then
-    create policy "Authenticated update Employees" on public."Employees"
-      for update to authenticated
-      using (true)
-      with check (true);
-  end if;
+drop policy if exists "Authenticated update Employees" on public."Employees";
+create policy "Authenticated update Employees" on public."Employees"
+  for update to authenticated
+  using (true)
+  with check (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Employees'
-      and policyname = 'Authenticated delete Employees'
-  ) then
-    create policy "Authenticated delete Employees" on public."Employees"
-      for delete to authenticated
-      using (true);
-  end if;
-end;
-$$;
+drop policy if exists "Authenticated delete Employees" on public."Employees";
+create policy "Authenticated delete Employees" on public."Employees"
+  for delete to authenticated
+  using (true);
 
 alter table public."WorkSessions" enable row level security;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'WorkSessions'
-      and policyname = 'Authenticated select WorkSessions'
-  ) then
-    create policy "Authenticated select WorkSessions" on public."WorkSessions"
-      for select to authenticated
-      using (true);
-  end if;
+drop policy if exists "Authenticated select WorkSessions" on public."WorkSessions";
+create policy "Authenticated select WorkSessions" on public."WorkSessions"
+  for select to authenticated
+  using (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'WorkSessions'
-      and policyname = 'Authenticated insert WorkSessions'
-  ) then
-    create policy "Authenticated insert WorkSessions" on public."WorkSessions"
-      for insert to authenticated
-      with check (true);
-  end if;
+drop policy if exists "Authenticated insert WorkSessions" on public."WorkSessions";
+create policy "Authenticated insert WorkSessions" on public."WorkSessions"
+  for insert to authenticated
+  with check (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'WorkSessions'
-      and policyname = 'Authenticated update WorkSessions'
-  ) then
-    create policy "Authenticated update WorkSessions" on public."WorkSessions"
-      for update to authenticated
-      using (true)
-      with check (true);
-  end if;
+drop policy if exists "Authenticated update WorkSessions" on public."WorkSessions";
+create policy "Authenticated update WorkSessions" on public."WorkSessions"
+  for update to authenticated
+  using (true)
+  with check (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'WorkSessions'
-      and policyname = 'Authenticated delete WorkSessions'
-  ) then
-    create policy "Authenticated delete WorkSessions" on public."WorkSessions"
-      for delete to authenticated
-      using (true);
-  end if;
-end;
-$$;
+drop policy if exists "Authenticated delete WorkSessions" on public."WorkSessions";
+create policy "Authenticated delete WorkSessions" on public."WorkSessions"
+  for delete to authenticated
+  using (true);
 
 alter table public."LeaveBalances" enable row level security;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'LeaveBalances'
-      and policyname = 'Authenticated select LeaveBalances'
-  ) then
-    create policy "Authenticated select LeaveBalances" on public."LeaveBalances"
-      for select to authenticated
-      using (true);
-  end if;
+drop policy if exists "Authenticated select LeaveBalances" on public."LeaveBalances";
+create policy "Authenticated select LeaveBalances" on public."LeaveBalances"
+  for select to authenticated
+  using (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'LeaveBalances'
-      and policyname = 'Authenticated insert LeaveBalances'
-  ) then
-    create policy "Authenticated insert LeaveBalances" on public."LeaveBalances"
-      for insert to authenticated
-      with check (true);
-  end if;
+drop policy if exists "Authenticated insert LeaveBalances" on public."LeaveBalances";
+create policy "Authenticated insert LeaveBalances" on public."LeaveBalances"
+  for insert to authenticated
+  with check (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'LeaveBalances'
-      and policyname = 'Authenticated update LeaveBalances'
-  ) then
-    create policy "Authenticated update LeaveBalances" on public."LeaveBalances"
-      for update to authenticated
-      using (true)
-      with check (true);
-  end if;
+drop policy if exists "Authenticated update LeaveBalances" on public."LeaveBalances";
+create policy "Authenticated update LeaveBalances" on public."LeaveBalances"
+  for update to authenticated
+  using (true)
+  with check (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'LeaveBalances'
-      and policyname = 'Authenticated delete LeaveBalances'
-  ) then
-    create policy "Authenticated delete LeaveBalances" on public."LeaveBalances"
-      for delete to authenticated
-      using (true);
-  end if;
-end;
-$$;
+drop policy if exists "Authenticated delete LeaveBalances" on public."LeaveBalances";
+create policy "Authenticated delete LeaveBalances" on public."LeaveBalances"
+  for delete to authenticated
+  using (true);
 
 alter table public."RateHistory" enable row level security;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'RateHistory'
-      and policyname = 'Authenticated select RateHistory'
-  ) then
-    create policy "Authenticated select RateHistory" on public."RateHistory"
-      for select to authenticated
-      using (true);
-  end if;
+drop policy if exists "Authenticated select RateHistory" on public."RateHistory";
+create policy "Authenticated select RateHistory" on public."RateHistory"
+  for select to authenticated
+  using (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'RateHistory'
-      and policyname = 'Authenticated insert RateHistory'
-  ) then
-    create policy "Authenticated insert RateHistory" on public."RateHistory"
-      for insert to authenticated
-      with check (true);
-  end if;
+drop policy if exists "Authenticated insert RateHistory" on public."RateHistory";
+create policy "Authenticated insert RateHistory" on public."RateHistory"
+  for insert to authenticated
+  with check (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'RateHistory'
-      and policyname = 'Authenticated update RateHistory'
-  ) then
-    create policy "Authenticated update RateHistory" on public."RateHistory"
-      for update to authenticated
-      using (true)
-      with check (true);
-  end if;
+drop policy if exists "Authenticated update RateHistory" on public."RateHistory";
+create policy "Authenticated update RateHistory" on public."RateHistory"
+  for update to authenticated
+  using (true)
+  with check (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'RateHistory'
-      and policyname = 'Authenticated delete RateHistory'
-  ) then
-    create policy "Authenticated delete RateHistory" on public."RateHistory"
-      for delete to authenticated
-      using (true);
-  end if;
-end;
-$$;
+drop policy if exists "Authenticated delete RateHistory" on public."RateHistory";
+create policy "Authenticated delete RateHistory" on public."RateHistory"
+  for delete to authenticated
+  using (true);
 
 alter table public."Services" enable row level security;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Services'
-      and policyname = 'Authenticated select Services'
-  ) then
-    create policy "Authenticated select Services" on public."Services"
-      for select to authenticated
-      using (true);
-  end if;
+drop policy if exists "Authenticated select Services" on public."Services";
+create policy "Authenticated select Services" on public."Services"
+  for select to authenticated
+  using (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Services'
-      and policyname = 'Authenticated insert Services'
-  ) then
-    create policy "Authenticated insert Services" on public."Services"
-      for insert to authenticated
-      with check (true);
-  end if;
+drop policy if exists "Authenticated insert Services" on public."Services";
+create policy "Authenticated insert Services" on public."Services"
+  for insert to authenticated
+  with check (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Services'
-      and policyname = 'Authenticated update Services'
-  ) then
-    create policy "Authenticated update Services" on public."Services"
-      for update to authenticated
-      using (true)
-      with check (true);
-  end if;
+drop policy if exists "Authenticated update Services" on public."Services";
+create policy "Authenticated update Services" on public."Services"
+  for update to authenticated
+  using (true)
+  with check (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Services'
-      and policyname = 'Authenticated delete Services'
-  ) then
-    create policy "Authenticated delete Services" on public."Services"
-      for delete to authenticated
-      using (true);
-  end if;
-end;
-$$;
+drop policy if exists "Authenticated delete Services" on public."Services";
+create policy "Authenticated delete Services" on public."Services"
+  for delete to authenticated
+  using (true);
 
 alter table public."Settings" enable row level security;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Settings'
-      and policyname = 'Authenticated select Settings'
-  ) then
-    create policy "Authenticated select Settings" on public."Settings"
-      for select to authenticated
-      using (true);
-  end if;
+drop policy if exists "Authenticated select Settings" on public."Settings";
+create policy "Authenticated select Settings" on public."Settings"
+  for select to authenticated
+  using (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Settings'
-      and policyname = 'Authenticated insert Settings'
-  ) then
-    create policy "Authenticated insert Settings" on public."Settings"
-      for insert to authenticated
-      with check (true);
-  end if;
+drop policy if exists "Authenticated insert Settings" on public."Settings";
+create policy "Authenticated insert Settings" on public."Settings"
+  for insert to authenticated
+  with check (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Settings'
-      and policyname = 'Authenticated update Settings'
-  ) then
-    create policy "Authenticated update Settings" on public."Settings"
-      for update to authenticated
-      using (true)
-      with check (true);
-  end if;
+drop policy if exists "Authenticated update Settings" on public."Settings";
+create policy "Authenticated update Settings" on public."Settings"
+  for update to authenticated
+  using (true)
+  with check (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Settings'
-      and policyname = 'Authenticated delete Settings'
-  ) then
-    create policy "Authenticated delete Settings" on public."Settings"
-      for delete to authenticated
-      using (true);
-  end if;
-end;
-$$;
-`
+drop policy if exists "Authenticated delete Settings" on public."Settings";
+create policy "Authenticated delete Settings" on public."Settings"
+  for delete to authenticated
+  using (true);
+`;
+
 function formatDateTime(isoString) {
   if (!isoString) return '';
   try {
