@@ -7,8 +7,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { supabase } from '@/supabaseClient.js';
+import { supabase, coreSupabase, maskSupabaseCredential } from '@/supabaseClient.js';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { useAuth } from '@/auth/AuthContext.jsx';
+import { loadRuntimeConfig, getRuntimeConfigDiagnostics, MissingRuntimeConfigError } from '@/runtime/config.js';
 import { mapSupabaseError } from '@/org/errors.js';
 import {
   Building2,
@@ -19,6 +21,22 @@ import {
   ShieldAlert,
   ShieldCheck,
 } from 'lucide-react';
+
+const INITIAL_CONNECTION_VALUES = {
+  supabase_url: '',
+  anon_key: '',
+  policy_links_text: '',
+  legal_contact_email: '',
+  legal_terms_url: '',
+  legal_privacy_url: '',
+};
+
+const INITIAL_CONNECTION_TEST = {
+  status: 'idle',
+  message: '',
+  diagnostics: null,
+  completedAt: null,
+};
 
 const REQUIRED_TABLES = ['Employees', 'WorkSessions', 'LeaveBalances', 'RateHistory', 'Services', 'Settings'];
 
@@ -571,6 +589,44 @@ function formatDateTime(isoString) {
   }
 }
 
+function formatDiagnosticsTimestamp(timestamp) {
+  if (!timestamp) return '';
+  try {
+    const iso = new Date(timestamp).toISOString();
+    return formatDateTime(iso);
+  } catch (error) {
+    console.error('Failed to format diagnostics timestamp', error);
+    return '';
+  }
+}
+
+function maskDiagnosticsPayload(payload) {
+  if (Array.isArray(payload)) {
+    return payload.map((item) => maskDiagnosticsPayload(item));
+  }
+
+  if (payload && typeof payload === 'object') {
+    const next = {};
+    for (const [key, value] of Object.entries(payload)) {
+      if (value && typeof value === 'object') {
+        next[key] = maskDiagnosticsPayload(value);
+        continue;
+      }
+      if (typeof value === 'string') {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey.includes('key')) {
+          next[key] = maskSupabaseCredential(value);
+          continue;
+        }
+      }
+      next[key] = value;
+    }
+    return next;
+  }
+
+  return payload;
+}
+
 function CopyButton({ text, ariaLabel }) {
   const [state, setState] = useState('idle');
 
@@ -655,22 +711,9 @@ export default function SetupAssistant() {
     recordVerification,
     createOrganization,
   } = useOrg();
-  const [connection, setConnection] = useState({
-    supabase_url: '',
-    anon_key: '',
-    policy_links_text: '',
-    legal_contact_email: '',
-    legal_terms_url: '',
-    legal_privacy_url: '',
-  });
-  const [originalConnection, setOriginalConnection] = useState({
-    supabase_url: '',
-    anon_key: '',
-    policy_links_text: '',
-    legal_contact_email: '',
-    legal_terms_url: '',
-    legal_privacy_url: '',
-  });
+  const { session } = useAuth();
+  const [connection, setConnection] = useState({ ...INITIAL_CONNECTION_VALUES });
+  const [originalConnection, setOriginalConnection] = useState({ ...INITIAL_CONNECTION_VALUES });
   const [isSavingConnection, setIsSavingConnection] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [verificationStatus, setVerificationStatus] = useState(activeOrg?.setup_completed ? 'success' : 'idle');
@@ -682,6 +725,8 @@ export default function SetupAssistant() {
   const [newOrgName, setNewOrgName] = useState('');
   const [createOrgError, setCreateOrgError] = useState('');
   const [isCreatingOrg, setIsCreatingOrg] = useState(false);
+  const [connectionTest, setConnectionTest] = useState(INITIAL_CONNECTION_TEST);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
 
   const handleOpenCreateDialog = () => {
     setCreateOrgError('');
@@ -758,19 +803,12 @@ export default function SetupAssistant() {
 
   useEffect(() => {
     if (!activeOrg) {
-      const reset = {
-        supabase_url: '',
-        anon_key: '',
-        policy_links_text: '',
-        legal_contact_email: '',
-        legal_terms_url: '',
-        legal_privacy_url: '',
-      };
-      setConnection(reset);
-      setOriginalConnection(reset);
+      setConnection({ ...INITIAL_CONNECTION_VALUES });
+      setOriginalConnection({ ...INITIAL_CONNECTION_VALUES });
       setLastSavedAt(null);
       setVerificationStatus('idle');
       setLastVerifiedAt(null);
+      setConnectionTest(INITIAL_CONNECTION_TEST);
       return;
     }
 
@@ -824,6 +862,7 @@ export default function SetupAssistant() {
       setVerificationStatus('idle');
       setLastVerifiedAt(activeOrg.verified_at || null);
     }
+    setConnectionTest(INITIAL_CONNECTION_TEST);
   }, [activeOrg, activeOrgConnection]);
 
   const hasUnsavedChanges = useMemo(() => {
@@ -847,6 +886,20 @@ export default function SetupAssistant() {
   const handleConnectionChange = (field) => (event) => {
     const value = event.target.value;
     setConnection((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const resolveAccessToken = async () => {
+    if (session?.access_token) {
+      return session.access_token;
+    }
+    try {
+      const { data, error } = await coreSupabase.auth.getSession();
+      if (error) throw error;
+      return data?.session?.access_token || null;
+    } catch (error) {
+      console.error('Failed to resolve access token for connection test', error);
+      return null;
+    }
   };
 
   const handleSaveConnection = async (event) => {
@@ -876,12 +929,67 @@ export default function SetupAssistant() {
 
       setOriginalConnection({ ...connection });
       setLastSavedAt(now);
+      setConnectionTest(INITIAL_CONNECTION_TEST);
       toast.success('חיבור ה-Supabase נשמר בהצלחה.');
     } catch (error) {
       console.error('Failed to save Supabase connection details', error);
       toast.error('שמירת פרטי החיבור נכשלה. בדוק את ההרשאות ונסה שוב.');
     } finally {
       setIsSavingConnection(false);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    if (!activeOrg || isTestingConnection) return;
+    if (hasUnsavedChanges) {
+      toast.error('שמור את פרטי החיבור לפני בדיקת הקישוריות.');
+      return;
+    }
+
+    setIsTestingConnection(true);
+    setConnectionTest({ ...INITIAL_CONNECTION_TEST, status: 'running' });
+
+    try {
+      const accessToken = await resolveAccessToken();
+
+      if (!accessToken) {
+        throw new MissingRuntimeConfigError('לא אותר אסימון כניסה. התחבר מחדש ונסה שוב.');
+      }
+
+      await loadRuntimeConfig({ accessToken, orgId: activeOrg.id, force: true });
+      const diagnostics = getRuntimeConfigDiagnostics();
+
+      setConnectionTest({
+        status: 'success',
+        message: 'חיבור Supabase אומת בהצלחה.',
+        diagnostics,
+        completedAt: new Date().toISOString(),
+      });
+      toast.success('חיבור הארגון אומת בהצלחה.');
+    } catch (error) {
+      console.error('Setup assistant connection test failed', error);
+      const diagnostics = getRuntimeConfigDiagnostics();
+      const message = error instanceof MissingRuntimeConfigError
+        ? error.message
+        : error?.message || 'בדיקת החיבור נכשלה. ודא שהפונקציה /api/org/{orgId}/keys זמינה ומחזירה JSON תקין.';
+
+      setConnectionTest({
+        status: 'error',
+        message,
+        diagnostics,
+        completedAt: new Date().toISOString(),
+      });
+      toast.error(message);
+
+      if (error?.status === 401) {
+        try {
+          await coreSupabase.auth.refreshSession();
+        } catch (refreshError) {
+          console.error('Failed to refresh session after connection test error', refreshError);
+        }
+      }
+    } finally {
+      setIsTestingConnection(false);
     }
   };
 
@@ -955,6 +1063,95 @@ export default function SetupAssistant() {
     } finally {
       setIsVerifying(false);
     }
+  };
+
+  const renderConnectionTestFeedback = () => {
+    if (connectionTest.status === 'idle') {
+      return null;
+    }
+
+    if (connectionTest.status === 'running') {
+      return (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 text-blue-700 text-sm p-3 flex items-start gap-2">
+          <Loader2 className="w-4 h-4 mt-0.5 animate-spin" aria-hidden="true" />
+          <span>בודק את החיבור השמור מול פונקציית ה-API של הארגון...</span>
+        </div>
+      );
+    }
+
+    if (connectionTest.status === 'success') {
+      return (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm p-3 flex items-start gap-2">
+          <CheckCircle2 className="w-4 h-4 mt-0.5" aria-hidden="true" />
+          <div className="space-y-1">
+            <span>{connectionTest.message || 'חיבור Supabase אומת בהצלחה.'}</span>
+            {connectionTest.completedAt ? (
+              <span className="block text-xs text-emerald-600">
+                בוצע: {formatDateTime(connectionTest.completedAt)}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+
+    if (connectionTest.status === 'error') {
+      return (
+        <div className="rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm p-3 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 mt-0.5" aria-hidden="true" />
+          <div className="space-y-1">
+            <span>{connectionTest.message || 'בדיקת החיבור נכשלה.'}</span>
+            {connectionTest.completedAt ? (
+              <span className="block text-xs text-red-600">
+                בוצע: {formatDateTime(connectionTest.completedAt)}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  const renderConnectionDiagnostics = () => {
+    if (!connectionTest.diagnostics || connectionTest.status === 'running') {
+      return null;
+    }
+
+    const diagnostics = connectionTest.diagnostics;
+    const rows = [
+      { label: 'סטטוס HTTP', value: diagnostics.status ?? '—' },
+      { label: 'טווח', value: diagnostics.scope === 'org' ? 'ארגון' : 'אפליקציה' },
+      { label: 'מזהה ארגון', value: diagnostics.orgId || '—' },
+      { label: 'אסימון', value: diagnostics.accessTokenPreview || '—' },
+      { label: 'מצב', value: diagnostics.ok ? 'הצלחה' : 'שגיאה' },
+      { label: 'זמן', value: formatDiagnosticsTimestamp(diagnostics.timestamp) || '—' },
+    ];
+
+    return (
+      <div className="rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-600 p-3 space-y-2">
+        <div className="flex flex-wrap gap-4">
+          {rows.map((row) => (
+            <div key={row.label} className="flex gap-1">
+              <span className="font-medium">{row.label}:</span>
+              <span>{row.value}</span>
+            </div>
+          ))}
+        </div>
+        {diagnostics.error ? (
+          <p className="text-red-600">הודעת שרת: {diagnostics.error}</p>
+        ) : null}
+        {diagnostics.body && diagnostics.bodyIsJson ? (
+          <pre
+            dir="ltr"
+            className="bg-white border border-slate-200 rounded-lg p-3 text-[11px] leading-relaxed overflow-x-auto text-slate-700"
+          >
+            {JSON.stringify(maskDiagnosticsPayload(diagnostics.body), null, 2)}
+          </pre>
+        ) : null}
+      </div>
+    );
   };
 
   const renderConnectionStatusBadge = () => {
@@ -1187,8 +1384,34 @@ export default function SetupAssistant() {
                   ) : null}
                   {isSavingConnection ? 'שומר...' : 'שמור חיבור'}
                 </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleTestConnection}
+                  disabled={
+                    !activeOrg
+                    || isTestingConnection
+                    || hasUnsavedChanges
+                    || !hasConnectionValues
+                  }
+                  className="gap-2"
+                >
+                  {isTestingConnection ? (
+                    <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <ShieldCheck className="w-4 h-4" aria-hidden="true" />
+                  )}
+                  {isTestingConnection ? 'מריץ בדיקה...' : 'בדוק חיבור שמור'}
+                </Button>
               </div>
             </div>
+            {hasUnsavedChanges ? (
+              <p className="text-xs text-amber-600">
+                שמור את השינויים לפני בדיקת החיבור.
+              </p>
+            ) : null}
+            {renderConnectionTestFeedback()}
+            {renderConnectionDiagnostics()}
           </form>
         </StepSection>
 

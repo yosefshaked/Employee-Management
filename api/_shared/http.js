@@ -125,13 +125,23 @@ export function resolveBearerAuthorization(request) {
   return null;
 }
 
+function ensureJsonSerializable(value) {
+  if (value === undefined) {
+    return null;
+  }
+  return value;
+}
+
 export function json(status, body, extraHeaders = {}) {
+  const headers = {
+    'content-type': 'application/json',
+    'Content-Type': 'application/json',
+    ...extraHeaders,
+  };
+
   return {
     status,
-    headers: {
-      'content-type': 'application/json',
-      ...extraHeaders,
-    },
-    body,
+    headers,
+    body: JSON.stringify(ensureJsonSerializable(body)),
   };
 }
