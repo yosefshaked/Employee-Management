@@ -21,6 +21,11 @@ import { verifyConnection } from '@/runtime/verification.js';
 import { resetSupabase as resetRuntimeSupabase } from '@/runtime/supabase-client.js';
 import { mapSupabaseError } from '@/org/errors.js';
 import {
+  setOrg as setRuntimeOrg,
+  clearOrg as clearRuntimeOrg,
+  getOrgOrThrow,
+} from '@/runtime/org-runtime.js';
+import {
   Building2,
   AlertCircle,
   CheckCircle2,
@@ -798,6 +803,7 @@ export default function SetupAssistant() {
     if (!activeOrg) {
       resetRuntimeSupabase();
       clearConfig();
+      clearRuntimeOrg();
       setConnection({ ...INITIAL_CONNECTION_VALUES });
       setOriginalConnection({ ...INITIAL_CONNECTION_VALUES });
       setLastSavedAt(null);
@@ -883,6 +889,7 @@ export default function SetupAssistant() {
       if (!clearedRuntimeConfigRef.current) {
         resetRuntimeSupabase();
         clearConfig();
+        clearRuntimeOrg();
         clearedRuntimeConfigRef.current = true;
       }
       setConfigStatus('cleared');
@@ -920,11 +927,13 @@ export default function SetupAssistant() {
           { supabaseUrl, supabaseAnonKey },
           { source: 'org-api', orgId: activeOrg.id },
         );
+        setRuntimeOrg({ orgId: activeOrg.id, supabaseUrl, supabaseAnonKey });
         if (!cancelled) {
           setConfigStatus('activated');
         }
       } catch (error) {
         console.error('Failed to activate connection while syncing setup assistant', error);
+        clearRuntimeOrg();
         if (!cancelled) {
           setConfigStatus('cleared');
         }
@@ -944,6 +953,17 @@ export default function SetupAssistant() {
     && originalConnection.supabase_url
     && originalConnection.anon_key
   );
+  const orgSelected = useMemo(() => {
+    if (!activeOrg || configStatus !== 'activated') {
+      return false;
+    }
+    try {
+      const org = getOrgOrThrow();
+      return Boolean(org?.orgId && org.orgId === activeOrg.id);
+    } catch {
+      return false;
+    }
+  }, [activeOrg, configStatus]);
 
   const handleConnectionChange = (field) => (event) => {
     const value = event.target.value;
@@ -1059,6 +1079,11 @@ export default function SetupAssistant() {
         },
         { source: config?.source || 'org-api', orgId: activeOrg.id },
       );
+      setRuntimeOrg({
+        orgId: activeOrg.id,
+        supabaseUrl: config.supabaseUrl,
+        supabaseAnonKey: config.supabaseAnonKey,
+      });
       setConfigStatus('activated');
       await verifyConnection();
       const diagnostics = getRuntimeConfigDiagnostics();
@@ -1092,6 +1117,7 @@ export default function SetupAssistant() {
         completedAt: new Date().toISOString(),
       });
       toast.error(message);
+      clearRuntimeOrg();
       setConfigStatus('cleared');
 
       if (error?.status === 401) {
@@ -1127,6 +1153,10 @@ export default function SetupAssistant() {
     if (!activeOrg) return;
     if (!hasSavedConnection) {
       toast.error('קודם שמור את כתובת ה-URL והמפתח לפני הרצת האימות.');
+      return;
+    }
+    if (!orgSelected) {
+      toast.error('בחר ארגון פעיל לפני הרצת האימות.');
       return;
     }
     setIsVerifying(true);
@@ -1620,7 +1650,7 @@ export default function SetupAssistant() {
                 <Button
                   type="button"
                   onClick={handleVerify}
-                  disabled={isVerifying || !hasSavedConnection || configStatus !== 'activated'}
+                  disabled={isVerifying || !hasSavedConnection || !orgSelected}
                   className="gap-2"
                 >
                   {isVerifying ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}
