@@ -27,13 +27,19 @@ async function parseJsonResponse(response) {
   }
 }
 
+function respond(context, status, body, extraHeaders) {
+  const response = json(status, body, extraHeaders);
+  context.res = response;
+  return response;
+}
+
 export default async function (context, req) {
   const env = readEnv(context);
   const orgId = context.bindingData?.orgId;
 
   if (!orgId) {
     context.log?.warn?.('org-keys missing orgId');
-    return json(400, { message: 'missing org id' });
+    return respond(context, 400, { message: 'missing org id' });
   }
 
   const authorization = resolveBearerAuthorization(req);
@@ -41,7 +47,7 @@ export default async function (context, req) {
 
   if (!hasBearer) {
     context.log?.warn?.('org-keys missing bearer', { orgId });
-    return json(401, { message: 'missing bearer' });
+    return respond(context, 401, { message: 'missing bearer' });
   }
 
   const supabaseUrl = env.APP_SUPABASE_URL;
@@ -49,7 +55,7 @@ export default async function (context, req) {
 
   if (!supabaseUrl || !anonKey) {
     context.log?.error?.('org-keys missing Supabase environment values');
-    return json(500, { message: 'server_misconfigured' });
+    return respond(context, 500, { message: 'server_misconfigured' });
   }
 
   const rpcUrl = `${supabaseUrl.replace(/\/$/, '')}/rest/v1/rpc/get_org_public_keys`;
@@ -71,7 +77,7 @@ export default async function (context, req) {
       hasBearer,
       message: error?.message,
     });
-    return json(502, { message: 'failed to reach control database' });
+    return respond(context, 502, { message: 'failed to reach control database' });
   }
 
   const payload = await parseJsonResponse(rpcResponse);
@@ -82,7 +88,7 @@ export default async function (context, req) {
       hasBearer,
       status: rpcResponse.status,
     });
-    return json(rpcResponse.status, payload && typeof payload === 'object' ? payload : {});
+    return respond(context, rpcResponse.status, payload && typeof payload === 'object' ? payload : {});
   }
 
   if (!payload || typeof payload !== 'object' || !payload.supabase_url || !payload.anon_key) {
@@ -91,7 +97,7 @@ export default async function (context, req) {
       hasBearer,
       status: 404,
     });
-    return json(404, { message: 'org not found or no access' });
+    return respond(context, 404, { message: 'org not found or no access' });
   }
 
   context.log?.info?.('org-keys success', {
@@ -100,8 +106,8 @@ export default async function (context, req) {
     status: 200,
   });
 
-  return json(200, {
-    supabase_url: payload.supabase_url,
-    anon_key: payload.anon_key,
+  return respond(context, 200, {
+    supabaseUrl: payload.supabase_url,
+    anonKey: payload.anon_key,
   });
 }
