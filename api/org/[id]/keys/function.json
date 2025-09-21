@@ -6,7 +6,7 @@
       "direction": "in",
       "name": "req",
       "methods": ["get"],
-      "route": "org/{orgId}/keys"
+      "route": "org/{id}/keys"
     },
     {
       "type": "http",
