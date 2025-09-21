@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { supabase, coreSupabase, maskSupabaseCredential } from '@/supabaseClient.js';
+import { coreSupabase, getOrgSupabase, maskSupabaseCredential } from '@/supabaseClient.js';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import {
@@ -24,6 +24,7 @@ import {
   setOrg as setRuntimeOrg,
   clearOrg as clearRuntimeOrg,
   getOrgOrThrow,
+  waitOrgReady,
 } from '@/runtime/org-runtime.js';
 import {
   Building2,
@@ -920,7 +921,7 @@ export default function SetupAssistant() {
 
     let cancelled = false;
 
-    const applyConfig = () => {
+    const applyConfig = async () => {
       setConfigStatus('activating');
       try {
         activateConfig(
@@ -928,6 +929,7 @@ export default function SetupAssistant() {
           { source: 'org-api', orgId: activeOrg.id },
         );
         setRuntimeOrg({ orgId: activeOrg.id, supabaseUrl, supabaseAnonKey });
+        await waitOrgReady();
         if (!cancelled) {
           setConfigStatus('activated');
         }
@@ -1084,6 +1086,7 @@ export default function SetupAssistant() {
         supabaseUrl: config.supabaseUrl,
         supabaseAnonKey: config.supabaseAnonKey,
       });
+      await waitOrgReady();
       setConfigStatus('activated');
       await verifyOrgConnection();
       const diagnostics = getRuntimeConfigDiagnostics();
@@ -1166,7 +1169,32 @@ export default function SetupAssistant() {
     setVerificationStatus('running');
 
     try {
-      const { data, error } = await supabase.rpc('setup_assistant_diagnostics');
+      if (configStatus !== 'activated') {
+        throw new MissingRuntimeConfigError('לא נבחר ארגון פעיל או שהחיבור שלו טרם הוגדר.');
+      }
+
+      let runtimeOrg = null;
+      try {
+        runtimeOrg = getOrgOrThrow();
+      } catch {
+        runtimeOrg = null;
+      }
+
+      if (!runtimeOrg || runtimeOrg.orgId !== activeOrg.id) {
+        await waitOrgReady();
+        try {
+          runtimeOrg = getOrgOrThrow();
+        } catch {
+          runtimeOrg = null;
+        }
+      }
+
+      if (!runtimeOrg || runtimeOrg.orgId !== activeOrg.id) {
+        throw new MissingRuntimeConfigError('לא נבחר ארגון פעיל או שהחיבור שלו טרם הוגדר.');
+      }
+
+      const runtimeSupabase = getOrgSupabase();
+      const { data, error } = await runtimeSupabase.rpc('setup_assistant_diagnostics');
 
       if (error) {
         throw error;
@@ -1650,7 +1678,7 @@ export default function SetupAssistant() {
                 <Button
                   type="button"
                   onClick={handleVerify}
-                  disabled={isVerifying || !hasSavedConnection || !orgSelected}
+                  disabled={isVerifying || !hasSavedConnection || !orgSelected || hasUnsavedChanges}
                   className="gap-2"
                 >
                   {isVerifying ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}
@@ -1658,6 +1686,12 @@ export default function SetupAssistant() {
                 </Button>
               </div>
             </div>
+
+            {hasUnsavedChanges ? (
+              <p className="text-xs text-amber-600">
+                שמור את פרטי החיבור לפני הרצת האימות.
+              </p>
+            ) : null}
 
             {verifyError ? (
               <div className="rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm p-3 flex items-start gap-2">
