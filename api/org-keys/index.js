@@ -99,6 +99,8 @@ function resolveHeaderValue(headers, name) {
     return undefined;
   }
 
+  const targetName = typeof name === 'string' ? name : String(name || '');
+
   if (typeof headers.get === 'function') {
     const directValue = normalizeHeaderValue(headers.get(name));
     if (typeof directValue === 'string' && directValue.length > 0) {
@@ -161,6 +163,33 @@ function resolveHeaderValue(headers, name) {
           return upperValue;
         }
       }
+    }
+  }
+
+  const rawHeaders = headers?.rawHeaders;
+  if (Array.isArray(rawHeaders)) {
+    for (let index = 0; index < rawHeaders.length - 1; index += 2) {
+      const rawName = rawHeaders[index];
+      if (typeof rawName !== 'string') {
+        continue;
+      }
+
+      if (rawName.toLowerCase() !== targetName.toLowerCase()) {
+        continue;
+      }
+
+      const rawValue = normalizeHeaderValue(rawHeaders[index + 1]);
+      if (typeof rawValue === 'string' && rawValue.length > 0) {
+        return rawValue;
+      }
+    }
+  }
+
+  const nestedHeaders = headers?.headers;
+  if (nestedHeaders && nestedHeaders !== headers) {
+    const nestedValue = resolveHeaderValue(nestedHeaders, name);
+    if (nestedValue) {
+      return nestedValue;
     }
   }
 

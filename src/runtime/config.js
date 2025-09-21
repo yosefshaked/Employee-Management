@@ -162,7 +162,11 @@ export async function loadRuntimeConfig(options = {}) {
       throw new MissingRuntimeConfigError('נדרשת כניסה מחדש כדי לאמת את בקשת מפתחות הארגון.');
     }
 
-    headers['X-Supabase-Authorization'] = `Bearer ${accessToken}`;
+    const bearerHeader = `Bearer ${accessToken}`;
+    headers['X-Supabase-Authorization'] = bearerHeader;
+    headers.Authorization = bearerHeader;
+    headers['X-Supabase-Auth'] = bearerHeader;
+    headers['x-supabase-auth'] = bearerHeader;
     endpoint = `/api/org/${encodeURIComponent(targetOrgId)}/keys`;
   }
 
