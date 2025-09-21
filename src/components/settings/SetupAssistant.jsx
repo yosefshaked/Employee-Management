@@ -18,14 +18,14 @@ import {
   MissingRuntimeConfigError,
 } from '@/runtime/config.js';
 import { verifyOrgConnection } from '@/runtime/verification.js';
-import { resetSupabase as resetRuntimeSupabase } from '@/runtime/supabase-client.js';
+import { resetSupabase as resetRuntimeSupabase } from '@/lib/supabase-client.js';
 import { mapSupabaseError } from '@/org/errors.js';
 import {
-  setOrg as setRuntimeOrg,
+  activateOrg as activateRuntimeOrg,
   clearOrg as clearRuntimeOrg,
   getOrgOrThrow,
   waitOrgReady,
-} from '@/runtime/org-runtime.js';
+} from '@/lib/org-runtime.js';
 import {
   Building2,
   AlertCircle,
@@ -928,7 +928,7 @@ export default function SetupAssistant() {
           { supabaseUrl, supabaseAnonKey },
           { source: 'org-api', orgId: activeOrg.id },
         );
-        setRuntimeOrg({ orgId: activeOrg.id, supabaseUrl, supabaseAnonKey });
+        activateRuntimeOrg({ orgId: activeOrg.id, supabaseUrl, supabaseAnonKey });
         await waitOrgReady();
         if (!cancelled) {
           setConfigStatus('activated');
@@ -1081,7 +1081,7 @@ export default function SetupAssistant() {
         },
         { source: config?.source || 'org-api', orgId: activeOrg.id },
       );
-      setRuntimeOrg({
+      activateRuntimeOrg({
         orgId: activeOrg.id,
         supabaseUrl: config.supabaseUrl,
         supabaseAnonKey: config.supabaseAnonKey,
@@ -1678,7 +1678,13 @@ export default function SetupAssistant() {
                 <Button
                   type="button"
                   onClick={handleVerify}
-                  disabled={isVerifying || !hasSavedConnection || !orgSelected || hasUnsavedChanges}
+                  disabled={
+                    isVerifying ||
+                    !hasSavedConnection ||
+                    !orgSelected ||
+                    hasUnsavedChanges ||
+                    configStatus !== 'activated'
+                  }
                   className="gap-2"
                 >
                   {isVerifying ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}

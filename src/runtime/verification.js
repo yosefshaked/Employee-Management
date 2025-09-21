@@ -1,4 +1,4 @@
-import { getSupabase } from './supabase-client.js';
+import { getSupabase } from '@/lib/supabase-client.js';
 
 export async function verifyOrgConnection() {
   const supabase = await getSupabase();

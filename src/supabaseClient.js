@@ -1,12 +1,12 @@
 import { createContext, createElement, useContext, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { getConfigOrThrow, MissingRuntimeConfigError } from './runtime/config.js';
-import { setOrg as setRuntimeOrg, clearOrg as clearRuntimeOrg } from './runtime/org-runtime.js';
+import { activateOrg as activateRuntimeOrg, clearOrg as clearRuntimeOrg } from './lib/org-runtime.js';
 import {
   getSupabase as getRuntimeSupabase,
   getCachedSupabase as getCachedRuntimeSupabase,
   resetSupabase as resetRuntimeSupabase,
-} from './runtime/supabase-client.js';
+} from './lib/supabase-client.js';
 
 let runtimeConfig;
 try {
@@ -161,7 +161,7 @@ export function OrgSupabaseProvider({ config, children }) {
           resetRuntimeSupabase(normalized.orgId);
         }
 
-        setRuntimeOrg(normalized);
+        activateRuntimeOrg(normalized);
         let client = getCachedRuntimeSupabase(normalized.orgId);
         let cached = Boolean(client);
         if (!client) {

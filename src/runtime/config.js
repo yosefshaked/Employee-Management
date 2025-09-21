@@ -1,3 +1,6 @@
+import { asError, MissingRuntimeConfigError } from '@/lib/error-utils.js';
+export { MissingRuntimeConfigError } from '@/lib/error-utils.js';
+
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const CACHE = new Map();
 
@@ -61,60 +64,6 @@ export function onConfigCleared(listener) {
     clearedListeners.delete(listener);
   };
 }
-
-const DEFAULT_MISSING_CONFIG_MESSAGE =
-  'טעינת ההגדרות נכשלה. ודא שפונקציית /api/config זמינה ומחזירה JSON תקין.';
-
-function applyErrorName(error, name) {
-  if (!error || (typeof error !== 'object' && typeof error !== 'function')) {
-    return error;
-  }
-
-  try {
-    Object.defineProperty(error, 'name', {
-      value: name,
-      configurable: true,
-      enumerable: false,
-      writable: true,
-    });
-  } catch {
-    try {
-      error.name = name;
-    } catch {
-      // ignore read-only name assignments
-    }
-  }
-
-  return error;
-}
-
-export function MissingRuntimeConfigError(message = DEFAULT_MISSING_CONFIG_MESSAGE) {
-  const target = new.target || MissingRuntimeConfigError;
-  const finalMessage = message === undefined ? DEFAULT_MISSING_CONFIG_MESSAGE : message;
-  const error = Reflect.construct(Error, [finalMessage], target);
-  applyErrorName(error, 'MissingRuntimeConfigError');
-
-  if (typeof Error.captureStackTrace === 'function') {
-    Error.captureStackTrace(error, MissingRuntimeConfigError);
-  }
-
-  return error;
-}
-
-MissingRuntimeConfigError.prototype = Object.create(Error.prototype, {
-  constructor: {
-    value: MissingRuntimeConfigError,
-    writable: true,
-    configurable: true,
-  },
-});
-
-Object.defineProperty(MissingRuntimeConfigError.prototype, 'name', {
-  value: 'MissingRuntimeConfigError',
-  configurable: true,
-});
-
-Object.setPrototypeOf(MissingRuntimeConfigError, Error);
 
 export function activateConfig(rawConfig, options = {}) {
   const sanitized = sanitizeConfig(rawConfig, options.source || rawConfig?.source || 'manual');
@@ -293,7 +242,7 @@ async function ensureJsonResponse(response, orgId, scope, accessToken, endpoint)
     error.status = response.status;
     error.endpoint = endpointLabel;
     error.bodyText = bodyText;
-    throw error;
+    throw asError(error);
   }
 }
 
@@ -444,7 +393,7 @@ export async function loadRuntimeConfig(options = {}) {
     error.body = payload;
     error.endpoint = endpoint;
     error.bodyText = rawBodyText;
-    throw error;
+    throw asError(error);
   }
 
   const sanitized = sanitizeConfig(payload, scope === 'org' ? 'org-api' : 'api');
@@ -468,7 +417,7 @@ export async function loadRuntimeConfig(options = {}) {
     error.body = payload;
     error.endpoint = endpoint;
     error.bodyText = rawBodyText;
-    throw error;
+    throw asError(error);
   }
 
   const normalized = {
