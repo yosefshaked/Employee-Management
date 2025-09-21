@@ -29,7 +29,7 @@ async function parseJsonResponse(response) {
 
 export default async function (context, req) {
   const env = readEnv(context);
-  const orgId = context?.bindingData?.orgId;
+  const orgId = context.bindingData?.orgId;
 
   if (!orgId) {
     context.log?.warn?.('org-keys missing orgId');
