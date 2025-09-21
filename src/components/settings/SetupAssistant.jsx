@@ -197,7 +197,7 @@ begin
       into existing_policies
     from pg_policies
     where schemaname = 'public'
-      and tablename = lower(table_name);
+      and lower(tablename) = lower(table_name);
 
     missing_policies := array(
       select policy_name
