@@ -627,6 +627,142 @@ function maskDiagnosticsPayload(payload) {
   return payload;
 }
 
+function maskDiagnosticsText(text) {
+  if (typeof text !== 'string' || !text) {
+    return '';
+  }
+  return text.replace(/[A-Za-z0-9-_]{24,}/g, (match) => maskSupabaseCredential(match));
+}
+
+function interpretDiagnostics(diagnostics) {
+  if (!diagnostics || !diagnostics.error) {
+    return null;
+  }
+
+  const { error, scope, status } = diagnostics;
+  const suggestions = [];
+  let message = null;
+
+  switch (error) {
+    case 'network-failure':
+      message = 'לא ניתן ליצור קשר עם פונקציית ה-API של הארגון.';
+      suggestions.push('ודא שהפונקציה פרוסה ופועלת בסביבת Azure Functions.');
+      suggestions.push('בדוק שאין חסימה על ידי חומת אש או פרוקסי ארגוני.');
+      break;
+    case 'missing-org':
+      message = 'לא נבחר ארגון פעיל עבור הבקשה.';
+      suggestions.push('בחר מחדש ארגון פעיל ונסה שוב.');
+      break;
+    case 'missing-token':
+      message = 'בקשת המפתחות לא כללה אסימון זיהוי.';
+      suggestions.push('התחבר מחדש כדי לרענן את אסימון ה-Supabase.');
+      break;
+    case 'response-not-json':
+      message = 'הפונקציה החזירה תשובה שאינה JSON.';
+      suggestions.push('ודא ש-Content-Type מוגדר ל-application/json ושנעשה שימוש ב-json() בצד השרת.');
+      break;
+    case 'invalid-json':
+      message = 'התגובה מהפונקציה לא ניתנת לפענוח כ-JSON תקין.';
+      suggestions.push('בדוק שהתגובה אינה מכילה הערות או תוכן נוסף מעבר ל-JSON.');
+      break;
+    case 'missing-keys':
+      message = 'התגובה לא הכילה supabase_url ו-anon_key.';
+      suggestions.push('ודא שטבלת org_settings מכילה את פרטי החיבור והפונקציה מחזירה אותם.');
+      break;
+    default: {
+      const normalized = typeof error === 'string' ? error.toLowerCase() : '';
+      if (normalized.includes('missing bearer')) {
+        message = 'הפונקציה סירבה לבקשה ללא כותרת Authorization.';
+        suggestions.push('ודא שהמשתמש מחובר ושהפונקציה קוראת את הכותרת x-supabase-authorization.');
+      } else if (normalized.includes('org not found') || normalized.includes('no access')) {
+        message = 'הפונקציה לא מצאה את הארגון או שאין למשתמש הרשאה.';
+        suggestions.push('בדוק שהמשתמש משויך לארגון ב-Supabase ושלטבלת org_memberships יש את הרשומות הנכונות.');
+      } else {
+        message = typeof error === 'string' ? error : null;
+      }
+      break;
+    }
+  }
+
+  if (!message) {
+    message = 'אירעה שגיאה בטעינת הגדרות הארגון.';
+  }
+
+  if (status && scope === 'org' && (status === 401 || status === 403)) {
+    suggestions.push('ודא שהמפתח הציבורי של הארגון מעודכן והמשתמש בעל הרשאות לקרוא את הנתונים.');
+  }
+
+  return { message, suggestions };
+}
+
+function extractErrorStatus(error) {
+  if (!error) {
+    return null;
+  }
+  if (typeof error.status === 'number') {
+    return error.status;
+  }
+  if (typeof error.statusCode === 'number') {
+    return error.statusCode;
+  }
+  if (typeof error.status === 'string') {
+    const parsed = Number(error.status);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  if (typeof error.statusCode === 'string') {
+    const parsed = Number(error.statusCode);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function describeVerificationError(error) {
+  const status = extractErrorStatus(error);
+  const code = typeof error?.code === 'string' ? error.code.trim() : '';
+  const rawMessage = typeof error?.message === 'string' ? error.message.trim() : '';
+  const normalizedMessage = rawMessage.toLowerCase();
+
+  if (status === 404 || code === 'PGRST301' || normalizedMessage.includes('setup_assistant_diagnostics')) {
+    return 'פונקציית setup_assistant_diagnostics לא נמצאה או שאינה זמינה. ודא שהרצת את בלוק הסכימה בסביבת Supabase.';
+  }
+  if (status === 401) {
+    return 'אסימון Supabase חסר או פג תוקף (401). התחבר מחדש ונסה שוב.';
+  }
+  if (status === 403) {
+    return 'למשתמש אין הרשאה להריץ את בדיקת האימות (403). בדוק שהמשתמש משויך לארגון.';
+  }
+  if (status && status >= 500) {
+    return `שרת Supabase החזיר שגיאה בעת הרצת האימות (סטטוס ${status}).`;
+  }
+  if (rawMessage) {
+    return rawMessage;
+  }
+  return 'בדיקת האימות נכשלה. נסה שוב או פנה לתמיכה.';
+}
+
+function collectVerificationDetails(error, summary) {
+  const status = extractErrorStatus(error);
+  const code = typeof error?.code === 'string' && error.code.trim() ? error.code.trim() : null;
+  const details = [];
+
+  const rawMessage = typeof error?.message === 'string' ? error.message.trim() : '';
+  if (rawMessage && rawMessage !== summary) {
+    details.push(rawMessage);
+  }
+  if (typeof error?.details === 'string' && error.details.trim()) {
+    details.push(error.details.trim());
+  }
+  if (typeof error?.hint === 'string' && error.hint.trim()) {
+    details.push(error.hint.trim());
+  }
+
+  return { status, code, details };
+}
+
 function CopyButton({ text, ariaLabel }) {
   const [state, setState] = useState('idle');
 
@@ -720,6 +856,7 @@ export default function SetupAssistant() {
   const [verifyResults, setVerifyResults] = useState([]);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState('');
+  const [verifyErrorInfo, setVerifyErrorInfo] = useState(null);
   const [lastVerifiedAt, setLastVerifiedAt] = useState(activeOrg?.verified_at || null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [newOrgName, setNewOrgName] = useState('');
@@ -809,6 +946,9 @@ export default function SetupAssistant() {
       setVerificationStatus('idle');
       setLastVerifiedAt(null);
       setConnectionTest(INITIAL_CONNECTION_TEST);
+      setVerifyResults([]);
+      setVerifyError('');
+      setVerifyErrorInfo(null);
       return;
     }
 
@@ -863,6 +1003,9 @@ export default function SetupAssistant() {
       setLastVerifiedAt(activeOrg.verified_at || null);
     }
     setConnectionTest(INITIAL_CONNECTION_TEST);
+    setVerifyResults([]);
+    setVerifyError('');
+    setVerifyErrorInfo(null);
   }, [activeOrg, activeOrgConnection]);
 
   const hasUnsavedChanges = useMemo(() => {
@@ -969,9 +1112,11 @@ export default function SetupAssistant() {
     } catch (error) {
       console.error('Setup assistant connection test failed', error);
       const diagnostics = getRuntimeConfigDiagnostics();
-      const message = error instanceof MissingRuntimeConfigError
+      const interpretation = interpretDiagnostics(diagnostics);
+      const defaultMessage = error instanceof MissingRuntimeConfigError
         ? error.message
         : error?.message || 'בדיקת החיבור נכשלה. ודא שהפונקציה /api/org/{orgId}/keys זמינה ומחזירה JSON תקין.';
+      const message = interpretation?.message || defaultMessage;
 
       setConnectionTest({
         status: 'error',
@@ -1018,6 +1163,7 @@ export default function SetupAssistant() {
     }
     setIsVerifying(true);
     setVerifyError('');
+    setVerifyErrorInfo(null);
     setVerifyResults([]);
     setVerificationStatus('running');
 
@@ -1054,12 +1200,11 @@ export default function SetupAssistant() {
     } catch (error) {
       console.error('Verification failed', error);
       setVerificationStatus('error');
-      if (error?.message?.includes('setup_assistant_diagnostics')) {
-        setVerifyError('לא נמצאה פונקציית האימות. ודא שהרצת את בלוק הסכימה ונסה שוב.');
-      } else {
-        setVerifyError('בדיקת האימות נכשלה. נסה שוב או פנה לתמיכה.');
-      }
-      toast.error('בדיקת האימות נכשלה.');
+      const summary = describeVerificationError(error);
+      const details = collectVerificationDetails(error, summary);
+      setVerifyError(summary);
+      setVerifyErrorInfo(details);
+      toast.error(summary);
     } finally {
       setIsVerifying(false);
     }
@@ -1123,11 +1268,18 @@ export default function SetupAssistant() {
     const rows = [
       { label: 'סטטוס HTTP', value: diagnostics.status ?? '—' },
       { label: 'טווח', value: diagnostics.scope === 'org' ? 'ארגון' : 'אפליקציה' },
+      ...(diagnostics.endpoint ? [{ label: 'מסלול', value: diagnostics.endpoint }] : []),
       { label: 'מזהה ארגון', value: diagnostics.orgId || '—' },
       { label: 'אסימון', value: diagnostics.accessTokenPreview || '—' },
       { label: 'מצב', value: diagnostics.ok ? 'הצלחה' : 'שגיאה' },
       { label: 'זמן', value: formatDiagnosticsTimestamp(diagnostics.timestamp) || '—' },
     ];
+
+    const interpretation = interpretDiagnostics(diagnostics);
+    const rawBodyText = typeof diagnostics.bodyText === 'string' ? diagnostics.bodyText : '';
+    const hasRawBodyText = Boolean(rawBodyText.trim());
+    const shouldShowRawError = diagnostics.error
+      && (!interpretation || (interpretation && interpretation.message !== diagnostics.error));
 
     return (
       <div className="rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-600 p-3 space-y-2">
@@ -1139,7 +1291,20 @@ export default function SetupAssistant() {
             </div>
           ))}
         </div>
-        {diagnostics.error ? (
+        {interpretation ? (
+          <div className="space-y-2">
+            <p className="text-sm text-slate-700 font-medium">פענוח השגיאה</p>
+            <p className="text-xs sm:text-sm text-slate-600">{interpretation.message}</p>
+            {interpretation.suggestions.length ? (
+              <ul className="list-disc pr-4 text-xs text-slate-500 space-y-1">
+                {interpretation.suggestions.map((suggestion, index) => (
+                  <li key={`${suggestion}-${index}`}>{suggestion}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+        {shouldShowRawError ? (
           <p className="text-red-600">הודעת שרת: {diagnostics.error}</p>
         ) : null}
         {diagnostics.body && diagnostics.bodyIsJson ? (
@@ -1148,6 +1313,14 @@ export default function SetupAssistant() {
             className="bg-white border border-slate-200 rounded-lg p-3 text-[11px] leading-relaxed overflow-x-auto text-slate-700"
           >
             {JSON.stringify(maskDiagnosticsPayload(diagnostics.body), null, 2)}
+          </pre>
+        ) : null}
+        {hasRawBodyText && !diagnostics.bodyIsJson ? (
+          <pre
+            dir="ltr"
+            className="bg-white border border-slate-200 rounded-lg p-3 text-[11px] leading-relaxed overflow-x-auto text-slate-700"
+          >
+            {maskDiagnosticsText(rawBodyText)}
           </pre>
         ) : null}
       </div>
@@ -1459,7 +1632,22 @@ export default function SetupAssistant() {
             {verifyError ? (
               <div className="rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm p-3 flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 mt-0.5" aria-hidden="true" />
-                <span>{verifyError}</span>
+                <div className="space-y-2">
+                  <span className="block">{verifyError}</span>
+                  {verifyErrorInfo ? (
+                    <ul className="list-disc pr-4 text-xs text-red-600 space-y-1">
+                      {verifyErrorInfo.status !== null && verifyErrorInfo.status !== undefined ? (
+                        <li>סטטוס HTTP: {verifyErrorInfo.status}</li>
+                      ) : null}
+                      {verifyErrorInfo.code ? <li>קוד Supabase: {verifyErrorInfo.code}</li> : null}
+                      {Array.isArray(verifyErrorInfo.details)
+                        ? verifyErrorInfo.details.map((detail, index) => (
+                            <li key={`${detail}-${index}`}>{detail}</li>
+                          ))
+                        : null}
+                    </ul>
+                  ) : null}
+                </div>
               </div>
             ) : null}
 

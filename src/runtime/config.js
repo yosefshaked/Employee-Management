@@ -8,11 +8,13 @@ let lastDiagnostics = {
   scope: 'app',
   ok: false,
   error: null,
+  endpoint: null,
   timestamp: null,
   accessToken: null,
   accessTokenPreview: null,
   body: null,
   bodyIsJson: false,
+  bodyText: null,
 };
 
 export class MissingRuntimeConfigError extends Error {
@@ -84,18 +86,31 @@ function buildTokenPreview(token) {
   return `${trimmed.slice(0, 4)}…${trimmed.slice(-4)}`;
 }
 
-function updateDiagnostics({ orgId, status, scope, ok, error, accessToken, body, bodyIsJson }) {
+function updateDiagnostics({
+  orgId,
+  status,
+  scope,
+  ok,
+  error,
+  accessToken,
+  body,
+  bodyIsJson,
+  endpoint,
+  bodyText,
+}) {
   lastDiagnostics = {
     orgId: orgId || null,
     status: typeof status === 'number' ? status : null,
     scope,
     ok,
     error: error || null,
+    endpoint: endpoint || null,
     timestamp: Date.now(),
     accessToken: accessToken || null,
     accessTokenPreview: buildTokenPreview(accessToken),
     body: bodyIsJson ? body ?? null : null,
     bodyIsJson: Boolean(bodyIsJson && body !== undefined),
+    bodyText: typeof bodyText === 'string' && bodyText.length ? bodyText : null,
   };
 }
 
@@ -110,9 +125,15 @@ function buildCacheKey(scope, orgId) {
   return 'app';
 }
 
-function ensureJsonResponse(response, orgId, scope, accessToken, endpoint) {
+async function ensureJsonResponse(response, orgId, scope, accessToken, endpoint) {
   const contentType = response.headers.get('content-type') || '';
   if (!contentType.toLowerCase().includes('application/json')) {
+    let bodyText = '';
+    try {
+      bodyText = await response.text();
+    } catch {
+      bodyText = '';
+    }
     updateDiagnostics({
       orgId,
       status: response.status,
@@ -122,6 +143,8 @@ function ensureJsonResponse(response, orgId, scope, accessToken, endpoint) {
       accessToken,
       body: null,
       bodyIsJson: false,
+      endpoint,
+      bodyText,
     });
     const endpointLabel = endpoint || '/api/config';
     const error = new MissingRuntimeConfigError(
@@ -129,6 +152,7 @@ function ensureJsonResponse(response, orgId, scope, accessToken, endpoint) {
     );
     error.status = response.status;
     error.endpoint = endpointLabel;
+    error.bodyText = bodyText;
     throw error;
   }
 }
@@ -200,34 +224,48 @@ export async function loadRuntimeConfig(options = {}) {
       accessToken,
       body: null,
       bodyIsJson: false,
+      endpoint,
     });
     throw new MissingRuntimeConfigError(
       `לא ניתן ליצור קשר עם הפונקציה ${endpoint}. ודא שהיא פרוסה ופועלת.`,
     );
   }
 
-  ensureJsonResponse(response, targetOrgId, scope, accessToken, endpoint);
+  await ensureJsonResponse(response, targetOrgId, scope, accessToken, endpoint);
 
-  let payload;
+  let rawBodyText = '';
   try {
-    payload = await response.json();
+    rawBodyText = await response.text();
   } catch {
-    updateDiagnostics({
-      orgId: targetOrgId,
-      status: response.status,
-      scope,
-      ok: false,
-      error: 'invalid-json',
-      accessToken,
-      body: null,
-      bodyIsJson: false,
-    });
-    const parsingError = new MissingRuntimeConfigError(
-      `לא ניתן לפענח את תשובת ${endpoint}. ודא שהפונקציה מחזירה JSON תקין.`,
-    );
-    parsingError.status = response.status;
-    parsingError.endpoint = endpoint;
-    throw parsingError;
+    rawBodyText = '';
+  }
+
+  let payload = null;
+  const trimmedBody = rawBodyText.trim();
+  if (trimmedBody) {
+    try {
+      payload = JSON.parse(trimmedBody);
+    } catch {
+      updateDiagnostics({
+        orgId: targetOrgId,
+        status: response.status,
+        scope,
+        ok: false,
+        error: 'invalid-json',
+        accessToken,
+        body: null,
+        bodyIsJson: false,
+        endpoint,
+        bodyText: rawBodyText,
+      });
+      const parsingError = new MissingRuntimeConfigError(
+        `לא ניתן לפענח את תשובת ${endpoint}. ודא שהפונקציה מחזירה JSON תקין.`,
+      );
+      parsingError.status = response.status;
+      parsingError.endpoint = endpoint;
+      parsingError.bodyText = rawBodyText;
+      throw parsingError;
+    }
   }
 
   if (!response.ok) {
@@ -258,11 +296,14 @@ export async function loadRuntimeConfig(options = {}) {
       accessToken,
       body: payload,
       bodyIsJson: typeof payload === 'object' && payload !== null,
+      endpoint,
+      bodyText: rawBodyText,
     });
     const error = new MissingRuntimeConfigError(serverMessage);
     error.status = response.status;
     error.body = payload;
     error.endpoint = endpoint;
+    error.bodyText = rawBodyText;
     throw error;
   }
 
@@ -277,6 +318,8 @@ export async function loadRuntimeConfig(options = {}) {
       accessToken,
       body: payload,
       bodyIsJson: typeof payload === 'object' && payload !== null,
+      endpoint,
+      bodyText: rawBodyText,
     });
     const error = new MissingRuntimeConfigError(
       `הפונקציה ${endpoint} לא סיפקה supabase_url ו-anon_key.`,
@@ -284,6 +327,7 @@ export async function loadRuntimeConfig(options = {}) {
     error.status = response.status;
     error.body = payload;
     error.endpoint = endpoint;
+    error.bodyText = rawBodyText;
     throw error;
   }
 
@@ -301,6 +345,8 @@ export async function loadRuntimeConfig(options = {}) {
     accessToken,
     body: payload,
     bodyIsJson: typeof payload === 'object' && payload !== null,
+    endpoint,
+    bodyText: rawBodyText,
   });
 
   CACHE.set(cacheKey, normalized);
