@@ -48,6 +48,12 @@ Visit `/#/diagnostics` in development to review the last configuration request (
 
 If either `/api/config` or `/api/org/:id/keys` is unreachable or returns non-JSON content the UI shows a blocking error screen in Hebrew with recovery steps.
 
+## Supabase guardrails for contributors
+
+- Reuse the shared clients: `coreSupabase` from `src/supabaseClient.js` for control-database calls and `getSupabase` from `src/lib/supabase-client.js` for organization scoped work. The ESLint rule `project/no-create-client-outside-shared` blocks new `createClient(` calls elsewhere, so update the shared modules if additional behavior is required.
+- Normalize thrown values with `asError` from `src/lib/error-utils.js` or dedicated error classes. Do not assign to `error.name` or mutate built-in error properties—linting will fail if you do.
+- When touching Supabase runtime flows run `npm run build` and `node --test` to ensure the guardrails and helper tests still pass.
+
 ## Health check endpoint
 
 Azure Static Web Apps automatically deploys Azure Functions inside the `api/` directory. The `/api/healthcheck` function responds with:
