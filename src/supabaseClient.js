@@ -27,6 +27,11 @@ export let SUPABASE_ANON_KEY = null;
 
 function buildCoreSupabase(config) {
   return createClient(config.supabaseUrl, config.supabaseAnonKey, {
+    auth: {
+      storageKey: 'sb-control',
+      persistSession: false,
+      autoRefreshToken: false,
+    },
     global: {
       headers: { Accept: 'application/json' },
     },
