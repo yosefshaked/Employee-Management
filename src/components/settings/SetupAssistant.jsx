@@ -18,16 +18,17 @@ import {
   MissingRuntimeConfigError,
 } from '@/runtime/config.js';
 import { verifyOrgConnection } from '@/runtime/verification.js';
-import { getSupabase as getRuntimeSupabase, resetSupabase as resetRuntimeSupabase } from '@/lib/supabase-client.js';
 import { fetchLeavePolicySettings } from '@/lib/settings-client.js';
 import { asError } from '@/lib/error-utils.js';
 import { mapSupabaseError } from '@/org/errors.js';
 import {
-  activateOrg as activateRuntimeOrg,
-  clearOrg as clearRuntimeOrg,
-  getOrgOrThrow,
-  waitOrgReady,
-} from '@/lib/org-runtime.js';
+  activateRuntimeOrg,
+  clearRuntimeOrg,
+  getRuntimeOrgOrThrow,
+  waitRuntimeOrgReady,
+  getRuntimeSupabase,
+  resetRuntimeSupabase,
+} from '@/runtime/org-gate.js';
 import {
   Building2,
   AlertCircle,
@@ -936,7 +937,7 @@ export default function SetupAssistant() {
           { source: 'org-api', orgId: activeOrg.id },
         );
         activateRuntimeOrg({ orgId: activeOrg.id, supabaseUrl, supabaseAnonKey });
-        await waitOrgReady();
+        await waitRuntimeOrgReady();
         if (!cancelled) {
           setConfigStatus('activated');
         }
@@ -1020,7 +1021,7 @@ export default function SetupAssistant() {
       return false;
     }
     try {
-      const org = getOrgOrThrow();
+      const org = getRuntimeOrgOrThrow();
       return Boolean(org?.orgId && org.orgId === activeOrg.id);
     } catch {
       return false;
@@ -1177,7 +1178,7 @@ export default function SetupAssistant() {
         supabaseUrl: config.supabaseUrl,
         supabaseAnonKey: config.supabaseAnonKey,
       });
-      await waitOrgReady();
+      await waitRuntimeOrgReady();
       setConfigStatus('activated');
       const verification = await verifyOrgConnection();
       const diagnostics = getRuntimeConfigDiagnostics();
@@ -1285,15 +1286,15 @@ export default function SetupAssistant() {
 
       let runtimeOrg = null;
       try {
-        runtimeOrg = getOrgOrThrow();
+        runtimeOrg = getRuntimeOrgOrThrow();
       } catch {
         runtimeOrg = null;
       }
 
       if (!runtimeOrg || runtimeOrg.orgId !== activeOrg.id) {
-        await waitOrgReady();
+        await waitRuntimeOrgReady();
         try {
-          runtimeOrg = getOrgOrThrow();
+          runtimeOrg = getRuntimeOrgOrThrow();
         } catch {
           runtimeOrg = null;
         }
