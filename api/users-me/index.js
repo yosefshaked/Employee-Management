@@ -1,7 +1,7 @@
 /* eslint-env node */
 import process from 'node:process';
-import { createClient } from '@supabase/supabase-js';
 import { json, resolveBearerAuthorization } from '../_shared/http.js';
+import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 
 function readEnv(context) {
   return context?.env ?? process.env ?? {};
@@ -22,8 +22,8 @@ function respond(context, status, body, extraHeaders) {
 
 export default async function (context, req) {
   const env = readEnv(context);
-  const supabaseUrl = env.APP_SUPABASE_URL;
-  const serviceRoleKey = env.APP_SUPABASE_SERVICE_ROLE;
+  const adminConfig = readSupabaseAdminConfig(env);
+  const { supabaseUrl, serviceRoleKey } = adminConfig;
 
   if (!supabaseUrl || !serviceRoleKey) {
     context.log?.error?.('users-me missing Supabase admin credentials');
@@ -38,9 +38,7 @@ export default async function (context, req) {
     return respond(context, 401, { message: 'missing bearer' });
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  const supabase = createSupabaseAdminClient(adminConfig);
 
   let authResult;
   try {

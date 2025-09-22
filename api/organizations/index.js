@@ -1,5 +1,5 @@
 /* eslint-env node */
-import { createClient } from '@supabase/supabase-js';
+import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 
 function jsonResponse(context, status, payload, extraHeaders = {}) {
   context.res = {
@@ -232,8 +232,8 @@ function sanitizeLegalSettings(raw) {
 
 export default async function (context, req) {
   const env = context.env ?? globalThis.process?.env ?? {};
-  const supabaseUrl = env.APP_SUPABASE_URL;
-  const serviceRoleKey = env.APP_SUPABASE_SERVICE_ROLE;
+  const adminConfig = readSupabaseAdminConfig(env);
+  const { supabaseUrl, serviceRoleKey } = adminConfig;
 
   if (!supabaseUrl || !serviceRoleKey) {
     context.log.error('Supabase metadata credentials are missing.');
@@ -271,7 +271,7 @@ export default async function (context, req) {
     return;
   }
 
-  const supabase = createClient(supabaseUrl, serviceRoleKey, {
+  const supabase = createSupabaseAdminClient(adminConfig, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
