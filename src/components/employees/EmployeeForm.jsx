@@ -52,7 +52,7 @@ export default function EmployeeForm({ employee, onSubmit, onCancel }) {
   const [rateHistory, setRateHistory] = useState([]);
   const [serviceRates, setServiceRates] = useState({});
   const [isLoading, setIsLoading] = useState(false);
-  const { dataClient } = useSupabase();
+  const { dataClient, authClient, user, loading } = useSupabase();
 
 useEffect(() => {
   const loadServicesAndRates = async () => {
@@ -159,6 +159,45 @@ useEffect(() => {
     hourly: 'תעריף שעתי (₪) *',
     global: 'שכר חודשי (₪) *',
   };
+
+  if (loading || !authClient) {
+    return (
+      <Card className="max-w-2xl mx-auto bg-white/80 backdrop-blur-sm border-0 shadow-xl">
+        <CardHeader className="p-6 border-b">
+          <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
+            <User className="w-5 h-5 text-blue-500" />
+            טוען חיבור Supabase...
+          </CardTitle>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Card className="max-w-2xl mx-auto bg-white/80 backdrop-blur-sm border-0 shadow-xl">
+        <CardHeader className="p-6 border-b">
+          <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
+            <User className="w-5 h-5 text-blue-500" />
+            יש להתחבר לפני עריכת עובדים.
+          </CardTitle>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  if (!dataClient) {
+    return (
+      <Card className="max-w-2xl mx-auto bg-white/80 backdrop-blur-sm border-0 shadow-xl">
+        <CardHeader className="p-6 border-b">
+          <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
+            <User className="w-5 h-5 text-blue-500" />
+            בחרו ארגון עם חיבור פעיל כדי לעדכן עובדים.
+          </CardTitle>
+        </CardHeader>
+      </Card>
+    );
+  }
 
   return (
     <Card className="max-w-2xl mx-auto bg-white/80 backdrop-blur-sm border-0 shadow-xl">

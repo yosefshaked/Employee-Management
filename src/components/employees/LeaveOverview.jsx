@@ -76,7 +76,7 @@ export default function LeaveOverview({
   const [overrideRate, setOverrideRate] = useState('');
   const [isSavingOverride, setIsSavingOverride] = useState(false);
   const [isOverrideDialogOpen, setIsOverrideDialogOpen] = useState(false);
-  const { dataClient } = useSupabase();
+  const { dataClient, authClient, user, loading } = useSupabase();
 
   const usageOptions = useMemo(() => {
     return LEAVE_TYPE_OPTIONS.filter(option => leavePolicy.allow_half_day || option.value !== 'half_day');
@@ -334,6 +334,36 @@ export default function LeaveOverview({
     }
     setIsSavingOverride(false);
   };
+
+  if (loading || !authClient) {
+    return (
+      <Card className="border-0 shadow-lg bg-white/80">
+        <CardHeader className="border-b">
+          <CardTitle className="text-xl font-semibold text-slate-900">טוען חיבור Supabase...</CardTitle>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Card className="border-0 shadow-lg bg-white/80">
+        <CardHeader className="border-b">
+          <CardTitle className="text-xl font-semibold text-slate-900">יש להתחבר כדי לנהל חופשות.</CardTitle>
+        </CardHeader>
+      </Card>
+    );
+  }
+
+  if (!dataClient) {
+    return (
+      <Card className="border-0 shadow-lg bg-white/80">
+        <CardHeader className="border-b">
+          <CardTitle className="text-xl font-semibold text-slate-900">נדרש חיבור Supabase פעיל לארגון.</CardTitle>
+        </CardHeader>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-6">

@@ -13,7 +13,7 @@ export default function Services() {
   const [showForm, setShowForm] = useState(false);
   const [editingService, setEditingService] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const { dataClient } = useSupabase();
+  const { dataClient, authClient, user, loading } = useSupabase();
 
   const loadServices = useCallback(async () => {
     if (!dataClient) {
@@ -75,6 +75,30 @@ export default function Services() {
     setEditingService(service);
     setShowForm(true);
   };
+
+  if (loading || !authClient) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        טוען חיבור Supabase...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        יש להתחבר כדי לנהל שירותים.
+      </div>
+    );
+  }
+
+  if (!dataClient) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        בחרו ארגון עם חיבור פעיל כדי לעבוד מול שירותים.
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">

@@ -719,7 +719,8 @@ export default function SetupAssistant() {
     createOrganization,
   } = useOrg();
   const { session } = useAuth();
-  const { authClient, dataClient } = useSupabase();
+  const { authClient, dataClient, user, loading } = useSupabase();
+  const supabaseReady = !loading && Boolean(authClient) && Boolean(user);
   const [connection, setConnection] = useState({ ...INITIAL_CONNECTION_VALUES });
   const [originalConnection, setOriginalConnection] = useState({ ...INITIAL_CONNECTION_VALUES });
   const [isSavingConnection, setIsSavingConnection] = useState(false);
@@ -1278,6 +1279,10 @@ export default function SetupAssistant() {
       toast.error('בחר ארגון פעיל לפני הרצת האימות.');
       return;
     }
+    if (!supabaseReady) {
+      toast.error('חיבור Supabase עדיין נטען. נסו שוב בעוד רגע.');
+      return;
+    }
     setIsVerifying(true);
     setVerifyError('');
     setVerifyErrorInfo(null);
@@ -1782,6 +1787,7 @@ export default function SetupAssistant() {
                     || isTestingConnection
                     || hasUnsavedChanges
                     || !hasConnectionValues
+                    || !supabaseReady
                   }
                   className="gap-2"
                 >
@@ -1842,7 +1848,8 @@ export default function SetupAssistant() {
                     !hasSavedConnection ||
                     !orgSelected ||
                     hasUnsavedChanges ||
-                    configStatus !== 'activated'
+                    configStatus !== 'activated' ||
+                    !supabaseReady
                   }
                   className="gap-2"
                 >

@@ -42,7 +42,7 @@ export default function Employees() {
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const { tenantClientReady, activeOrgHasConnection } = useOrg();
-  const { dataClient } = useSupabase();
+  const { dataClient, authClient, user, loading } = useSupabase();
 
   const loadData = useCallback(async () => {
     if (!tenantClientReady || !activeOrgHasConnection || !dataClient) {
@@ -251,6 +251,30 @@ export default function Employees() {
     const { error } = await dataClient.from('Employees').update({ is_active: !employee.is_active }).eq('id', employee.id);
     if (!error) loadData();
   };
+
+  if (loading || !authClient) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        טוען חיבור Supabase...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        יש להתחבר כדי להציג את רשימת העובדים.
+      </div>
+    );
+  }
+
+  if (!dataClient) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        בחרו ארגון עם חיבור פעיל כדי להמשיך.
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">

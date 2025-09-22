@@ -24,7 +24,7 @@ export default function ImportModal({ open, onOpenChange, employees, services, g
   const [detectedDelim, setDetectedDelim] = useState(',');
   const [overrideDelim, setOverrideDelim] = useState('');
   const [includeDup, setIncludeDup] = useState(false);
-  const { dataClient } = useSupabase();
+  const { dataClient, authClient, user, loading } = useSupabase();
 
   const handleFileChange = e => {
     const f = e.target.files?.[0];
@@ -132,6 +132,45 @@ export default function ImportModal({ open, onOpenChange, employees, services, g
   };
 
   const delimiterName = DELIMITERS[overrideDelim || detectedDelim];
+
+  if (loading || !authClient) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>ייבוא נתונים</DialogTitle>
+          </DialogHeader>
+          <p className="text-center text-slate-500">טוען את חיבור Supabase...</p>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  if (!user) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>ייבוא נתונים</DialogTitle>
+          </DialogHeader>
+          <p className="text-center text-slate-500">נא להתחבר לפני ייבוא נתונים.</p>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  if (!dataClient) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>ייבוא נתונים</DialogTitle>
+          </DialogHeader>
+          <p className="text-center text-slate-500">נדרש לבחור ארגון עם חיבור פעיל.</p>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

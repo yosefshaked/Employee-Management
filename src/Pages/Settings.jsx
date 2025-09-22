@@ -119,7 +119,7 @@ export default function Settings() {
   const [isSavingLeavePayPolicy, setIsSavingLeavePayPolicy] = useState(false);
   const setupDialogAutoOpenRef = useRef(!activeOrgHasConnection);
   const [isSetupDialogOpen, setIsSetupDialogOpen] = useState(!activeOrgHasConnection);
-  const { dataClient } = useSupabase();
+  const { dataClient, authClient, user, loading } = useSupabase();
 
   useEffect(() => {
     if (activeOrgHasConnection) {
@@ -340,6 +340,30 @@ export default function Settings() {
 
   const upcomingHoliday = findHolidayForDate(policy);
   const resolvedLegalInfoUrl = (leavePayPolicy.legal_info_url || '').trim() || DEFAULT_LEGAL_INFO_URL;
+
+  if (loading || !authClient) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        טוען חיבור Supabase...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        יש להתחבר כדי להגדיר את הארגון.
+      </div>
+    );
+  }
+
+  if (!dataClient && activeOrgHasConnection) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        ממתין לטעינת חיבור Supabase של הארגון.
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">

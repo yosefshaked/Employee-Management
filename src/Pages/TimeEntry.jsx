@@ -88,7 +88,7 @@ export default function TimeEntry() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(() => getTabFromSearch(location.search));
   const { tenantClientReady, activeOrgHasConnection } = useOrg();
-  const { dataClient } = useSupabase();
+  const { dataClient, authClient, user, loading } = useSupabase();
   const loadInitialData = useCallback(async ({ silent = false } = {}) => {
     if (!tenantClientReady || !activeOrgHasConnection || !dataClient) {
       if (!silent) {
@@ -712,6 +712,30 @@ export default function TimeEntry() {
       throw error;
     }
   };
+
+  if (loading || !authClient) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        טוען חיבור Supabase...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        יש להתחבר כדי לעבוד עם רישומי הזמנים.
+      </div>
+    );
+  }
+
+  if (!dataClient) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        בחרו ארגון עם חיבור פעיל כדי להציג את רישומי הזמנים.
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">
