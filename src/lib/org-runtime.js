@@ -1,5 +1,11 @@
 import { MissingRuntimeConfigError } from './error-utils.js';
 
+const IS_DEV = Boolean(import.meta?.env?.DEV);
+
+if (IS_DEV) {
+  console.debug('[org-runtime] module evaluated');
+}
+
 let currentOrg = null;
 let readyResolve = () => {};
 let readyPromise = createReadyPromise();

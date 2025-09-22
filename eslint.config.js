@@ -3,6 +3,7 @@ import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
+import importPlugin from 'eslint-plugin-import'
 import noCreateClientRule from './eslint-rules/no-create-client-outside-shared.js'
 
 export default defineConfig([
@@ -29,10 +30,23 @@ export default defineConfig([
           'no-create-client-outside-shared': noCreateClientRule,
         },
       },
+      import: importPlugin,
+    },
+    settings: {
+      'import/resolver': {
+        node: {
+          extensions: ['.js', '.jsx', '.mjs'],
+        },
+        alias: {
+          map: [['@', './src']],
+          extensions: ['.js', '.jsx', '.mjs'],
+        },
+      },
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
       'project/no-create-client-outside-shared': 'error',
+      'import/no-cycle': ['error', { maxDepth: Infinity }],
       'no-restricted-syntax': [
         'error',
         {

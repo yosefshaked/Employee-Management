@@ -1,6 +1,11 @@
 import { createContext, createElement, useContext, useEffect, useMemo, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { getConfigOrThrow, MissingRuntimeConfigError } from './runtime/config.js';
+import {
+  getCurrentConfig,
+  MissingRuntimeConfigError,
+  onConfigActivated,
+  onConfigCleared,
+} from './runtime/config.js';
 import { activateOrg as activateRuntimeOrg, clearOrg as clearRuntimeOrg } from './lib/org-runtime.js';
 import {
   getSupabase as getRuntimeSupabase,
@@ -8,20 +13,134 @@ import {
   resetSupabase as resetRuntimeSupabase,
 } from './lib/supabase-client.js';
 
-let runtimeConfig;
-try {
-  runtimeConfig = getConfigOrThrow();
-} catch {
-  throw new Error('Supabase configuration missing. ודא שפונקציית /api/config זמינה ומחזירה supabase_url ו-anon_key.');
+const IS_DEV = Boolean(import.meta?.env?.DEV);
+
+if (IS_DEV) {
+  console.debug('[supabaseClient] module evaluated');
 }
 
-export const coreSupabase = createClient(runtimeConfig.supabaseUrl, runtimeConfig.supabaseAnonKey, {
-  global: {
-    headers: { Accept: 'application/json' },
-  },
+let coreSupabaseInstance = null;
+let coreSupabaseConfigKey = null;
+let controlConfigSnapshot = null;
+export let SUPABASE_URL = null;
+export let SUPABASE_ANON_KEY = null;
+
+function buildCoreSupabase(config) {
+  return createClient(config.supabaseUrl, config.supabaseAnonKey, {
+    global: {
+      headers: { Accept: 'application/json' },
+    },
+  });
+}
+
+function computeCoreConfigKey(config) {
+  return `${config.supabaseUrl}::${config.supabaseAnonKey}`;
+}
+
+function applyCoreConfig(config) {
+  const key = computeCoreConfigKey(config);
+  if (coreSupabaseInstance && coreSupabaseConfigKey === key) {
+    return coreSupabaseInstance;
+  }
+  coreSupabaseInstance = buildCoreSupabase(config);
+  coreSupabaseConfigKey = key;
+  SUPABASE_URL = config.supabaseUrl;
+  SUPABASE_ANON_KEY = config.supabaseAnonKey;
+  if (!config.orgId) {
+    controlConfigSnapshot = {
+      supabaseUrl: config.supabaseUrl,
+      supabaseAnonKey: config.supabaseAnonKey,
+      source: config.source || null,
+    };
+  }
+  if (IS_DEV) {
+    console.debug('[supabaseClient] core client initialized', {
+      source: config.source || 'unknown',
+    });
+  }
+  return coreSupabaseInstance;
+}
+
+function ensureCoreSupabaseInstance() {
+  const activeConfig = getCurrentConfig();
+  const controlConfig = activeConfig && !activeConfig.orgId ? activeConfig : controlConfigSnapshot;
+  if (!controlConfig) {
+    throw new MissingRuntimeConfigError(
+      'Supabase configuration missing. ודא שפונקציית /api/config זמינה ומחזירה supabase_url ו-anon_key.',
+    );
+  }
+  return applyCoreConfig(controlConfig);
+}
+
+const preloadedConfig = getCurrentConfig();
+if (preloadedConfig && !preloadedConfig.orgId) {
+  applyCoreConfig(preloadedConfig);
+}
+
+onConfigActivated((config) => {
+  if (!config || config.orgId) {
+    if (IS_DEV && config?.orgId) {
+      console.debug('[supabaseClient] skipped core init for org config', {
+        orgId: config.orgId,
+      });
+    }
+    return;
+  }
+  try {
+    applyCoreConfig(config);
+  } catch (error) {
+    if (IS_DEV) {
+      console.warn('[supabaseClient] failed to initialize core client on activation', error);
+    }
+  }
 });
-export const SUPABASE_URL = runtimeConfig.supabaseUrl;
-export const SUPABASE_ANON_KEY = runtimeConfig.supabaseAnonKey;
+
+onConfigCleared(() => {
+  if (!controlConfigSnapshot) {
+    coreSupabaseInstance = null;
+    coreSupabaseConfigKey = null;
+    SUPABASE_URL = null;
+    SUPABASE_ANON_KEY = null;
+  }
+  if (IS_DEV) {
+    console.debug('[supabaseClient] core client clear event', {
+      preserved: Boolean(controlConfigSnapshot),
+    });
+  }
+});
+
+export const coreSupabase = new Proxy(
+  {},
+  {
+    get(_target, prop) {
+      const client = ensureCoreSupabaseInstance();
+      const value = client[prop];
+      return typeof value === 'function' ? value.bind(client) : value;
+    },
+  },
+);
+
+export function getCoreSupabase() {
+  return ensureCoreSupabaseInstance();
+}
+
+export function getSupabaseUrl() {
+  if (!SUPABASE_URL) {
+    throw new MissingRuntimeConfigError(
+      'Supabase configuration missing. ודא שפונקציית /api/config זמינה ומחזירה supabase_url ו-anon_key.',
+    );
+  }
+  return SUPABASE_URL;
+}
+
+export function getSupabaseAnonKey() {
+  if (!SUPABASE_ANON_KEY) {
+    throw new MissingRuntimeConfigError(
+      'Supabase configuration missing. ודא שפונקציית /api/config זמינה ומחזירה supabase_url ו-anon_key.',
+    );
+  }
+  return SUPABASE_ANON_KEY;
+}
 
 let activeOrgConfig = null;
 let activeOrgClient = null;

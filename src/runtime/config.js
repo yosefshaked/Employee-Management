@@ -1,6 +1,12 @@
 import { asError, MissingRuntimeConfigError } from '@/lib/error-utils.js';
 export { MissingRuntimeConfigError } from '@/lib/error-utils.js';
 
+const IS_DEV = Boolean(import.meta?.env?.DEV);
+
+if (IS_DEV) {
+  console.debug('[runtime/config] module evaluated');
+}
+
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const CACHE = new Map();
 
@@ -86,6 +92,13 @@ export function activateConfig(rawConfig, options = {}) {
     orgId: normalized.orgId,
   };
 
+  if (IS_DEV) {
+    console.debug('[runtime/config] activated', {
+      source: currentConfig.source,
+      hasOrg: Boolean(currentConfig.orgId),
+    });
+  }
+
   if (typeof window !== 'undefined') {
     window.__RUNTIME_CONFIG__ = {
       supabaseUrl: currentConfig.supabaseUrl,
@@ -114,6 +127,9 @@ export function clearConfig() {
   if (typeof window !== 'undefined') {
     window.__RUNTIME_CONFIG__ = null;
   }
+  if (IS_DEV) {
+    console.debug('[runtime/config] cleared');
+  }
 }
 
 export function getConfigOrThrow() {
@@ -123,6 +139,18 @@ export function getConfigOrThrow() {
   return {
     supabaseUrl: currentConfig.supabaseUrl,
     supabaseAnonKey: currentConfig.supabaseAnonKey,
+  };
+}
+
+export function getCurrentConfig() {
+  if (!currentConfig?.supabaseUrl || !currentConfig?.supabaseAnonKey) {
+    return null;
+  }
+  return {
+    supabaseUrl: currentConfig.supabaseUrl,
+    supabaseAnonKey: currentConfig.supabaseAnonKey,
+    source: currentConfig.source || null,
+    orgId: currentConfig.orgId || null,
   };
 }
 
