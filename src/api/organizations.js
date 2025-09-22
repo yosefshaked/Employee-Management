@@ -1,4 +1,4 @@
-import { authClient } from '@/lib/supabase-manager.js';
+import { getAuthClient } from '@/lib/supabase-manager.js';
 
 export async function createOrganization(orgName) {
   const trimmedName = typeof orgName === 'string' ? orgName.trim() : '';
@@ -6,7 +6,8 @@ export async function createOrganization(orgName) {
     throw new Error('יש להזין שם ארגון.');
   }
 
-  const { data, error } = await authClient.rpc('create_organization', { p_name: trimmedName });
+  const client = getAuthClient();
+  const { data, error } = await client.rpc('create_organization', { p_name: trimmedName });
   if (error) {
     throw error;
   }
