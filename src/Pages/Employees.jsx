@@ -9,6 +9,8 @@ import { searchVariants } from "@/lib/layoutSwap";
 import EmployeeForm from "../components/employees/EmployeeForm";
 import LeaveOverview from "../components/employees/LeaveOverview.jsx";
 import { supabase } from "../supabaseClient";
+import { useOrg } from '@/org/OrgContext.jsx';
+import { fetchLeavePolicySettings, fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
 import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, normalizeLeavePayPolicy } from "@/lib/leave.js";
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
@@ -39,17 +41,30 @@ export default function Employees() {
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
+  const { tenantClientReady, activeOrgHasConnection } = useOrg();
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
+    if (!tenantClientReady || !activeOrgHasConnection) {
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const [employeesData, ratesData, servicesData, leavePolicySettings, leaveLedgerData, leavePayPolicySettings] = await Promise.all([
+      const [
+        employeesData,
+        ratesData,
+        servicesData,
+        leavePolicySettings,
+        leaveLedgerData,
+        leavePayPolicySettings,
+      ] = await Promise.all([
         supabase.from('Employees').select('*').order('name'),
         supabase.from('RateHistory').select('*'),
         supabase.from('Services').select('*'),
-        supabase.from('Settings').select('settings_value').eq('key', 'leave_policy').single(),
+        fetchLeavePolicySettings(supabase),
         supabase.from('LeaveBalances').select('*'),
-        supabase.from('Settings').select('settings_value').eq('key', 'leave_pay_policy').single(),
+        fetchLeavePayPolicySettings(supabase),
       ]);
 
       if (employeesData.error) throw employeesData.error;
@@ -63,25 +78,23 @@ export default function Employees() {
       setServices(filteredServices);
       setLeaveBalances(sortLeaveLedger(leaveLedgerData.data || []));
 
-      if (leavePolicySettings.error) {
-        if (leavePolicySettings.error.code !== 'PGRST116') throw leavePolicySettings.error;
-        setLeavePolicy(DEFAULT_LEAVE_POLICY);
-      } else {
-        setLeavePolicy(normalizeLeavePolicy(leavePolicySettings.data?.settings_value));
-      }
+      setLeavePolicy(
+        leavePolicySettings.value
+          ? normalizeLeavePolicy(leavePolicySettings.value)
+          : DEFAULT_LEAVE_POLICY,
+      );
 
-      if (leavePayPolicySettings.error) {
-        if (leavePayPolicySettings.error.code !== 'PGRST116') throw leavePayPolicySettings.error;
-        setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
-      } else {
-        setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicySettings.data?.settings_value));
-      }
+      setLeavePayPolicy(
+        leavePayPolicySettings.value
+          ? normalizeLeavePayPolicy(leavePayPolicySettings.value)
+          : DEFAULT_LEAVE_PAY_POLICY,
+      );
     } catch (error) {
       console.error('Error fetching data:', error);
       toast.error("שגיאה בטעינת הנתונים");
     }
     setIsLoading(false);
-  };
+  }, [tenantClientReady, activeOrgHasConnection]);
 
   const filterEmployees = useCallback(() => {
     let filtered = employees;
@@ -98,7 +111,7 @@ export default function Employees() {
     setFilteredEmployees(filtered);
   }, [employees, searchTerm, activeTab]);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { filterEmployees(); }, [filterEmployees]);
 
   const handleSubmit = async ({ employeeData, serviceRates, rateHistory }) => {

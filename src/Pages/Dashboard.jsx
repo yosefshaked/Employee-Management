@@ -1,5 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../supabaseClient';
+import { useOrg } from '@/org/OrgContext.jsx';
+import { fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
 import QuickStats from '../components/dashboard/QuickStats';
 import MonthlyCalendar from '../components/dashboard/MonthlyCalendar';
 import RecentActivity from '../components/dashboard/RecentActivity';
@@ -15,8 +17,14 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
+  const { tenantClientReady, activeOrgHasConnection } = useOrg();
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
+    if (!tenantClientReady || !activeOrgHasConnection) {
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     try {
       const [employeesData, sessionsData, servicesData, leavePayPolicySettings] = await Promise.all([
@@ -24,33 +32,31 @@ export default function Dashboard() {
         // === התיקון הסופי והנכון באמת: מיון לפי created_at ===
         supabase.from('WorkSessions').select('*').eq('deleted', false).order('created_at', { ascending: false }),
         supabase.from('Services').select('*'),
-        supabase.from('Settings').select('settings_value').eq('key', 'leave_pay_policy').single(),
+        fetchLeavePayPolicySettings(supabase),
       ]);
 
       if (employeesData.error) throw employeesData.error;
       if (sessionsData.error) throw sessionsData.error;
       if (servicesData.error) throw servicesData.error;
-      if (leavePayPolicySettings.error && leavePayPolicySettings.error.code !== 'PGRST116') throw leavePayPolicySettings.error;
-
       setEmployees(employeesData.data || []);
       const safeSessions = (sessionsData.data || []).filter(session => !session?.deleted);
       setWorkSessions(safeSessions);
       const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
       setServices(filteredServices);
-      if (!leavePayPolicySettings.error) {
-        setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicySettings.data?.settings_value));
-      } else {
-        setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
-      }
+      setLeavePayPolicy(
+        leavePayPolicySettings.value
+          ? normalizeLeavePayPolicy(leavePayPolicySettings.value)
+          : DEFAULT_LEAVE_PAY_POLICY,
+      );
 
     } catch (error) {
       console.error("Error loading dashboard data:", error);
       toast.error("שגיאה בטעינת נתוני הדשבורד");
     }
     setIsLoading(false);
-  };
+  }, [tenantClientReady, activeOrgHasConnection]);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [loadData]);
 
   // אנחנו כבר לא צריכים למיין בצד הלקוח, ה-DB עושה את זה
   const recentSessions = (workSessions || []).slice(0, 5);

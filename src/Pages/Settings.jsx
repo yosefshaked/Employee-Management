@@ -27,6 +27,7 @@ import {
   normalizeLeavePayPolicy,
   DEFAULT_LEGAL_INFO_URL,
 } from '@/lib/leave.js';
+import { fetchLeavePolicySettings, fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
 
 function createNewRule() {
   const today = new Date().toISOString().slice(0, 10);
@@ -110,7 +111,7 @@ function HolidayRuleRow({ rule, onChange, onRemove, onSave, allowHalfDay, isSavi
 }
 
 export default function Settings() {
-  const { activeOrg, activeOrgHasConnection } = useOrg();
+  const { activeOrg, activeOrgHasConnection, tenantClientReady } = useOrg();
   const [policy, setPolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const [isLoading, setIsLoading] = useState(true);
@@ -138,53 +139,55 @@ export default function Settings() {
     }
   };
   useEffect(() => {
-    if (!activeOrgHasConnection) {
+    if (!activeOrgHasConnection || !tenantClientReady) {
       setPolicy(DEFAULT_LEAVE_POLICY);
       setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
       setIsLoading(false);
       return;
     }
 
+    let cancelled = false;
+
     const loadPolicy = async () => {
       setIsLoading(true);
       try {
-        const [policyResponse, leavePayPolicyResponse] = await Promise.all([
-          supabase
-            .from('Settings')
-            .select('settings_value')
-            .eq('key', 'leave_policy')
-            .single(),
-          supabase
-            .from('Settings')
-            .select('settings_value')
-            .eq('key', 'leave_pay_policy')
-            .single(),
+        const [leavePolicyResult, leavePayPolicyResult] = await Promise.all([
+          fetchLeavePolicySettings(supabase),
+          fetchLeavePayPolicySettings(supabase),
         ]);
 
-        if (policyResponse.error) {
-          if (policyResponse.error.code !== 'PGRST116') throw policyResponse.error;
-          setPolicy(DEFAULT_LEAVE_POLICY);
-        } else {
-          setPolicy(normalizeLeavePolicy(policyResponse.data?.settings_value));
+        if (cancelled) {
+          return;
         }
 
-        if (leavePayPolicyResponse.error) {
-          if (leavePayPolicyResponse.error.code !== 'PGRST116') throw leavePayPolicyResponse.error;
-          setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
-        } else {
-          setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicyResponse.data?.settings_value));
-        }
+        setPolicy(
+          leavePolicyResult.value
+            ? normalizeLeavePolicy(leavePolicyResult.value)
+            : DEFAULT_LEAVE_POLICY,
+        );
+
+        setLeavePayPolicy(
+          leavePayPolicyResult.value
+            ? normalizeLeavePayPolicy(leavePayPolicyResult.value)
+            : DEFAULT_LEAVE_PAY_POLICY,
+        );
       } catch (error) {
         console.error('Error loading leave policy', error);
         toast.error('שגיאה בטעינת הגדרות החופשה');
         setPolicy(DEFAULT_LEAVE_POLICY);
         setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
       }
-      setIsLoading(false);
     };
 
     loadPolicy();
-  }, [activeOrgHasConnection]);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrgHasConnection, tenantClientReady]);
 
   const handleToggle = (key) => (checked) => {
     setPolicy(prev => ({ ...prev, [key]: checked }));

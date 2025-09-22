@@ -19,6 +19,8 @@ import {
 } from '@/runtime/config.js';
 import { verifyOrgConnection } from '@/runtime/verification.js';
 import { getSupabase as getRuntimeSupabase, resetSupabase as resetRuntimeSupabase } from '@/lib/supabase-client.js';
+import { fetchLeavePolicySettings } from '@/lib/settings-client.js';
+import { asError } from '@/lib/error-utils.js';
 import { mapSupabaseError } from '@/org/errors.js';
 import {
   activateOrg as activateRuntimeOrg,
@@ -51,6 +53,13 @@ const INITIAL_CONNECTION_TEST = {
   diagnostics: null,
   supabaseError: null,
   completedAt: null,
+};
+
+const INITIAL_LEAVE_POLICY_STATUS = {
+  state: 'idle',
+  policy: null,
+  error: null,
+  fetchedAt: null,
 };
 
 const REQUIRED_TABLES = ['Employees', 'WorkSessions', 'LeaveBalances', 'RateHistory', 'Services', 'Settings'];
@@ -724,8 +733,10 @@ export default function SetupAssistant() {
   const [createOrgError, setCreateOrgError] = useState('');
   const [isCreatingOrg, setIsCreatingOrg] = useState(false);
   const [connectionTest, setConnectionTest] = useState(INITIAL_CONNECTION_TEST);
+  const [leavePolicyStatus, setLeavePolicyStatus] = useState(INITIAL_LEAVE_POLICY_STATUS);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const clearedRuntimeConfigRef = useRef(false);
+  const activeOrgId = activeOrg?.id || null;
 
   const handleOpenCreateDialog = () => {
     setCreateOrgError('');
@@ -811,6 +822,7 @@ export default function SetupAssistant() {
       setVerificationStatus('idle');
       setLastVerifiedAt(null);
       setConnectionTest(INITIAL_CONNECTION_TEST);
+      setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
       setVerifyResults([]);
       setVerifyError('');
       setVerifyErrorInfo(null);
@@ -870,6 +882,7 @@ export default function SetupAssistant() {
       setLastVerifiedAt(activeOrg.verified_at || null);
     }
     setConnectionTest(INITIAL_CONNECTION_TEST);
+    setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
     setVerifyResults([]);
     setVerifyError('');
     setVerifyErrorInfo(null);
@@ -943,6 +956,59 @@ export default function SetupAssistant() {
     };
   }, [activeOrg, hasSavedConnection, hasUnsavedChanges, originalConnection.supabase_url, originalConnection.anon_key]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!activeOrgId || configStatus !== 'activated') {
+      setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setLeavePolicyStatus((prev) => ({
+      state: 'loading',
+      policy: prev.policy,
+      error: null,
+      fetchedAt: prev.fetchedAt,
+    }));
+
+    const loadLeavePolicyStatus = async () => {
+      try {
+        const runtimeSupabase = await getRuntimeSupabase();
+        if (cancelled) {
+          return;
+        }
+        const { value } = await fetchLeavePolicySettings(runtimeSupabase);
+        if (cancelled) {
+          return;
+        }
+        setLeavePolicyStatus({
+          state: value ? 'configured' : 'missing',
+          policy: value,
+          error: null,
+          fetchedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setLeavePolicyStatus({
+          state: 'error',
+          policy: null,
+          error: asError(error),
+          fetchedAt: new Date().toISOString(),
+        });
+      }
+    };
+
+    loadLeavePolicyStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrgId, configStatus]);
+
   const hasConnectionValues = Boolean(connection.supabase_url.trim() && connection.anon_key.trim());
   const hasSavedConnection = Boolean(
     activeOrgHasConnection
@@ -984,6 +1050,7 @@ export default function SetupAssistant() {
     resetRuntimeSupabase();
     clearConfig();
     clearRuntimeOrg();
+    setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
     clearedRuntimeConfigRef.current = true;
     setConfigStatus('cleared');
   };
@@ -1062,6 +1129,7 @@ export default function SetupAssistant() {
       clearedRuntimeConfigRef.current = false;
       setLastSavedAt(now);
       setConnectionTest(INITIAL_CONNECTION_TEST);
+      setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
       toast.success('חיבור ה-Supabase נשמר בהצלחה.');
     } catch (error) {
       console.error('Failed to save Supabase connection details', error);
@@ -1080,6 +1148,12 @@ export default function SetupAssistant() {
 
     setIsTestingConnection(true);
     setConnectionTest({ ...INITIAL_CONNECTION_TEST, status: 'running' });
+    setLeavePolicyStatus({
+      state: 'loading',
+      policy: null,
+      error: null,
+      fetchedAt: null,
+    });
 
     try {
       const accessToken = await resolveAccessToken();
@@ -1105,15 +1179,28 @@ export default function SetupAssistant() {
       });
       await waitOrgReady();
       setConfigStatus('activated');
-      await verifyOrgConnection();
+      const verification = await verifyOrgConnection();
       const diagnostics = getRuntimeConfigDiagnostics();
+      const leavePolicyValue = verification?.settingsValue ?? null;
+      const policyState = leavePolicyValue ? 'configured' : 'missing';
+      const now = new Date().toISOString();
+
+      setLeavePolicyStatus({
+        state: policyState,
+        policy: leavePolicyValue,
+        error: null,
+        fetchedAt: now,
+      });
 
       setConnectionTest({
         status: 'success',
-        message: 'חיבור Supabase אומת בהצלחה וטבלת Settings (leave_policy) נגישה.',
+        message:
+          policyState === 'configured'
+            ? 'חיבור Supabase אומת בהצלחה ונמצאה מדיניות leave_policy פעילה בטבלת Settings.'
+            : 'חיבור Supabase אומת בהצלחה. טבלת Settings נגישה אך leave_policy טרם הוגדרה – ניתן להמשיך עם ברירות המחדל עד שתגדירו מדיניות.',
         diagnostics,
         supabaseError: null,
-        completedAt: new Date().toISOString(),
+        completedAt: now,
       });
       toast.success('חיבור הארגון אומת בהצלחה.');
     } catch (error) {
@@ -1135,6 +1222,12 @@ export default function SetupAssistant() {
         diagnostics,
         supabaseError: supabaseErrorInfo,
         completedAt: new Date().toISOString(),
+      });
+      setLeavePolicyStatus({
+        state: 'error',
+        policy: null,
+        error: asError(error),
+        fetchedAt: new Date().toISOString(),
       });
       toast.error(message);
       clearRuntimeOrg();
@@ -1402,6 +1495,48 @@ export default function SetupAssistant() {
     );
   };
 
+  const renderLeavePolicyStatusNotice = () => {
+    if (leavePolicyStatus.state === 'idle') {
+      return null;
+    }
+
+    if (leavePolicyStatus.state === 'loading') {
+      return (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-600 p-3 flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+          <span>טוען את סטטוס leave_policy מטבלת Settings...</span>
+        </div>
+      );
+    }
+
+    if (leavePolicyStatus.state === 'configured') {
+      return (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-xs text-emerald-700 p-3">
+          נמצאה מדיניות leave_policy בטבלת Settings. ניתן לערוך אותה במסך ההגדרות לאחר סיום האשף.
+        </div>
+      );
+    }
+
+    if (leavePolicyStatus.state === 'missing') {
+      return (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-700 p-3">
+          טבלת Settings נגישה אך אינה מכילה ערך leave_policy. האפליקציה תשתמש בערכי ברירת המחדל עד שתשמרו מדיניות במסך ההגדרות.
+        </div>
+      );
+    }
+
+    if (leavePolicyStatus.state === 'error') {
+      const message = leavePolicyStatus.error?.message || 'שגיאה בקריאת leave_policy.';
+      return (
+        <div className="rounded-xl border border-red-200 bg-red-50 text-xs text-red-700 p-3">
+          <span>שגיאה בטעינת leave_policy: {message}</span>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
   const renderConnectionStatusBadge = () => {
     if (!activeOrg) {
       return (
@@ -1660,6 +1795,7 @@ export default function SetupAssistant() {
             ) : null}
             {renderConnectionTestFeedback()}
             {renderConnectionDiagnostics()}
+            {renderLeavePolicyStatusNotice()}
           </form>
         </StepSection>
 

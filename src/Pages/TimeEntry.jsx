@@ -5,6 +5,8 @@ import TimeEntryTable from '../components/time-entry/TimeEntryTable';
 import TrashTab from '../components/time-entry/TrashTab.jsx';
 import { toast } from "sonner";
 import { supabase } from "../supabaseClient";
+import { useOrg } from '@/org/OrgContext.jsx';
+import { fetchLeavePolicySettings, fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
@@ -85,7 +87,15 @@ export default function TimeEntry() {
   const location = useLocation();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(() => getTabFromSearch(location.search));
+  const { tenantClientReady, activeOrgHasConnection } = useOrg();
   const loadInitialData = useCallback(async ({ silent = false } = {}) => {
+    if (!tenantClientReady || !activeOrgHasConnection) {
+      if (!silent) {
+        setIsLoading(false);
+      }
+      return;
+    }
+
     if (!silent) setIsLoading(true);
     try {
       const [
@@ -106,8 +116,8 @@ export default function TimeEntry() {
           .order('created_at', { ascending: false }),
         supabase.from('RateHistory').select('*'),
         supabase.from('Services').select('*'),
-        supabase.from('Settings').select('settings_value').eq('key', 'leave_policy').single(),
-        supabase.from('Settings').select('settings_value').eq('key', 'leave_pay_policy').single(),
+        fetchLeavePolicySettings(supabase),
+        fetchLeavePayPolicySettings(supabase),
         supabase.from('LeaveBalances').select('*'),
         supabase.from('WorkSessions')
           .select('*, service:service_id(name)')
@@ -131,27 +141,25 @@ export default function TimeEntry() {
       setServices(filteredServices);
       setLeaveBalances(sortLeaveLedger(leaveLedgerData.data || []));
 
-      if (leavePolicySettings.error) {
-        if (leavePolicySettings.error.code !== 'PGRST116') throw leavePolicySettings.error;
-        setLeavePolicy(DEFAULT_LEAVE_POLICY);
-      } else {
-        setLeavePolicy(normalizeLeavePolicy(leavePolicySettings.data?.settings_value));
-      }
+      setLeavePolicy(
+        leavePolicySettings.value
+          ? normalizeLeavePolicy(leavePolicySettings.value)
+          : DEFAULT_LEAVE_POLICY,
+      );
 
-      if (leavePayPolicySettings.error) {
-        if (leavePayPolicySettings.error.code !== 'PGRST116') throw leavePayPolicySettings.error;
-        setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
-      } else {
-        setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicySettings.data?.settings_value));
-      }
+      setLeavePayPolicy(
+        leavePayPolicySettings.value
+          ? normalizeLeavePayPolicy(leavePayPolicySettings.value)
+          : DEFAULT_LEAVE_PAY_POLICY,
+      );
 
     } catch (error) {
-      console.error("Error loading data:", error);
-      toast.error("שגיאה בטעינת הנתונים");
+      console.error('Error loading time entry data:', error);
+      toast.error('שגיאה בטעינת נתוני רישום הזמנים');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [tenantClientReady, activeOrgHasConnection]);
 
   useEffect(() => {
     loadInitialData();

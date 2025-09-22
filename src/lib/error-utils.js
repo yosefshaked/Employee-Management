@@ -1,5 +1,17 @@
 const DEFAULT_ERROR_MESSAGE = 'אירעה שגיאה לא צפויה.';
 
+export class SupabaseHttpError extends Error {
+  constructor(message, { status = null, code = null } = {}) {
+    super(message);
+    if (status !== null && status !== undefined) {
+      this.status = status;
+    }
+    if (code !== null && code !== undefined) {
+      this.code = code;
+    }
+  }
+}
+
 export function asError(value, fallbackMessage = DEFAULT_ERROR_MESSAGE) {
   if (value instanceof Error) {
     return value;
