@@ -18,7 +18,7 @@ export let AUTH_SUPABASE_ANON_KEY = null;
 function buildAuthClient(config) {
   return createClient(config.supabaseUrl, config.supabaseAnonKey, {
     auth: {
-      storageKey: 'sb-auth',
+      storageKey: 'app-auth-token',
       persistSession: true,
       autoRefreshToken: true,
     },

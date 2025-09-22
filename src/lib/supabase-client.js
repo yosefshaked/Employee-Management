@@ -7,9 +7,10 @@ const pendingClients = new Map();
 function buildSupabaseClient({ orgId, supabaseUrl, supabaseAnonKey }) {
   return createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
-      storageKey: `sb-${orgId}`,
+      storageKey: `org-data-token-${orgId}`,
       persistSession: false,
       autoRefreshToken: false,
+      detectSessionInUrl: false,
     },
     global: {
       headers: { Accept: 'application/json' },
