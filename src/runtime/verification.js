@@ -1,4 +1,4 @@
-import { getSupabase } from '@/lib/supabase-client.js';
+import { getSupabase } from '@/lib/supabase-manager.js';
 import { fetchLeavePolicySettings } from '@/lib/settings-client.js';
 
 export async function verifyOrgConnection() {

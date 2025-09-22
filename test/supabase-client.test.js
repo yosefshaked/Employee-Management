@@ -5,7 +5,7 @@ import {
   getSupabase,
   getCachedSupabase,
   resetSupabase,
-} from '../src/lib/supabase-client.js';
+} from '../src/lib/supabase-manager.js';
 
 describe('shared Supabase client module', () => {
   it('exposes the expected helpers', () => {

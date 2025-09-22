@@ -9,7 +9,7 @@ import {
   getSupabase,
   getCachedSupabase,
   resetSupabase,
-} from '@/lib/supabase-client.js';
+} from '@/lib/supabase-manager.js';
 
 export function activateRuntimeOrg(config) {
   return activateOrg(config);

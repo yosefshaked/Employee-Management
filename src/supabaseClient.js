@@ -13,13 +13,11 @@ import {
   getAuthClient,
   getAuthSupabaseAnonKey,
   getAuthSupabaseUrl,
-} from './lib/authClient.js';
-import { activateOrg as activateRuntimeOrg, clearOrg as clearRuntimeOrg } from './lib/org-runtime.js';
-import {
   getSupabase as getRuntimeSupabase,
   getCachedSupabase as getCachedRuntimeSupabase,
   resetSupabase as resetRuntimeSupabase,
-} from './lib/supabase-client.js';
+} from './lib/supabase-manager.js';
+import { activateOrg as activateRuntimeOrg, clearOrg as clearRuntimeOrg } from './lib/org-runtime.js';
 
 const IS_DEV = Boolean(import.meta?.env?.DEV);
 
@@ -27,7 +25,10 @@ if (IS_DEV) {
   console.debug('[supabaseClient] module evaluated');
 }
 
-export { AUTH_SUPABASE_ANON_KEY as SUPABASE_ANON_KEY, AUTH_SUPABASE_URL as SUPABASE_URL } from './lib/authClient.js';
+export {
+  getAuthSupabaseAnonKey as getCoreSupabaseAnonKey,
+  getAuthSupabaseUrl as getCoreSupabaseUrl,
+} from './lib/supabase-manager.js';
 
 export const coreSupabase = controlSupabase;
 

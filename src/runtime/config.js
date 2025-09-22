@@ -1,5 +1,5 @@
-import { asError, MissingRuntimeConfigError } from '@/lib/error-utils.js';
-export { MissingRuntimeConfigError } from '@/lib/error-utils.js';
+import { asError, MissingRuntimeConfigError } from '../lib/error-utils.js';
+export { MissingRuntimeConfigError } from '../lib/error-utils.js';
 
 const IS_DEV = Boolean(import.meta?.env?.DEV);
 

@@ -4,7 +4,6 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 import importPlugin from 'eslint-plugin-import'
-import noCreateClientRule from './eslint-rules/no-create-client-outside-shared.js'
 
 export default defineConfig([
   globalIgnores(['dist']),
@@ -25,11 +24,6 @@ export default defineConfig([
       },
     },
     plugins: {
-      project: {
-        rules: {
-          'no-create-client-outside-shared': noCreateClientRule,
-        },
-      },
       import: importPlugin,
     },
     settings: {
@@ -45,7 +39,6 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
-      'project/no-create-client-outside-shared': 'error',
       'import/no-cycle': ['error', { maxDepth: Infinity }],
       'no-restricted-syntax': [
         'error',
@@ -55,6 +48,31 @@ export default defineConfig([
           message: 'Do not assign to .name; use asError() or define a custom error class instead.',
         },
       ],
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@supabase/supabase-js',
+              importNames: ['createClient'],
+              message:
+                "Do not import createClient directly. Use the helpers from 'src/lib/supabase-manager.js' instead.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['api/**/*.{js,jsx,mjs}', 'scripts/**/*.{js,mjs}'],
+    rules: {
+      'no-restricted-imports': 'off',
+    },
+  },
+  {
+    files: ['src/lib/supabase-manager.js'],
+    rules: {
+      'no-restricted-imports': 'off',
     },
   },
 ])
