@@ -1,4 +1,12 @@
-import { createContext, createElement, useContext, useEffect, useMemo, useState } from 'react';
+import {
+  createContext,
+  createElement,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { MissingRuntimeConfigError } from './runtime/config.js';
 import {
   authClient as controlSupabase,
@@ -60,6 +68,17 @@ function normalizeOrgConfig(raw) {
   }
 
   return { orgId: trimmedOrgId, supabaseUrl: trimmedUrl, supabaseAnonKey: trimmedKey };
+}
+
+function configsEqual(a, b) {
+  if (!a || !b) {
+    return false;
+  }
+  return (
+    a.orgId === b.orgId &&
+    a.supabaseUrl === b.supabaseUrl &&
+    a.supabaseAnonKey === b.supabaseAnonKey
+  );
 }
 
 function logOrgClientUpdate(action, config, options = {}) {
@@ -141,18 +160,27 @@ const OrgSupabaseContext = createContext(undefined);
 export function OrgSupabaseProvider({ config, children }) {
   const [state, setState] = useState({ client: activeOrgClient, config: activeOrgConfig });
   const authClient = useMemo(() => getAuthClient(), []);
+  const lastAppliedConfigRef = useRef(activeOrgConfig);
 
   useEffect(() => {
     let cancelled = false;
+    let cachedClient = false;
+    let resolvedClient = null;
     const normalized = normalizeOrgConfig(config);
+    const previousApplied = lastAppliedConfigRef.current;
 
     if (!normalized) {
-      const previousConfig = activeOrgConfig;
-      clearRuntimeOrg();
-      resetRuntimeSupabase();
+      lastAppliedConfigRef.current = null;
+      if (previousApplied) {
+        clearRuntimeOrg();
+        resetRuntimeSupabase(previousApplied.orgId);
+      } else {
+        clearRuntimeOrg();
+        resetRuntimeSupabase();
+      }
       const action = updateActiveOrgState(null, null);
       if (action) {
-        logOrgClientUpdate(action, previousConfig || {});
+        logOrgClientUpdate(action, previousApplied || {});
       }
       setState((current) => {
         if (!current.client && !current.config) {
@@ -160,41 +188,47 @@ export function OrgSupabaseProvider({ config, children }) {
         }
         return { client: null, config: null };
       });
-      return;
+      return () => {
+        cancelled = true;
+      };
     }
+
+    const hasConfigChanged = !configsEqual(previousApplied, normalized);
 
     const initialize = async () => {
       try {
-        if (
-          activeOrgConfig &&
-          (activeOrgConfig.orgId !== normalized.orgId ||
-            activeOrgConfig.supabaseUrl !== normalized.supabaseUrl ||
-            activeOrgConfig.supabaseAnonKey !== normalized.supabaseAnonKey)
-        ) {
-          resetRuntimeSupabase(normalized.orgId);
+        if (hasConfigChanged && previousApplied) {
+          resetRuntimeSupabase(previousApplied.orgId);
         }
 
         activateRuntimeOrg(normalized);
-        let client = getCachedRuntimeSupabase(normalized.orgId);
-        let cached = Boolean(client);
-        if (!client) {
-          client = await getRuntimeSupabase();
-          cached = false;
+        resolvedClient = getCachedRuntimeSupabase(normalized.orgId);
+        cachedClient = Boolean(resolvedClient);
+        if (!resolvedClient) {
+          resolvedClient = await getRuntimeSupabase();
+          cachedClient = false;
         }
 
         if (cancelled) {
-          if (!cached) {
+          if (!cachedClient && resolvedClient) {
             resetRuntimeSupabase(normalized.orgId);
           }
           return;
         }
 
-        const action = updateActiveOrgState(client, normalized);
+        lastAppliedConfigRef.current = normalized;
+
+        const action = updateActiveOrgState(resolvedClient, normalized);
         if (action) {
-          logOrgClientUpdate(action, normalized, { cached });
+          logOrgClientUpdate(action, normalized, { cached: cachedClient });
         }
 
-        setState({ client, config: normalized });
+        setState((current) => {
+          if (current.client === resolvedClient && configsEqual(current.config, normalized)) {
+            return current;
+          }
+          return { client: resolvedClient, config: normalized };
+        });
       } catch (error) {
         if (cancelled) {
           return;
@@ -202,6 +236,7 @@ export function OrgSupabaseProvider({ config, children }) {
         console.error('Org Supabase initialization failed', error);
         clearRuntimeOrg();
         resetRuntimeSupabase(normalized.orgId);
+        lastAppliedConfigRef.current = null;
         const action = updateActiveOrgState(null, null);
         if (action) {
           logOrgClientUpdate(action, normalized);
@@ -215,7 +250,7 @@ export function OrgSupabaseProvider({ config, children }) {
     return () => {
       cancelled = true;
     };
-  }, [config, config?.orgId, config?.supabaseUrl, config?.supabaseAnonKey]);
+  }, [config]);
 
   const contextValue = useMemo(
     () => ({
