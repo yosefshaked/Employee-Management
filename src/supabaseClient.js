@@ -29,8 +29,8 @@ function buildCoreSupabase(config) {
   return createClient(config.supabaseUrl, config.supabaseAnonKey, {
     auth: {
       storageKey: 'sb-control',
-      persistSession: false,
-      autoRefreshToken: false,
+      persistSession: true,
+      autoRefreshToken: true,
     },
     global: {
       headers: { Accept: 'application/json' },
