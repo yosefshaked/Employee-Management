@@ -1,11 +1,7 @@
 // src/context/SupabaseContext.jsx
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import {
-  createDataClient,
-  getAuthClient,
-  initializeAuthClient,
-  isAuthClientInitialized,
-} from '../lib/supabase-manager.js';
+import { createDataClient, getAuthClient } from '../lib/supabase-manager.js';
+import { onConfigActivated, onConfigCleared } from '../runtime/config.js';
 import { useRuntimeConfig } from '../runtime/RuntimeConfigContext.jsx';
 
 const SupabaseContext = createContext(undefined);
@@ -34,55 +30,104 @@ export const SupabaseProvider = ({ children }) => {
 
   useEffect(() => {
     let isMounted = true;
-    let unsubscribe = null;
 
-    async function bootstrapAuthClient(config) {
-      if (!config?.supabaseUrl || !config?.supabaseAnonKey) {
-        if (isMounted) {
-          setAuthClient(null);
-          setSession(null);
-          setLoading(false);
-        }
+    function resolveAuthClient() {
+      if (!isMounted) {
+        return;
+      }
+
+      if (!normalizedConfig) {
+        setAuthClient(null);
+        setSession(null);
+        setLoading(true);
         return;
       }
 
       try {
-        initializeAuthClient(config);
         const client = getAuthClient();
-        if (!isMounted) {
-          return;
-        }
-        setAuthClient(client);
-
-        const { data } = await client.auth.getSession();
-        if (!isMounted) {
-          return;
-        }
-        setSession(data?.session ?? null);
-        setLoading(false);
-
-        const { data: subscriptionData } = client.auth.onAuthStateChange((_event, nextSession) => {
-          if (isMounted) {
-            setSession(nextSession);
-          }
-        });
-        if (subscriptionData?.subscription) {
-          unsubscribe = () => subscriptionData.subscription.unsubscribe();
-        } else {
-          unsubscribe = null;
-        }
+        setAuthClient((previous) => (previous === client ? previous : client));
       } catch (error) {
-        console.error('[SupabaseProvider] Failed to initialize auth client', error);
-        if (isMounted) {
-          setAuthClient(null);
-          setSession(null);
-          setLoading(false);
+        if (import.meta?.env?.DEV) {
+          console.debug('[SupabaseProvider] auth client not ready yet', error);
         }
+        setAuthClient(null);
+        setSession(null);
+        setLoading(true);
       }
     }
 
+    resolveAuthClient();
+
+    const unsubscribeActivated = onConfigActivated(() => {
+      resolveAuthClient();
+    });
+
+    const unsubscribeCleared = onConfigCleared(() => {
+      if (!isMounted) {
+        return;
+      }
+      setAuthClient(null);
+      setSession(null);
+      setLoading(true);
+    });
+
+    return () => {
+      isMounted = false;
+      if (typeof unsubscribeActivated === 'function') {
+        unsubscribeActivated();
+      }
+      if (typeof unsubscribeCleared === 'function') {
+        unsubscribeCleared();
+      }
+    };
+  }, [normalizedConfig, supabaseConfigKey]);
+
+  useEffect(() => {
+    let isMounted = true;
+    let unsubscribe = null;
+
+    if (!authClient) {
+      setLoading(true);
+      setSession(null);
+      return () => {
+        isMounted = false;
+        if (typeof unsubscribe === 'function') {
+          unsubscribe();
+        }
+      };
+    }
+
     setLoading(true);
-    bootstrapAuthClient(normalizedConfig);
+
+    authClient
+      .auth
+      .getSession()
+      .then(({ data }) => {
+        if (isMounted) {
+          setSession(data?.session ?? null);
+        }
+      })
+      .catch((error) => {
+        console.error('[SupabaseProvider] Failed to fetch auth session', error);
+        if (isMounted) {
+          setSession(null);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setLoading(false);
+        }
+      });
+
+    const { data } = authClient.auth.onAuthStateChange((_event, nextSession) => {
+      if (isMounted) {
+        setSession(nextSession);
+      }
+    });
+
+    if (data?.subscription) {
+      unsubscribe = () => data.subscription.unsubscribe();
+    }
 
     return () => {
       isMounted = false;
@@ -90,7 +135,7 @@ export const SupabaseProvider = ({ children }) => {
         unsubscribe();
       }
     };
-  }, [normalizedConfig, supabaseConfigKey]);
+  }, [authClient]);
 
   useEffect(() => {
     if (activeOrg) {
@@ -108,7 +153,7 @@ export const SupabaseProvider = ({ children }) => {
     user: session?.user ?? null,
     activeOrg,
     setActiveOrg,
-    loading: loading || !isAuthClientInitialized(),
+    loading: loading || !authClient,
   }), [authClient, dataClient, session, activeOrg, loading]);
 
   return (
