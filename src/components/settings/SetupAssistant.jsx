@@ -7,7 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { coreSupabase, getOrgSupabase, maskSupabaseCredential } from '@/supabaseClient.js';
+import { coreSupabase, maskSupabaseCredential } from '@/supabaseClient.js';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import {
@@ -18,7 +18,7 @@ import {
   MissingRuntimeConfigError,
 } from '@/runtime/config.js';
 import { verifyOrgConnection } from '@/runtime/verification.js';
-import { resetSupabase as resetRuntimeSupabase } from '@/lib/supabase-client.js';
+import { getSupabase as getRuntimeSupabase, resetSupabase as resetRuntimeSupabase } from '@/lib/supabase-client.js';
 import { mapSupabaseError } from '@/org/errors.js';
 import {
   activateOrg as activateRuntimeOrg,
@@ -815,6 +815,7 @@ export default function SetupAssistant() {
       setVerifyError('');
       setVerifyErrorInfo(null);
       setConfigStatus('idle');
+      clearedRuntimeConfigRef.current = false;
       return;
     }
 
@@ -872,6 +873,7 @@ export default function SetupAssistant() {
     setVerifyResults([]);
     setVerifyError('');
     setVerifyErrorInfo(null);
+    clearedRuntimeConfigRef.current = false;
   }, [activeOrg, activeOrgConnection]);
 
   const hasUnsavedChanges = useMemo(() => {
@@ -886,15 +888,7 @@ export default function SetupAssistant() {
   }, [connection, originalConnection]);
 
   useEffect(() => {
-    if (hasUnsavedChanges) {
-      if (!clearedRuntimeConfigRef.current) {
-        resetRuntimeSupabase();
-        clearConfig();
-        clearRuntimeOrg();
-        clearedRuntimeConfigRef.current = true;
-      }
-      setConfigStatus('cleared');
-    } else {
+    if (!hasUnsavedChanges) {
       clearedRuntimeConfigRef.current = false;
     }
   }, [hasUnsavedChanges]);
@@ -970,6 +964,28 @@ export default function SetupAssistant() {
   const handleConnectionChange = (field) => (event) => {
     const value = event.target.value;
     setConnection((prev) => ({ ...prev, [field]: value }));
+
+    if (clearedRuntimeConfigRef.current) {
+      return;
+    }
+
+    const isSensitiveField = field === 'supabase_url' || field === 'anon_key';
+    if (!isSensitiveField) {
+      return;
+    }
+
+    const originalValue = originalConnection[field] || '';
+    const nextValue = typeof value === 'string' ? value : '';
+
+    if (nextValue === originalValue) {
+      return;
+    }
+
+    resetRuntimeSupabase();
+    clearConfig();
+    clearRuntimeOrg();
+    clearedRuntimeConfigRef.current = true;
+    setConfigStatus('cleared');
   };
 
   const resolveAccessToken = async () => {
@@ -1043,6 +1059,7 @@ export default function SetupAssistant() {
       });
 
       setOriginalConnection({ ...connection });
+      clearedRuntimeConfigRef.current = false;
       setLastSavedAt(now);
       setConnectionTest(INITIAL_CONNECTION_TEST);
       toast.success('חיבור ה-Supabase נשמר בהצלחה.');
@@ -1193,7 +1210,7 @@ export default function SetupAssistant() {
         throw new MissingRuntimeConfigError('לא נבחר ארגון פעיל או שהחיבור שלו טרם הוגדר.');
       }
 
-      const runtimeSupabase = getOrgSupabase();
+      const runtimeSupabase = await getRuntimeSupabase();
       const { data, error } = await runtimeSupabase.rpc('setup_assistant_diagnostics');
 
       if (error) {
