@@ -1,11 +1,11 @@
 import { createContext, createElement, useContext, useEffect, useMemo, useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { MissingRuntimeConfigError } from './runtime/config.js';
 import {
-  getCurrentConfig,
-  MissingRuntimeConfigError,
-  onConfigActivated,
-  onConfigCleared,
-} from './runtime/config.js';
+  authClient as controlSupabase,
+  getAuthClient,
+  getAuthSupabaseAnonKey,
+  getAuthSupabaseUrl,
+} from './lib/authClient.js';
 import { activateOrg as activateRuntimeOrg, clearOrg as clearRuntimeOrg } from './lib/org-runtime.js';
 import {
   getSupabase as getRuntimeSupabase,
@@ -19,132 +19,20 @@ if (IS_DEV) {
   console.debug('[supabaseClient] module evaluated');
 }
 
-let coreSupabaseInstance = null;
-let coreSupabaseConfigKey = null;
-let controlConfigSnapshot = null;
-export let SUPABASE_URL = null;
-export let SUPABASE_ANON_KEY = null;
+export { AUTH_SUPABASE_ANON_KEY as SUPABASE_ANON_KEY, AUTH_SUPABASE_URL as SUPABASE_URL } from './lib/authClient.js';
 
-function buildCoreSupabase(config) {
-  return createClient(config.supabaseUrl, config.supabaseAnonKey, {
-    auth: {
-      storageKey: 'sb-control',
-      persistSession: true,
-      autoRefreshToken: true,
-    },
-    global: {
-      headers: { Accept: 'application/json' },
-    },
-  });
-}
-
-function computeCoreConfigKey(config) {
-  return `${config.supabaseUrl}::${config.supabaseAnonKey}`;
-}
-
-function applyCoreConfig(config) {
-  const key = computeCoreConfigKey(config);
-  if (coreSupabaseInstance && coreSupabaseConfigKey === key) {
-    return coreSupabaseInstance;
-  }
-  coreSupabaseInstance = buildCoreSupabase(config);
-  coreSupabaseConfigKey = key;
-  SUPABASE_URL = config.supabaseUrl;
-  SUPABASE_ANON_KEY = config.supabaseAnonKey;
-  if (!config.orgId) {
-    controlConfigSnapshot = {
-      supabaseUrl: config.supabaseUrl,
-      supabaseAnonKey: config.supabaseAnonKey,
-      source: config.source || null,
-    };
-  }
-  if (IS_DEV) {
-    console.debug('[supabaseClient] core client initialized', {
-      source: config.source || 'unknown',
-    });
-  }
-  return coreSupabaseInstance;
-}
-
-function ensureCoreSupabaseInstance() {
-  const activeConfig = getCurrentConfig();
-  const controlConfig = activeConfig && !activeConfig.orgId ? activeConfig : controlConfigSnapshot;
-  if (!controlConfig) {
-    throw new MissingRuntimeConfigError(
-      'Supabase configuration missing. ודא שפונקציית /api/config זמינה ומחזירה supabase_url ו-anon_key.',
-    );
-  }
-  return applyCoreConfig(controlConfig);
-}
-
-const preloadedConfig = getCurrentConfig();
-if (preloadedConfig && !preloadedConfig.orgId) {
-  applyCoreConfig(preloadedConfig);
-}
-
-onConfigActivated((config) => {
-  if (!config || config.orgId) {
-    if (IS_DEV && config?.orgId) {
-      console.debug('[supabaseClient] skipped core init for org config', {
-        orgId: config.orgId,
-      });
-    }
-    return;
-  }
-  try {
-    applyCoreConfig(config);
-  } catch (error) {
-    if (IS_DEV) {
-      console.warn('[supabaseClient] failed to initialize core client on activation', error);
-    }
-  }
-});
-
-onConfigCleared(() => {
-  if (!controlConfigSnapshot) {
-    coreSupabaseInstance = null;
-    coreSupabaseConfigKey = null;
-    SUPABASE_URL = null;
-    SUPABASE_ANON_KEY = null;
-  }
-  if (IS_DEV) {
-    console.debug('[supabaseClient] core client clear event', {
-      preserved: Boolean(controlConfigSnapshot),
-    });
-  }
-});
-
-export const coreSupabase = new Proxy(
-  {},
-  {
-    get(_target, prop) {
-      const client = ensureCoreSupabaseInstance();
-      const value = client[prop];
-      return typeof value === 'function' ? value.bind(client) : value;
-    },
-  },
-);
+export const coreSupabase = controlSupabase;
 
 export function getCoreSupabase() {
-  return ensureCoreSupabaseInstance();
+  return getAuthClient();
 }
 
 export function getSupabaseUrl() {
-  if (!SUPABASE_URL) {
-    throw new MissingRuntimeConfigError(
-      'Supabase configuration missing. ודא שפונקציית /api/config זמינה ומחזירה supabase_url ו-anon_key.',
-    );
-  }
-  return SUPABASE_URL;
+  return getAuthSupabaseUrl();
 }
 
 export function getSupabaseAnonKey() {
-  if (!SUPABASE_ANON_KEY) {
-    throw new MissingRuntimeConfigError(
-      'Supabase configuration missing. ודא שפונקציית /api/config זמינה ומחזירה supabase_url ו-anon_key.',
-    );
-  }
-  return SUPABASE_ANON_KEY;
+  return getAuthSupabaseAnonKey();
 }
 
 let activeOrgConfig = null;
@@ -252,6 +140,7 @@ const OrgSupabaseContext = createContext(undefined);
 
 export function OrgSupabaseProvider({ config, children }) {
   const [state, setState] = useState({ client: activeOrgClient, config: activeOrgConfig });
+  const authClient = useMemo(() => getAuthClient(), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -328,7 +217,16 @@ export function OrgSupabaseProvider({ config, children }) {
     };
   }, [config, config?.orgId, config?.supabaseUrl, config?.supabaseAnonKey]);
 
-  const contextValue = useMemo(() => state, [state]);
+  const contextValue = useMemo(
+    () => ({
+      authClient,
+      dataClient: state.client,
+      client: state.client,
+      config: state.config,
+      currentOrg: state.config,
+    }),
+    [authClient, state],
+  );
 
   return createElement(OrgSupabaseContext.Provider, { value: contextValue, children });
 }
@@ -338,10 +236,11 @@ export function useOrgSupabase() {
   if (context === undefined) {
     throw new Error('OrgSupabaseProvider is missing from the React tree.');
   }
-  if (!context.client) {
+  const client = context.dataClient || context.client;
+  if (!client) {
     throw new MissingRuntimeConfigError('לא נבחר ארגון פעיל או שהחיבור שלו טרם הוגדר.');
   }
-  return context.client;
+  return client;
 }
 
 export function useOrgSupabaseConfig() {
@@ -349,7 +248,19 @@ export function useOrgSupabaseConfig() {
   if (context === undefined) {
     throw new Error('OrgSupabaseProvider is missing from the React tree.');
   }
-  return context.config;
+  return context.currentOrg || context.config;
+}
+
+export function useSupabase() {
+  const context = useContext(OrgSupabaseContext);
+  if (context === undefined) {
+    throw new Error('OrgSupabaseProvider is missing from the React tree.');
+  }
+  return {
+    authClient: context.authClient,
+    dataClient: context.dataClient,
+    currentOrg: context.currentOrg,
+  };
 }
 
 export const supabase = new Proxy(

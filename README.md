@@ -50,7 +50,7 @@ If either `/api/config` or `/api/org/:id/keys` is unreachable or returns non-JSO
 
 ## Supabase guardrails for contributors
 
-- Reuse the shared clients: `coreSupabase` from `src/supabaseClient.js` for control-database calls and `getSupabase` from `src/lib/supabase-client.js` for organization scoped work. The ESLint rule `project/no-create-client-outside-shared` blocks new `createClient(` calls elsewhere, so update the shared modules if additional behavior is required.
+- Reuse the shared clients: the persistent auth client (`coreSupabase` from `src/lib/authClient.js` via `src/supabaseClient.js`) for control-database calls and the organization data client (`getSupabase` from `src/lib/supabase-client.js` or `useSupabase().dataClient`) for tenant data. The ESLint rule `project/no-create-client-outside-shared` blocks new `createClient(` calls elsewhere, so update the shared modules if additional behavior is required.
 - Normalize thrown values with `asError` from `src/lib/error-utils.js` or dedicated error classes. Do not assign to `error.name` or mutate built-in error properties—linting will fail if you do.
 - When touching Supabase runtime flows run `npm run build` and `node --test` to ensure the guardrails and helper tests still pass.
 - Run `npm run dep:check` before committing to ensure no circular dependencies were introduced. The check wraps Madge with the same alias configuration used by Vite, so failures point at real module cycles.

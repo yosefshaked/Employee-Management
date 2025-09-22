@@ -3,6 +3,7 @@ import path from 'node:path';
 
 const projectRoot = process.cwd();
 const allowedFiles = new Set([
+  path.resolve(projectRoot, 'src/lib/authClient.js'),
   path.resolve(projectRoot, 'src/lib/supabase-client.js'),
   path.resolve(projectRoot, 'src/supabaseClient.js'),
 ]);
