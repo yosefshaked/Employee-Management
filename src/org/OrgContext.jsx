@@ -8,12 +8,8 @@ import React, {
   useState,
 } from 'react';
 import { toast } from 'sonner';
-import {
-  coreSupabase,
-  OrgSupabaseProvider,
-  maskSupabaseCredential,
-  subscribeOrgClientChange,
-} from '@/supabaseClient.js';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
 import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { createOrganization as createOrganizationRpc } from '@/api/organizations.js';
@@ -166,6 +162,11 @@ function deriveNameFromMetadata(metadata) {
 
 export function OrgProvider({ children }) {
   const { status: authStatus, user, session } = useAuth();
+  const {
+    authClient,
+    dataClient,
+    setActiveOrg: setSupabaseActiveOrg,
+  } = useSupabase();
   const [status, setStatus] = useState('idle');
   const [organizations, setOrganizations] = useState([]);
   const [activeOrgId, setActiveOrgId] = useState(null);
@@ -177,17 +178,10 @@ export function OrgProvider({ children }) {
   const [error, setError] = useState(null);
   const [configStatus, setConfigStatus] = useState('idle');
   const [activeOrgConfig, setActiveOrgConfig] = useState(null);
-  const [tenantClientReady, setTenantClientReady] = useState(false);
   const loadingRef = useRef(false);
   const lastUserIdRef = useRef(null);
   const configRequestRef = useRef(0);
-
-  useEffect(() => {
-    const unsubscribe = subscribeOrgClientChange((client) => {
-      setTenantClientReady(Boolean(client));
-    });
-    return unsubscribe;
-  }, []);
+  const tenantClientReady = Boolean(dataClient);
 
   const resetState = useCallback(() => {
     setStatus('idle');
@@ -201,7 +195,8 @@ export function OrgProvider({ children }) {
     setError(null);
     setActiveOrgConfig(null);
     setConfigStatus('idle');
-  }, []);
+    setSupabaseActiveOrg(null);
+  }, [setSupabaseActiveOrg]);
 
   const loadMemberships = useCallback(async () => {
     if (!user) {
@@ -214,14 +209,14 @@ export function OrgProvider({ children }) {
     setError(null);
 
     try {
-      const membershipPromise = coreSupabase
+      const membershipPromise = authClient
         .from('org_memberships')
         .select('id, role, org_id, user_id, created_at')
         .eq('user_id', user.id)
         .order('created_at', { ascending: true });
 
       const invitesPromise = user.email
-        ? coreSupabase
+        ? authClient
             .from('org_invitations')
             .select('id, org_id, email, status, invited_by, created_at, expires_at')
             .eq('email', user.email.toLowerCase())
@@ -248,7 +243,7 @@ export function OrgProvider({ children }) {
       const connectionMap = new Map();
 
       if (orgIds.length) {
-        const { data: organizationsData, error: organizationsError } = await coreSupabase
+        const { data: organizationsData, error: organizationsError } = await authClient
           .from('organizations')
           .select(
             'id, name, slug, policy_links, legal_settings, setup_completed, verified_at, created_at, updated_at',
@@ -271,7 +266,7 @@ export function OrgProvider({ children }) {
         .filter(Boolean);
 
       if (orgIds.length) {
-        const { data: settingsData, error: settingsError } = await coreSupabase
+        const { data: settingsData, error: settingsError } = await authClient
           .from('org_settings')
           .select('org_id, supabase_url, anon_key, metadata, updated_at')
           .in('org_id', orgIds);
@@ -320,7 +315,7 @@ export function OrgProvider({ children }) {
     } finally {
       loadingRef.current = false;
     }
-  }, [user, resetState]);
+  }, [authClient, user, resetState]);
 
   const loadOrgDirectory = useCallback(
     async (orgId) => {
@@ -332,12 +327,12 @@ export function OrgProvider({ children }) {
 
       try {
         const [membersResponse, invitesResponse] = await Promise.all([
-          coreSupabase
+          authClient
             .from('org_memberships')
             .select('id, org_id, user_id, role, created_at')
             .eq('org_id', orgId)
             .order('created_at', { ascending: true }),
-          coreSupabase
+          authClient
             .from('org_invitations')
             .select('id, org_id, email, status, invited_by, created_at, expires_at')
             .eq('org_id', orgId)
@@ -401,13 +396,14 @@ export function OrgProvider({ children }) {
         setOrgInvites([]);
       }
     },
-    [session],
+    [authClient, session],
   );
 
   const fetchOrgRuntimeConfig = useCallback(async (orgId) => {
     if (!orgId) {
       setActiveOrgConfig(null);
       setConfigStatus('idle');
+      setSupabaseActiveOrg(null);
       return;
     }
 
@@ -416,7 +412,7 @@ export function OrgProvider({ children }) {
     setConfigStatus('loading');
 
     try {
-      const { data: sessionData, error: sessionError } = await coreSupabase.auth.getSession();
+      const { data: sessionData, error: sessionError } = await authClient.auth.getSession();
 
       if (configRequestRef.current !== requestId) {
         return;
@@ -461,6 +457,11 @@ export function OrgProvider({ children }) {
 
         return normalized;
       });
+      setSupabaseActiveOrg({
+        id: orgId,
+        supabase_url: config.supabaseUrl,
+        supabase_anon_key: config.supabaseAnonKey,
+      });
       setConfigStatus('success');
       console.info('[OrgSupabase]', {
         action: 'config-fetched',
@@ -479,7 +480,7 @@ export function OrgProvider({ children }) {
       if (error?.status === 401) {
         toast.error('פג תוקף כניסה/חסר Bearer');
         try {
-          await coreSupabase.auth.refreshSession();
+          await authClient.auth.refreshSession();
         } catch (refreshError) {
           console.error('Failed to refresh Supabase session after 401', refreshError);
         }
@@ -495,8 +496,9 @@ export function OrgProvider({ children }) {
 
       setActiveOrgConfig(null);
       setConfigStatus('error');
+      setSupabaseActiveOrg(null);
     }
-  }, []);
+  }, [authClient, setSupabaseActiveOrg]);
 
   const determineStatus = useCallback(
     (orgList) => {
@@ -516,6 +518,7 @@ export function OrgProvider({ children }) {
         setActiveOrg(null);
         setActiveOrgConfig(null);
         setConfigStatus('idle');
+        setSupabaseActiveOrg(null);
         return;
       }
 
@@ -525,7 +528,7 @@ export function OrgProvider({ children }) {
       setActiveOrgConfig(null);
       setConfigStatus('idle');
     },
-    [],
+    [setSupabaseActiveOrg],
   );
 
   useEffect(() => {
@@ -639,7 +642,7 @@ export function OrgProvider({ children }) {
       const normalizedKey = supabaseAnonKey ? supabaseAnonKey.trim() : '';
 
       if (!normalizedUrl || !normalizedKey) {
-        const { error } = await coreSupabase
+        const { error } = await authClient
           .from('org_settings')
           .delete()
           .eq('org_id', orgId);
@@ -682,7 +685,7 @@ export function OrgProvider({ children }) {
         updated_at: new Date().toISOString(),
       };
 
-      const { error } = await coreSupabase
+      const { error } = await authClient
         .from('org_settings')
         .upsert(payload, { onConflict: 'org_id' });
       if (error) throw error;
@@ -721,13 +724,13 @@ export function OrgProvider({ children }) {
         });
       }
     },
-    [activeOrgId],
+    [authClient, activeOrgId],
   );
 
   const createOrganization = useCallback(
     async ({ name, supabaseUrl, supabaseAnonKey, policyLinks = [], legalSettings = {} }) => {
       if (!user?.id && !session?.user?.id) {
-        const { data: authUser, error: authError } = await coreSupabase.auth.getUser();
+        const { data: authUser, error: authError } = await authClient.auth.getUser();
         if (authError) {
           console.error('Failed to resolve authenticated user for organization creation', authError);
           throw new Error('לא ניתן היה לאמת את המשתמש. נסה להתחבר מחדש.');
@@ -795,7 +798,7 @@ export function OrgProvider({ children }) {
         if (Object.keys(updates).length) {
           updates.updated_at = now;
 
-          const { error: updateError } = await coreSupabase
+          const { error: updateError } = await authClient
             .from('organizations')
             .update(updates)
             .eq('id', effectiveOrgId);
@@ -818,21 +821,21 @@ export function OrgProvider({ children }) {
         throw new Error(message);
       }
     },
-    [user, session, refreshOrganizations, selectOrg, syncOrgSettings],
+    [authClient, user, session, refreshOrganizations, selectOrg, syncOrgSettings],
   );
 
   const updateOrganizationMetadata = useCallback(
     async (orgId, updates) => {
       if (!orgId) throw new Error('זיהוי ארגון חסר.');
       const payload = { ...updates, updated_at: new Date().toISOString() };
-      const { error } = await coreSupabase
+      const { error } = await authClient
         .from('organizations')
         .update(payload)
         .eq('id', orgId);
       if (error) throw error;
       await refreshOrganizations();
     },
-    [refreshOrganizations],
+    [authClient, refreshOrganizations],
   );
 
   const updateConnection = useCallback(
@@ -872,7 +875,7 @@ export function OrgProvider({ children }) {
       const normalizedEmail = (email || '').trim().toLowerCase();
       if (!normalizedEmail) throw new Error('יש להזין כתובת אימייל תקינה.');
 
-      const { data, error } = await coreSupabase
+      const { data, error } = await authClient
         .from('org_invitations')
         .insert({
           org_id: orgId,
@@ -888,26 +891,26 @@ export function OrgProvider({ children }) {
       toast.success('הזמנה נשלחה.');
       return data;
     },
-    [user, loadOrgDirectory],
+    [authClient, user, loadOrgDirectory],
   );
 
   const revokeInvite = useCallback(
     async (inviteId) => {
       if (!inviteId) return;
-      const { error } = await coreSupabase
+      const { error } = await authClient
         .from('org_invitations')
         .update({ status: 'revoked', revoked_at: new Date().toISOString() })
         .eq('id', inviteId);
       if (error) throw error;
       if (activeOrgId) await loadOrgDirectory(activeOrgId);
     },
-    [activeOrgId, loadOrgDirectory],
+    [authClient, activeOrgId, loadOrgDirectory],
   );
 
   const removeMember = useCallback(
     async (membershipId) => {
       if (!membershipId) return;
-      const { error } = await coreSupabase
+      const { error } = await authClient
         .from('org_memberships')
         .delete()
         .eq('id', membershipId);
@@ -917,14 +920,14 @@ export function OrgProvider({ children }) {
         await refreshOrganizations();
       }
     },
-    [activeOrgId, loadOrgDirectory, refreshOrganizations],
+    [authClient, activeOrgId, loadOrgDirectory, refreshOrganizations],
   );
 
   const acceptInvite = useCallback(
     async (inviteId) => {
       if (!inviteId || !user) throw new Error('הזמנה אינה זמינה.');
 
-      const { data: inviteData, error: inviteError } = await coreSupabase
+      const { data: inviteData, error: inviteError } = await authClient
         .from('org_invitations')
         .select('id, org_id, status')
         .eq('id', inviteId)
@@ -939,7 +942,7 @@ export function OrgProvider({ children }) {
 
       const now = new Date().toISOString();
 
-      const { error: membershipError } = await coreSupabase
+      const { error: membershipError } = await authClient
         .from('org_memberships')
         .insert({
           org_id: inviteData.org_id,
@@ -952,7 +955,7 @@ export function OrgProvider({ children }) {
         throw membershipError;
       }
 
-      const { error: updateError } = await coreSupabase
+      const { error: updateError } = await authClient
         .from('org_invitations')
         .update({ status: 'accepted', accepted_at: now })
         .eq('id', inviteId);
@@ -963,7 +966,7 @@ export function OrgProvider({ children }) {
       await selectOrg(inviteData.org_id);
       toast.success('הצטרפת לארגון בהצלחה.');
     },
-    [user, refreshOrganizations, selectOrg],
+    [authClient, user, refreshOrganizations, selectOrg],
   );
 
   const activeOrgConnection = useMemo(() => {
@@ -1029,9 +1032,9 @@ export function OrgProvider({ children }) {
   );
 
   return (
-    <OrgSupabaseProvider config={activeOrgConfig}>
-      <OrgContext.Provider value={value}>{children}</OrgContext.Provider>
-    </OrgSupabaseProvider>
+    <OrgContext.Provider value={value}>
+      {children}
+    </OrgContext.Provider>
   );
 }
 

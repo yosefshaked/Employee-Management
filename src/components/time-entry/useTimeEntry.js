@@ -56,7 +56,10 @@ export function useTimeEntry({
   };
 
   const saveRows = async (rows, dayTypeMap = {}) => {
-    const client = supabaseClient || (await import('../../supabaseClient.js')).supabase;
+    if (!supabaseClient) {
+      throw new Error('Supabase client is required for saving rows.');
+    }
+    const client = supabaseClient;
     const canWriteMetadata = await canUseWorkSessionMetadata(client);
     const inserts = [];
     const leaveConflicts = [];
@@ -211,7 +214,10 @@ export function useTimeEntry({
   };
 
   const saveMixedLeave = async (entries = [], options = {}) => {
-    const client = supabaseClient || (await import('../../supabaseClient.js')).supabase;
+    if (!supabaseClient) {
+      throw new Error('Supabase client is required for saving leave.');
+    }
+    const client = supabaseClient;
     const { leaveType = 'mixed' } = options;
     const entryType = getEntryTypeForLeaveKind(leaveType);
     if (!entryType) throw new Error('סוג חופשה לא נתמך');
@@ -332,7 +338,10 @@ export function useTimeEntry({
   };
 
   const saveAdjustments = async (items = []) => {
-    const client = supabaseClient || (await import('../../supabaseClient.js')).supabase;
+    if (!supabaseClient) {
+      throw new Error('Supabase client is required for deleting rows.');
+    }
+    const client = supabaseClient;
     const canWriteMetadata = await canUseWorkSessionMetadata(client);
     const inserts = [];
     const invalidNotes = [];

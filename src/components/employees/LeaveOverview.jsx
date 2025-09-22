@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { Loader2, ShieldCheck, Info } from 'lucide-react';
-import { supabase } from '@/supabaseClient';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { selectLeaveRemaining, selectHolidayForDate } from '@/selectors.js';
 import {
   DEFAULT_LEAVE_POLICY,
@@ -76,6 +76,7 @@ export default function LeaveOverview({
   const [overrideRate, setOverrideRate] = useState('');
   const [isSavingOverride, setIsSavingOverride] = useState(false);
   const [isOverrideDialogOpen, setIsOverrideDialogOpen] = useState(false);
+  const { dataClient } = useSupabase();
 
   const usageOptions = useMemo(() => {
     return LEAVE_TYPE_OPTIONS.filter(option => leavePolicy.allow_half_day || option.value !== 'half_day');
@@ -204,6 +205,9 @@ export default function LeaveOverview({
     }
     setIsSubmitting(true);
     try {
+      if (!dataClient) {
+        throw new Error('חיבור Supabase אינו זמין.');
+      }
       const payload = {
         employee_id: employee.id,
         effective_date: date,
@@ -211,7 +215,7 @@ export default function LeaveOverview({
         leave_type: ledgerType,
         notes: formState.notes ? formState.notes.trim() : null,
       };
-      const { error } = await supabase.from('LeaveBalances').insert([payload]);
+      const { error } = await dataClient.from('LeaveBalances').insert([payload]);
       if (error) throw error;
       toast.success('הרישום נשמר בהצלחה');
       if (onRefresh) await onRefresh();
@@ -306,12 +310,15 @@ export default function LeaveOverview({
     }
     setIsSavingOverride(true);
     try {
+      if (!dataClient) {
+        throw new Error('חיבור Supabase אינו זמין.');
+      }
       const methodToSave = normalizedOverrideMethod || null;
       const payload = {
         leave_pay_method: methodToSave,
         leave_fixed_day_rate: methodToSave === 'fixed_rate' ? rateToSave : null,
       };
-      const { error } = await supabase
+      const { error } = await dataClient
         .from('Employees')
         .update(payload)
         .eq('id', overrideEmployeeId);

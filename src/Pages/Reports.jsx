@@ -8,7 +8,7 @@ import CombinedHoursCard from "@/components/dashboard/CombinedHoursCard.jsx";
 import { selectHourlyHours, selectMeetingHours, selectGlobalHours, selectLeaveDayValue } from "@/selectors.js";
 import { format, startOfMonth } from "date-fns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { supabase } from "../supabaseClient";
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 
 import ReportsFilters from "../components/reports/ReportsFilters";
 import { parseDateStrict, toISODateString, isValidRange, isFullMonthRange } from '@/lib/date.js';
@@ -50,6 +50,7 @@ export default function Reports() {
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const { tenantClientReady, activeOrgHasConnection } = useOrg();
+  const { dataClient } = useSupabase();
 
   const getRateForDate = (employeeId, date, serviceId = null) => {
     const employee = employees.find(e => e.id === employeeId);
@@ -162,7 +163,7 @@ export default function Reports() {
   }, [applyFilters]);
 
   const loadInitialData = useCallback(async () => {
-    if (!tenantClientReady || !activeOrgHasConnection) {
+    if (!tenantClientReady || !activeOrgHasConnection || !dataClient) {
       setIsLoading(false);
       return;
     }
@@ -178,13 +179,13 @@ export default function Reports() {
         leavePayPolicySettings,
         leaveData,
       ] = await Promise.all([
-        supabase.from('Employees').select('*').order('name'),
-        supabase.from('WorkSessions').select('*').eq('deleted', false),
-        supabase.from('Services').select('*'),
-        supabase.from('RateHistory').select('*'),
-        fetchLeavePolicySettings(supabase),
-        fetchLeavePayPolicySettings(supabase),
-        supabase.from('LeaveBalances').select('*')
+        dataClient.from('Employees').select('*').order('name'),
+        dataClient.from('WorkSessions').select('*').eq('deleted', false),
+        dataClient.from('Services').select('*'),
+        dataClient.from('RateHistory').select('*'),
+        fetchLeavePolicySettings(dataClient),
+        fetchLeavePayPolicySettings(dataClient),
+        dataClient.from('LeaveBalances').select('*')
       ]);
 
       if (employeesData.error) throw employeesData.error;
@@ -215,7 +216,7 @@ export default function Reports() {
       console.error("Error loading data:", error);
     }
     setIsLoading(false);
-  }, [tenantClientReady, activeOrgHasConnection]);
+  }, [tenantClientReady, activeOrgHasConnection, dataClient]);
 
   useEffect(() => {
     loadInitialData();

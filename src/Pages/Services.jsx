@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Plus, Settings } from "lucide-react";
 import { toast } from "sonner";
 import ServiceList from "../components/services/ServiceList";
 import ServiceForm from "../components/services/ServiceForm";
-import { supabase } from "../supabaseClient";
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -13,10 +13,16 @@ export default function Services() {
   const [showForm, setShowForm] = useState(false);
   const [editingService, setEditingService] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const { dataClient } = useSupabase();
 
-  const loadServices = async () => {
+  const loadServices = useCallback(async () => {
+    if (!dataClient) {
+      setServices([]);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
-    const { data, error } = await supabase
+    const { data, error } = await dataClient
       .from('Services')
       .select('*')
       .order('name', { ascending: true });
@@ -29,23 +35,26 @@ export default function Services() {
       setServices(filteredServices);
     }
     setIsLoading(false);
-  };
+  }, [dataClient]);
 
   useEffect(() => {
     loadServices();
-  }, []);
+  }, [loadServices]);
 
   const handleSubmit = async (serviceData) => {
     try {
+      if (!dataClient) {
+        throw new Error('חיבור Supabase אינו זמין.');
+      }
       if (editingService) {
-        const { error } = await supabase
+        const { error } = await dataClient
           .from('Services')
           .update(serviceData)
           .eq('id', editingService.id);
         if (error) throw error;
         toast.success("השירות עודכן בהצלחה!");
       } else {
-        const { error } = await supabase
+        const { error } = await dataClient
           .from('Services')
           .insert([serviceData]);
         if (error) throw error;

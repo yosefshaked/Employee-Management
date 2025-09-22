@@ -11,10 +11,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { Plus, Save, Trash2, PlugZap, Sparkles } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { supabase } from '@/supabaseClient';
 import SetupAssistant from '@/components/settings/SetupAssistant.jsx';
 import OrgMembersCard from '@/components/settings/OrgMembersCard.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 import {
   DEFAULT_LEAVE_POLICY,
   HOLIDAY_TYPE_LABELS,
@@ -119,6 +119,7 @@ export default function Settings() {
   const [isSavingLeavePayPolicy, setIsSavingLeavePayPolicy] = useState(false);
   const setupDialogAutoOpenRef = useRef(!activeOrgHasConnection);
   const [isSetupDialogOpen, setIsSetupDialogOpen] = useState(!activeOrgHasConnection);
+  const { dataClient } = useSupabase();
 
   useEffect(() => {
     if (activeOrgHasConnection) {
@@ -151,9 +152,13 @@ export default function Settings() {
     const loadPolicy = async () => {
       setIsLoading(true);
       try {
+        if (!dataClient) {
+          throw new Error('חיבור Supabase אינו זמין.');
+        }
+
         const [leavePolicyResult, leavePayPolicyResult] = await Promise.all([
-          fetchLeavePolicySettings(supabase),
-          fetchLeavePayPolicySettings(supabase),
+          fetchLeavePolicySettings(dataClient),
+          fetchLeavePayPolicySettings(dataClient),
         ]);
 
         if (cancelled) {
@@ -187,7 +192,7 @@ export default function Settings() {
     return () => {
       cancelled = true;
     };
-  }, [activeOrgHasConnection, tenantClientReady]);
+  }, [activeOrgHasConnection, tenantClientReady, dataClient]);
 
   const handleToggle = (key) => (checked) => {
     setPolicy(prev => ({ ...prev, [key]: checked }));
@@ -237,7 +242,10 @@ export default function Settings() {
     setIsSaving(true);
     try {
       const normalized = normalizeLeavePolicy(policy);
-      const { error } = await supabase
+      if (!dataClient) {
+        throw new Error('חיבור Supabase אינו זמין.');
+      }
+      const { error } = await dataClient
         .from('Settings')
         .upsert({
           key: 'leave_policy',
@@ -301,7 +309,10 @@ export default function Settings() {
     setIsSavingLeavePayPolicy(true);
     try {
       const normalized = normalizeLeavePayPolicy(leavePayPolicy);
-      const { error } = await supabase
+      if (!dataClient) {
+        throw new Error('חיבור Supabase אינו זמין.');
+      }
+      const { error } = await dataClient
         .from('Settings')
         .upsert({
           key: 'leave_pay_policy',

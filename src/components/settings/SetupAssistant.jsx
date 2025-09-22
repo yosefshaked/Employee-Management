@@ -7,7 +7,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { coreSupabase, maskSupabaseCredential } from '@/supabaseClient.js';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import {
@@ -718,6 +719,7 @@ export default function SetupAssistant() {
     createOrganization,
   } = useOrg();
   const { session } = useAuth();
+  const { authClient, dataClient } = useSupabase();
   const [connection, setConnection] = useState({ ...INITIAL_CONNECTION_VALUES });
   const [originalConnection, setOriginalConnection] = useState({ ...INITIAL_CONNECTION_VALUES });
   const [isSavingConnection, setIsSavingConnection] = useState(false);
@@ -1061,7 +1063,7 @@ export default function SetupAssistant() {
       return session.access_token;
     }
     try {
-      const { data, error } = await coreSupabase.auth.getSession();
+      const { data, error } = await authClient.auth.getSession();
       if (error) throw error;
       return data?.session?.access_token || null;
     } catch (error) {
@@ -1180,7 +1182,10 @@ export default function SetupAssistant() {
       });
       await waitRuntimeOrgReady();
       setConfigStatus('activated');
-      const verification = await verifyOrgConnection();
+      if (!dataClient) {
+        throw new Error('Supabase client is unavailable for verification.');
+      }
+      const verification = await verifyOrgConnection(dataClient);
       const diagnostics = getRuntimeConfigDiagnostics();
       const leavePolicyValue = verification?.settingsValue ?? null;
       const policyState = leavePolicyValue ? 'configured' : 'missing';
@@ -1236,7 +1241,7 @@ export default function SetupAssistant() {
 
       if (error?.status === 401) {
         try {
-          await coreSupabase.auth.refreshSession();
+          await authClient.auth.refreshSession();
         } catch (refreshError) {
           console.error('Failed to refresh session after connection test error', refreshError);
         }

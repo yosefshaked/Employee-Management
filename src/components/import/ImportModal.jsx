@@ -10,8 +10,8 @@ import { mapRows } from '@/lib/csvMapping.js';
 import { validateRows } from '@/lib/validators.js';
 import { isLeaveEntryType } from '@/lib/leave.js';
 import { downloadCsvTemplate, downloadExcelTemplate } from '@/lib/excelTemplate.js';
-import { supabase } from '@/supabaseClient';
 import { format } from 'date-fns';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -24,6 +24,7 @@ export default function ImportModal({ open, onOpenChange, employees, services, g
   const [detectedDelim, setDetectedDelim] = useState(',');
   const [overrideDelim, setOverrideDelim] = useState('');
   const [includeDup, setIncludeDup] = useState(false);
+  const { dataClient } = useSupabase();
 
   const handleFileChange = e => {
     const f = e.target.files?.[0];
@@ -99,7 +100,11 @@ export default function ImportModal({ open, onOpenChange, employees, services, g
       }
       return;
     }
-    const { error } = await supabase.from('WorkSessions').insert(filteredPayload);
+    if (!dataClient) {
+      toast.error('חיבור Supabase אינו זמין.');
+      return;
+    }
+    const { error } = await dataClient.from('WorkSessions').insert(filteredPayload);
     if (error) {
       toast.error(error.message);
       return;

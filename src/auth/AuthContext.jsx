@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { coreSupabase } from '@/supabaseClient';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 
 const AuthContext = createContext(null);
 
@@ -21,67 +21,52 @@ function extractProfile(session) {
 }
 
 export function AuthProvider({ children }) {
+  const { authClient, session: supabaseSession, loading } = useSupabase();
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [status, setStatus] = useState('loading');
 
   useEffect(() => {
-    let isMounted = true;
+    setSession(supabaseSession || null);
+    setProfile(extractProfile(supabaseSession));
+  }, [supabaseSession]);
 
-    const resolveSession = async () => {
-      try {
-        const { data, error } = await coreSupabase.auth.getSession();
-        if (!isMounted) return;
-        if (error) throw error;
-        setSession(data.session);
-        setProfile(extractProfile(data.session));
-      } catch (error) {
-        console.error('Failed to resolve session', error);
-        if (!isMounted) return;
-        setSession(null);
-        setProfile(null);
-      } finally {
-        if (isMounted) setStatus('ready');
-      }
-    };
-
-    resolveSession();
-
-    const { data: listener } = coreSupabase.auth.onAuthStateChange((_event, nextSession) => {
-      if (!isMounted) return;
-      setSession(nextSession);
-      setProfile(extractProfile(nextSession));
-      setStatus('ready');
-    });
-
-    return () => {
-      isMounted = false;
-      listener?.subscription?.unsubscribe();
-    };
-  }, []);
+  const ensureAuthClient = useCallback(() => {
+    if (loading) {
+      throw new Error('Supabase authentication is still initializing.');
+    }
+    if (!authClient) {
+      throw new Error('Supabase authentication client is unavailable.');
+    }
+    return authClient;
+  }, [authClient, loading]);
 
   const signOut = useCallback(async () => {
-    const { error } = await coreSupabase.auth.signOut();
+    const client = ensureAuthClient();
+    const { error } = await client.auth.signOut();
     if (error) throw error;
-  }, []);
+  }, [ensureAuthClient]);
 
   const signInWithEmail = useCallback(async (email, password) => {
-    const { data, error } = await coreSupabase.auth.signInWithPassword({ email, password });
+    const client = ensureAuthClient();
+    const { data, error } = await client.auth.signInWithPassword({ email, password });
     if (error) throw error;
     return data;
-  }, []);
+  }, [ensureAuthClient]);
 
   const signInWithOAuth = useCallback(async (provider) => {
+    const client = ensureAuthClient();
     const origin = typeof window === 'undefined' ? undefined : window.location.origin;
     const pathname = typeof window === 'undefined' ? undefined : window.location.pathname;
     const redirectTo = origin && pathname ? `${origin}${pathname}` : undefined;
-    const { data, error } = await coreSupabase.auth.signInWithOAuth({
+    const { data, error } = await client.auth.signInWithOAuth({
       provider,
       options: redirectTo ? { redirectTo } : {},
     });
     if (error) throw error;
     return data;
-  }, []);
+  }, [ensureAuthClient]);
+
+  const status = loading ? 'loading' : 'ready';
 
   const value = useMemo(() => ({
     status,

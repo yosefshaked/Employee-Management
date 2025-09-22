@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../supabaseClient';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
 import QuickStats from '../components/dashboard/QuickStats';
@@ -7,6 +6,7 @@ import MonthlyCalendar from '../components/dashboard/MonthlyCalendar';
 import RecentActivity from '../components/dashboard/RecentActivity';
 import { toast } from "sonner";
 import { DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePayPolicy } from '@/lib/leave.js';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -18,9 +18,10 @@ export default function Dashboard() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const { tenantClientReady, activeOrgHasConnection } = useOrg();
+  const { dataClient } = useSupabase();
 
   const loadData = useCallback(async () => {
-    if (!tenantClientReady || !activeOrgHasConnection) {
+    if (!tenantClientReady || !activeOrgHasConnection || !dataClient) {
       setIsLoading(false);
       return;
     }
@@ -28,11 +29,11 @@ export default function Dashboard() {
     setIsLoading(true);
     try {
       const [employeesData, sessionsData, servicesData, leavePayPolicySettings] = await Promise.all([
-        supabase.from('Employees').select('*').eq('is_active', true),
+        dataClient.from('Employees').select('*').eq('is_active', true),
         // === התיקון הסופי והנכון באמת: מיון לפי created_at ===
-        supabase.from('WorkSessions').select('*').eq('deleted', false).order('created_at', { ascending: false }),
-        supabase.from('Services').select('*'),
-        fetchLeavePayPolicySettings(supabase),
+        dataClient.from('WorkSessions').select('*').eq('deleted', false).order('created_at', { ascending: false }),
+        dataClient.from('Services').select('*'),
+        fetchLeavePayPolicySettings(dataClient),
       ]);
 
       if (employeesData.error) throw employeesData.error;
@@ -54,7 +55,7 @@ export default function Dashboard() {
       toast.error("שגיאה בטעינת נתוני הדשבורד");
     }
     setIsLoading(false);
-  }, [tenantClientReady, activeOrgHasConnection]);
+  }, [tenantClientReady, activeOrgHasConnection, dataClient]);
 
   useEffect(() => { loadData(); }, [loadData]);
 

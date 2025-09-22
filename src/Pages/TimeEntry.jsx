@@ -4,7 +4,6 @@ import RecentActivity from "../components/dashboard/RecentActivity";
 import TimeEntryTable from '../components/time-entry/TimeEntryTable';
 import TrashTab from '../components/time-entry/TrashTab.jsx';
 import { toast } from "sonner";
-import { supabase } from "../supabaseClient";
 import { useOrg } from '@/org/OrgContext.jsx';
 import { fetchLeavePolicySettings, fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,6 +11,7 @@ import { format } from "date-fns";
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { hasDuplicateSession } from '@/lib/workSessionsUtils.js';
 import { restoreWorkSessions, permanentlyDeleteWorkSessions } from '@/api/workSessions.js';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 import {
   DEFAULT_LEAVE_POLICY,
   DEFAULT_LEAVE_PAY_POLICY,
@@ -88,8 +88,9 @@ export default function TimeEntry() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(() => getTabFromSearch(location.search));
   const { tenantClientReady, activeOrgHasConnection } = useOrg();
+  const { dataClient } = useSupabase();
   const loadInitialData = useCallback(async ({ silent = false } = {}) => {
-    if (!tenantClientReady || !activeOrgHasConnection) {
+    if (!tenantClientReady || !activeOrgHasConnection || !dataClient) {
       if (!silent) {
         setIsLoading(false);
       }
@@ -108,18 +109,18 @@ export default function TimeEntry() {
         leaveLedgerData,
         trashData,
       ] = await Promise.all([
-        supabase.from('Employees').select('*').eq('is_active', true).order('name'),
-        supabase.from('WorkSessions')
+        dataClient.from('Employees').select('*').eq('is_active', true).order('name'),
+        dataClient.from('WorkSessions')
           .select('*, service:service_id(name)')
           .eq('deleted', false)
           .order('date', { ascending: false })
           .order('created_at', { ascending: false }),
-        supabase.from('RateHistory').select('*'),
-        supabase.from('Services').select('*'),
-        fetchLeavePolicySettings(supabase),
-        fetchLeavePayPolicySettings(supabase),
-        supabase.from('LeaveBalances').select('*'),
-        supabase.from('WorkSessions')
+        dataClient.from('RateHistory').select('*'),
+        dataClient.from('Services').select('*'),
+        fetchLeavePolicySettings(dataClient),
+        fetchLeavePayPolicySettings(dataClient),
+        dataClient.from('LeaveBalances').select('*'),
+        dataClient.from('WorkSessions')
           .select('*, service:service_id(name)')
           .eq('deleted', true)
           .order('deleted_at', { ascending: false })
@@ -159,7 +160,7 @@ export default function TimeEntry() {
     } finally {
       setIsLoading(false);
     }
-  }, [tenantClientReady, activeOrgHasConnection]);
+  }, [tenantClientReady, activeOrgHasConnection, dataClient]);
 
   useEffect(() => {
     loadInitialData();
@@ -248,8 +249,11 @@ export default function TimeEntry() {
   }) => {
     setIsLoading(true);
     try {
+      if (!dataClient) {
+        throw new Error('חיבור Supabase אינו זמין.');
+      }
       const dateStr = format(day, 'yyyy-MM-dd');
-      const canWriteMetadata = await canUseWorkSessionMetadata(supabase);
+      const canWriteMetadata = await canUseWorkSessionMetadata(dataClient);
 
       if (dayType === 'adjustment') {
         const normalizedAdjustments = Array.isArray(adjustments) ? adjustments : [];
@@ -300,12 +304,12 @@ export default function TimeEntry() {
           return;
         }
         if (insertPayload.length) {
-          const { error } = await supabase.from('WorkSessions').insert(insertPayload);
+          const { error } = await dataClient.from('WorkSessions').insert(insertPayload);
           if (error) throw new Error(error.message);
         }
         if (updatePayloads.length) {
           const results = await Promise.all(
-            updatePayloads.map(({ id, values }) => supabase.from('WorkSessions').update(values).eq('id', id)),
+            updatePayloads.map(({ id, values }) => dataClient.from('WorkSessions').update(values).eq('id', id)),
           );
           for (const { error } of results) {
             if (error) throw new Error(error.message);
@@ -611,20 +615,20 @@ export default function TimeEntry() {
       }
 
       if (toInsert.length > 0) {
-        const { error: insErr } = await supabase.from('WorkSessions').insert(toInsert);
+        const { error: insErr } = await dataClient.from('WorkSessions').insert(toInsert);
         if (insErr) throw insErr;
       }
       if (toUpdate.length > 0) {
-        const { error: upErr } = await supabase.from('WorkSessions').upsert(toUpdate, { onConflict: 'id' });
+        const { error: upErr } = await dataClient.from('WorkSessions').upsert(toUpdate, { onConflict: 'id' });
         if (upErr) throw upErr;
       }
 
       if (ledgerDeleteIds.length > 0) {
-        const { error: ledgerDeleteErr } = await supabase.from('LeaveBalances').delete().in('id', ledgerDeleteIds);
+        const { error: ledgerDeleteErr } = await dataClient.from('LeaveBalances').delete().in('id', ledgerDeleteIds);
         if (ledgerDeleteErr) throw ledgerDeleteErr;
       }
       if (ledgerInsertPayload) {
-        const { error: ledgerInsertErr } = await supabase.from('LeaveBalances').insert([ledgerInsertPayload]);
+        const { error: ledgerInsertErr } = await dataClient.from('LeaveBalances').insert([ledgerInsertPayload]);
         if (ledgerInsertErr) throw ledgerInsertErr;
       }
 
@@ -682,7 +686,7 @@ export default function TimeEntry() {
     const normalized = Array.from(new Set(idsArray.map(String)));
     if (!normalized.length) return;
     try {
-      await restoreWorkSessions(normalized, supabase);
+      await restoreWorkSessions(normalized, dataClient);
       toast.success(normalized.length === 1 ? 'הרישום שוחזר.' : 'הרישומים שוחזרו.');
       setTrashSessions(prev => prev.filter(item => !normalized.includes(String(item.id))));
       await loadInitialData({ silent: true });
@@ -698,7 +702,7 @@ export default function TimeEntry() {
     const normalized = Array.from(new Set(idsArray.map(String)));
     if (!normalized.length) return;
     try {
-      await permanentlyDeleteWorkSessions(normalized, supabase);
+      await permanentlyDeleteWorkSessions(normalized, dataClient);
       toast.success(normalized.length === 1 ? 'הרישום נמחק לצמיתות.' : 'הרישומים נמחקו לצמיתות.');
       setTrashSessions(prev => prev.filter(item => !normalized.includes(String(item.id))));
       await loadInitialData({ silent: true });

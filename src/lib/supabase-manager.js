@@ -4,8 +4,11 @@ import { createClient } from '@supabase/supabase-js';
 // --- Main Authentication Client (Singleton) ---
 // This is created only ONCE when the application loads.
 
-const supabaseUrl = import.meta.env.VITE_APP_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_APP_SUPABASE_ANON_KEY;
+const viteEnv = typeof import.meta !== 'undefined' ? import.meta.env ?? {} : {};
+const nodeProcess = typeof globalThis !== 'undefined' ? globalThis.process : undefined;
+const nodeEnv = nodeProcess?.env ?? {};
+const supabaseUrl = viteEnv.VITE_APP_SUPABASE_URL ?? nodeEnv.VITE_APP_SUPABASE_URL;
+const supabaseAnonKey = viteEnv.VITE_APP_SUPABASE_ANON_KEY ?? nodeEnv.VITE_APP_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error("Critical Error: Main Supabase credentials are not defined in environment variables.");

@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Save, X, User, DollarSign } from "lucide-react";
 import RateHistoryManager from './RateHistoryManager';
-import { supabase } from '@/supabaseClient';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -52,12 +52,18 @@ export default function EmployeeForm({ employee, onSubmit, onCancel }) {
   const [rateHistory, setRateHistory] = useState([]);
   const [serviceRates, setServiceRates] = useState({});
   const [isLoading, setIsLoading] = useState(false);
+  const { dataClient } = useSupabase();
 
 useEffect(() => {
   const loadServicesAndRates = async () => {
+    if (!dataClient) {
+      setServices([]);
+      setRateHistory([]);
+      return;
+    }
     // Load services only if the employee is an instructor
     if (formData.employee_type === 'instructor') {
-      const { data: servicesData } = await supabase.from('Services').select('*').order('name');
+      const { data: servicesData } = await dataClient.from('Services').select('*').order('name');
       const filteredServices = (servicesData || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
       setServices(filteredServices);
     } else {
@@ -66,13 +72,13 @@ useEffect(() => {
 
     // Load rate history FOR ANY existing employee
     if (employee) {
-      const { data: ratesData } = await supabase.from('RateHistory').select('*').eq('employee_id', employee.id);
+      const { data: ratesData } = await dataClient.from('RateHistory').select('*').eq('employee_id', employee.id);
       setRateHistory(ratesData || []);
       setFormData(prev => ({ ...prev, current_rate: '' }));
     }
   };
   loadServicesAndRates();
-}, [formData.employee_type, employee]);
+}, [dataClient, formData.employee_type, employee]);
 
 useEffect(() => {
      if (employee && rateHistory.length > 0) {
