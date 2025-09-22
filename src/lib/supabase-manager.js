@@ -48,7 +48,6 @@ export function initializeAuthClient(config) {
 
   if (authClient) {
     if (credentialsMatch(lastCredentials, { supabaseUrl, supabaseAnonKey })) {
-      console.warn('Auth client is already initialized with identical credentials.');
       return authClient;
     }
     throw new Error(
