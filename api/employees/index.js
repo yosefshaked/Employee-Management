@@ -312,253 +312,257 @@ async function upsertRateHistory(client, entries, options = {}) {
 }
 
 export default async function (context, req) {
-  console.log('--- API Function Invoked: Verifying Environment ---');
-
-  const envSupabaseUrl = process.env.APP_SUPABASE_URL;
-  const envServiceRoleKey = process.env.APP_SUPABASE_SERVICE_ROLE;
-
-  console.log('Found APP_SUPABASE_URL:', envSupabaseUrl);
-
-  if (envServiceRoleKey) {
-    console.log('Found APP_SUPABASE_SERVICE_ROLE: [SECRET PRESENT], Length:', envServiceRoleKey.length);
-    console.log('First 8 chars of Service Role Key:', envServiceRoleKey.substring(0, 8));
-  } else {
-    console.error('CRITICAL ERROR: APP_SUPABASE_SERVICE_ROLE is MISSING or UNDEFINED!');
-  }
-
-  console.log('--- API Function Invoked ---');
-  console.log('Request Method:', req?.method);
-  console.log('All Incoming Headers:', JSON.stringify(req?.headers, null, 2));
-  const authHeader = req?.headers?.authorization ?? req?.headers?.Authorization;
-  console.log('Received Authorization Header:', authHeader);
-
-  const authorization = resolveBearerAuthorization(req);
-  if (!authorization?.token) {
-    context.log?.warn?.('employees missing bearer token');
-    return respond(context, 401, { message: 'missing bearer' });
-  }
-
-  const env = readEnv(context);
-  const adminConfig = readSupabaseAdminConfig(env);
-  const { supabaseUrl, serviceRoleKey } = adminConfig;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    context.log?.error?.('employees missing Supabase admin credentials');
-    return respond(context, 500, { message: 'server_misconfigured' });
-  }
-
-  const supabase = createSupabaseAdminClient(adminConfig);
-
-  let authResult;
-  try {
-    authResult = await supabase.auth.getUser(authorization.token);
-  } catch (error) {
-    context.log?.error?.('employees failed to validate token', { message: error?.message });
-    return respond(context, 401, { message: 'invalid or expired token' });
-  }
-
-  if (authResult.error || !authResult.data?.user?.id) {
-    context.log?.warn?.('employees token did not resolve to user');
-    return respond(context, 401, { message: 'invalid or expired token' });
-  }
-
-  const userId = authResult.data.user.id;
-  const method = String(req.method || 'GET').toUpperCase();
-  const body = method === 'GET' ? {} : parseRequestBody(req);
-  const query = req?.query ?? {};
-  const orgCandidate = body.org_id || body.orgId || query.org_id || query.orgId;
-  const orgId = normalizeString(orgCandidate);
-
-  if (!orgId || !isValidOrgId(orgId)) {
-    return respond(context, 400, { message: 'invalid org id' });
-  }
+  console.log('[API INIT] /api/employees handler invoked');
 
   try {
-    const role = await ensureMembership(supabase, orgId, userId);
-    if (!role) {
-      return respond(context, 403, { message: 'forbidden' });
+    console.log('[API STAGE 1] Validating JWT...');
+    const authorization = resolveBearerAuthorization(req);
+    if (!authorization?.token) {
+      context.log?.warn?.('employees missing bearer token');
+      return respond(context, 401, { message: 'missing bearer' });
     }
 
-    if ((method === 'POST' || method === 'PATCH' || method === 'PUT' || method === 'DELETE') && !isAdminRole(role)) {
-      return respond(context, 403, { message: 'forbidden' });
-    }
-  } catch (membershipError) {
-    context.log?.error?.('employees failed to verify membership', {
-      message: membershipError?.message,
-      orgId,
-      userId,
-    });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
-  }
+    const env = readEnv(context);
+    const adminConfig = readSupabaseAdminConfig(env);
+    const { supabaseUrl, serviceRoleKey } = adminConfig;
 
-  const connectionResult = await fetchOrgConnection(supabase, orgId);
-  if (connectionResult.error) {
-    const message = connectionResult.error.message || 'failed_to_load_connection';
-    const status = message === 'missing_connection_settings' ? 412 : message === 'missing_dedicated_key' ? 428 : 500;
-    return respond(context, status, { message });
-  }
-
-  const encryptionSecret = resolveEncryptionSecret(env);
-  const encryptionKey = deriveEncryptionKey(encryptionSecret);
-
-  if (!encryptionKey) {
-    context.log?.error?.('employees missing encryption secret');
-    return respond(context, 500, { message: 'encryption_not_configured' });
-  }
-
-  const dedicatedKey = decryptDedicatedKey(connectionResult.encryptedKey, encryptionKey);
-  if (!dedicatedKey) {
-    return respond(context, 500, { message: 'failed_to_decrypt_key' });
-  }
-
-  let tenantClient;
-  try {
-    tenantClient = createTenantClient({
-      supabaseUrl: connectionResult.supabaseUrl,
-      anonKey: connectionResult.anonKey,
-      dedicatedKey,
-    });
-  } catch (clientError) {
-    context.log?.error?.('employees failed to create tenant client', { message: clientError?.message });
-    return respond(context, 500, { message: 'failed_to_connect_tenant' });
-  }
-
-  if (method === 'GET') {
-    const bundle = await fetchEmployeesBundle(tenantClient);
-    if (bundle.error) {
-      context.log?.error?.('employees fetch failed', { message: bundle.error.message });
-      return respond(context, 500, { message: 'failed_to_fetch_employees' });
-    }
-    return respond(context, 200, { ...bundle });
-  }
-
-  if (method === 'POST') {
-    const employeePayload = normalizeEmployeePayload(body.employee || body.employeeData);
-    if (!employeePayload) {
-      return respond(context, 400, { message: 'invalid employee payload' });
+    if (!supabaseUrl || !serviceRoleKey) {
+      context.log?.error?.('employees missing Supabase admin credentials');
+      return respond(context, 500, { message: 'server_misconfigured' });
     }
 
-    const rateUpdates = normalizeRateHistoryEntries(body.rate_updates || body.rateUpdates, null);
-    const manualRateHistory = normalizeRateHistoryEntries(body.manual_rate_history || body.manualRateHistory, null);
+    const supabase = createSupabaseAdminClient(adminConfig);
 
-    const insertResult = await tenantClient
-      .from('Employees')
-      .insert(employeePayload)
-      .select('id')
-      .single();
-
-    if (insertResult.error) {
-      context.log?.error?.('employees insert failed', { message: insertResult.error.message });
-      return respond(context, 500, { message: 'failed_to_create_employee' });
+    let authResult;
+    try {
+      authResult = await supabase.auth.getUser(authorization.token);
+    } catch (error) {
+      context.log?.error?.('employees failed to validate token', { message: error?.message });
+      return respond(context, 401, { message: 'invalid or expired token' });
     }
 
-    const employeeId = insertResult.data?.id;
-    const combinedErrors = [];
-
-    const rateInsertError = await upsertRateHistory(
-      tenantClient,
-      normalizeRateHistoryEntries(rateUpdates, employeeId),
-      { onConflict: 'employee_id,service_id,effective_date' },
-    );
-    if (rateInsertError) {
-      combinedErrors.push(rateInsertError);
+    if (authResult.error || !authResult.data?.user?.id) {
+      context.log?.warn?.('employees token did not resolve to user');
+      return respond(context, 401, { message: 'invalid or expired token' });
     }
 
-    const manualError = await upsertRateHistory(
-      tenantClient,
-      normalizeRateHistoryEntries(manualRateHistory, employeeId),
-      { onConflict: 'id' },
-    );
-    if (manualError) {
-      combinedErrors.push(manualError);
+    const userId = authResult.data.user.id;
+    console.log(`[API STAGE 1] JWT validation successful for user ${userId}.`);
+
+    const method = String(req.method || 'GET').toUpperCase();
+    const body = method === 'GET' ? {} : parseRequestBody(req);
+    const query = req?.query ?? {};
+    const orgCandidate = body.org_id || body.orgId || query.org_id || query.orgId;
+    const orgId = normalizeString(orgCandidate);
+
+    if (!orgId || !isValidOrgId(orgId)) {
+      return respond(context, 400, { message: 'invalid org id' });
     }
 
-    if (combinedErrors.length) {
-      context.log?.error?.('employees rate history upsert failed', {
-        messages: combinedErrors.map((error) => error.message),
+    try {
+      const role = await ensureMembership(supabase, orgId, userId);
+      if (!role) {
+        return respond(context, 403, { message: 'forbidden' });
+      }
+
+      if ((method === 'POST' || method === 'PATCH' || method === 'PUT' || method === 'DELETE') && !isAdminRole(role)) {
+        return respond(context, 403, { message: 'forbidden' });
+      }
+    } catch (membershipError) {
+      context.log?.error?.('employees failed to verify membership', {
+        message: membershipError?.message,
+        orgId,
+        userId,
       });
-      return respond(context, 500, { message: 'employee_created_but_rates_failed', employee_id: employeeId });
+      return respond(context, 500, { message: 'failed_to_verify_membership' });
     }
 
-    return respond(context, 201, { employee_id: employeeId });
-  }
+    console.log(`[API STAGE 2] Fetching encrypted dedicated key for org ${orgId}...`);
+    const connectionResult = await fetchOrgConnection(supabase, orgId);
+    if (connectionResult.error) {
+      const message = connectionResult.error.message || 'failed_to_load_connection';
+      const status = message === 'missing_connection_settings' ? 412 : message === 'missing_dedicated_key' ? 428 : 500;
+      return respond(context, status, { message });
+    }
+    console.log('[API STAGE 2] Retrieved encrypted key and connection details.');
 
-  if (method === 'PATCH' || method === 'PUT') {
-    const employeeIdCandidate = context.bindingData?.employeeId || body.employee_id || body.employeeId;
-    const employeeId = normalizeString(employeeIdCandidate);
-    if (!employeeId || !isValidOrgId(employeeId)) {
-      const numericId = Number(employeeIdCandidate);
-      const acceptNumeric = !Number.isNaN(numericId) && numericId > 0;
-      if (!acceptNumeric) {
+    const encryptionSecret = resolveEncryptionSecret(env);
+    const encryptionKey = deriveEncryptionKey(encryptionSecret);
+
+    if (!encryptionKey) {
+      context.log?.error?.('employees missing encryption secret');
+      return respond(context, 500, { message: 'encryption_not_configured' });
+    }
+
+    console.log('[API STAGE 3] Decrypting dedicated key...');
+    const dedicatedKey = decryptDedicatedKey(connectionResult.encryptedKey, encryptionKey);
+    if (!dedicatedKey) {
+      return respond(context, 500, { message: 'failed_to_decrypt_key' });
+    }
+    console.log(`[API STAGE 3] Dedicated key decrypted successfully (length: ${dedicatedKey.length}).`);
+
+    console.log('[API STAGE 4] Creating tenant Supabase client...');
+    let tenantClient;
+    try {
+      tenantClient = createTenantClient({
+        supabaseUrl: connectionResult.supabaseUrl,
+        anonKey: connectionResult.anonKey,
+        dedicatedKey,
+      });
+    } catch (clientError) {
+      context.log?.error?.('employees failed to create tenant client', { message: clientError?.message });
+      return respond(context, 500, { message: 'failed_to_connect_tenant' });
+    }
+    console.log('[API STAGE 4] Tenant client created.');
+
+    if (method === 'GET') {
+      console.log('[API STAGE 5] Executing GET operation against tenant DB...');
+      const bundle = await fetchEmployeesBundle(tenantClient);
+      if (bundle.error) {
+        context.log?.error?.('employees fetch failed', { message: bundle.error.message });
+        return respond(context, 500, { message: 'failed_to_fetch_employees' });
+      }
+      console.log('[API STAGE 5] GET operation completed successfully.');
+      return respond(context, 200, { ...bundle });
+    }
+
+    if (method === 'POST') {
+      console.log('[API STAGE 5] Executing POST operation against tenant DB...');
+      const employeePayload = normalizeEmployeePayload(body.employee || body.employeeData);
+      if (!employeePayload) {
+        return respond(context, 400, { message: 'invalid employee payload' });
+      }
+
+      const rateUpdates = normalizeRateHistoryEntries(body.rate_updates || body.rateUpdates, null);
+      const manualRateHistory = normalizeRateHistoryEntries(body.manual_rate_history || body.manualRateHistory, null);
+
+      const insertResult = await tenantClient
+        .from('Employees')
+        .insert(employeePayload)
+        .select('id')
+        .single();
+
+      if (insertResult.error) {
+        context.log?.error?.('employees insert failed', { message: insertResult.error.message });
+        return respond(context, 500, { message: 'failed_to_create_employee' });
+      }
+
+      const employeeId = insertResult.data?.id;
+      const combinedErrors = [];
+
+      const rateInsertError = await upsertRateHistory(
+        tenantClient,
+        normalizeRateHistoryEntries(rateUpdates, employeeId),
+        { onConflict: 'employee_id,service_id,effective_date' },
+      );
+      if (rateInsertError) {
+        combinedErrors.push(rateInsertError);
+      }
+
+      const manualError = await upsertRateHistory(
+        tenantClient,
+        normalizeRateHistoryEntries(manualRateHistory, employeeId),
+        { onConflict: 'id' },
+      );
+      if (manualError) {
+        combinedErrors.push(manualError);
+      }
+
+      if (combinedErrors.length) {
+        context.log?.error?.('employees rate history upsert failed', {
+          messages: combinedErrors.map((error) => error.message),
+        });
+        return respond(context, 500, { message: 'employee_created_but_rates_failed', employee_id: employeeId });
+      }
+
+      console.log('[API STAGE 5] POST operation completed successfully.');
+      return respond(context, 201, { employee_id: employeeId });
+    }
+
+    if (method === 'PATCH' || method === 'PUT') {
+      console.log(`[API STAGE 5] Executing ${method} operation against tenant DB...`);
+      const employeeIdCandidate = context.bindingData?.employeeId || body.employee_id || body.employeeId;
+      const employeeId = normalizeString(employeeIdCandidate);
+      if (!employeeId || !isValidOrgId(employeeId)) {
+        const numericId = Number(employeeIdCandidate);
+        const acceptNumeric = !Number.isNaN(numericId) && numericId > 0;
+        if (!acceptNumeric) {
+          return respond(context, 400, { message: 'invalid employee id' });
+        }
+      }
+
+      const updates = normalizeEmployeePayload(body.updates || body.employee || body.employeeData);
+      const rateUpdates = normalizeRateHistoryEntries(body.rate_updates || body.rateUpdates, employeeId);
+      const manualRateHistory = normalizeRateHistoryEntries(body.manual_rate_history || body.manualRateHistory, employeeId);
+
+      if (updates) {
+        const updateResult = await tenantClient
+          .from('Employees')
+          .update(updates)
+          .eq('id', employeeId);
+
+        if (updateResult.error) {
+          context.log?.error?.('employees update failed', { message: updateResult.error.message });
+          return respond(context, 500, { message: 'failed_to_update_employee' });
+        }
+      }
+
+      const combinedErrors = [];
+
+      const rateUpsertError = await upsertRateHistory(
+        tenantClient,
+        rateUpdates,
+        { onConflict: 'employee_id,service_id,effective_date' },
+      );
+      if (rateUpsertError) {
+        combinedErrors.push(rateUpsertError);
+      }
+
+      const manualUpsertError = await upsertRateHistory(
+        tenantClient,
+        manualRateHistory,
+        { onConflict: 'id' },
+      );
+      if (manualUpsertError) {
+        combinedErrors.push(manualUpsertError);
+      }
+
+      if (combinedErrors.length) {
+        context.log?.error?.('employees update rate history failed', {
+          messages: combinedErrors.map((error) => error.message),
+        });
+        return respond(context, 500, { message: 'employee_updated_but_rates_failed' });
+      }
+
+      console.log(`[API STAGE 5] ${method} operation completed successfully.`);
+      return respond(context, 200, { updated: true });
+    }
+
+    if (method === 'DELETE') {
+      console.log('[API STAGE 5] Executing DELETE operation against tenant DB...');
+      const employeeIdCandidate = context.bindingData?.employeeId || body.employee_id || body.employeeId;
+      const employeeId = normalizeString(employeeIdCandidate);
+      if (!employeeId) {
         return respond(context, 400, { message: 'invalid employee id' });
       }
-    }
 
-    const updates = normalizeEmployeePayload(body.updates || body.employee || body.employeeData);
-    const rateUpdates = normalizeRateHistoryEntries(body.rate_updates || body.rateUpdates, employeeId);
-    const manualRateHistory = normalizeRateHistoryEntries(body.manual_rate_history || body.manualRateHistory, employeeId);
-
-    if (updates) {
-      const updateResult = await tenantClient
+      const { error } = await tenantClient
         .from('Employees')
-        .update(updates)
+        .delete()
         .eq('id', employeeId);
 
-      if (updateResult.error) {
-        context.log?.error?.('employees update failed', { message: updateResult.error.message });
-        return respond(context, 500, { message: 'failed_to_update_employee' });
+      if (error) {
+        context.log?.error?.('employees delete failed', { message: error.message });
+        return respond(context, 500, { message: 'failed_to_delete_employee' });
       }
+
+      console.log('[API STAGE 5] DELETE operation completed successfully.');
+      return respond(context, 200, { deleted: true });
     }
 
-    const combinedErrors = [];
-
-    const rateUpsertError = await upsertRateHistory(
-      tenantClient,
-      rateUpdates,
-      { onConflict: 'employee_id,service_id,effective_date' },
-    );
-    if (rateUpsertError) {
-      combinedErrors.push(rateUpsertError);
-    }
-
-    const manualUpsertError = await upsertRateHistory(
-      tenantClient,
-      manualRateHistory,
-      { onConflict: 'id' },
-    );
-    if (manualUpsertError) {
-      combinedErrors.push(manualUpsertError);
-    }
-
-    if (combinedErrors.length) {
-      context.log?.error?.('employees update rate history failed', {
-        messages: combinedErrors.map((error) => error.message),
-      });
-      return respond(context, 500, { message: 'employee_updated_but_rates_failed' });
-    }
-
-    return respond(context, 200, { updated: true });
+    return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET,POST,PATCH,PUT,DELETE' });
+  } catch (error) {
+    console.error('API crashed with error:', error);
+    return respond(context, 500, { message: 'internal_server_error' });
   }
-
-  if (method === 'DELETE') {
-    const employeeIdCandidate = context.bindingData?.employeeId || body.employee_id || body.employeeId;
-    const employeeId = normalizeString(employeeIdCandidate);
-    if (!employeeId) {
-      return respond(context, 400, { message: 'invalid employee id' });
-    }
-
-    const { error } = await tenantClient
-      .from('Employees')
-      .delete()
-      .eq('id', employeeId);
-
-    if (error) {
-      context.log?.error?.('employees delete failed', { message: error.message });
-      return respond(context, 500, { message: 'failed_to_delete_employee' });
-    }
-
-    return respond(context, 200, { deleted: true });
-  }
-
-  return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET,POST,PATCH,PUT,DELETE' });
 }
