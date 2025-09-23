@@ -44,15 +44,47 @@ export default function Employees() {
   const { tenantClientReady, activeOrgHasConnection, activeOrg, activeOrgId } = useOrg();
   const { authClient, user, loading, session } = useSupabase();
 
+  console.log('[DEBUG 8] Employees: component render.', {
+    tenantClientReady,
+    activeOrgHasConnection,
+    hasSession: Boolean(session),
+    activeOrgId,
+    userId: user?.id || null,
+  });
+
   const loadData = useCallback(async () => {
+    console.log('[DEBUG 9] Employees: loadData invoked.', {
+      tenantClientReady,
+      activeOrgHasConnection,
+      hasSession: Boolean(session),
+      activeOrgId,
+    });
+
     if (!tenantClientReady || !activeOrgHasConnection || !session || !activeOrgId) {
+      console.log('[DEBUG 10] Employees: prerequisites missing, skipping fetch.', {
+        tenantClientReady,
+        activeOrgHasConnection,
+        hasSession: Boolean(session),
+        activeOrgId,
+      });
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
+    console.log('[DEBUG 11] Employees: fetching bundle from API.', {
+      orgId: activeOrgId,
+    });
     try {
       const bundle = await fetchEmployeesList({ session, orgId: activeOrgId });
+      console.log('[DEBUG 12] Employees: bundle received.', {
+        employees: Array.isArray(bundle?.employees) ? bundle.employees.length : null,
+        rateHistory: Array.isArray(bundle?.rateHistory) ? bundle.rateHistory.length : null,
+        services: Array.isArray(bundle?.services) ? bundle.services.length : null,
+        leaveBalances: Array.isArray(bundle?.leaveBalances) ? bundle.leaveBalances.length : null,
+        hasLeavePolicy: Boolean(bundle?.leavePolicy),
+        hasLeavePayPolicy: Boolean(bundle?.leavePayPolicy),
+      });
       const employeeRecords = Array.isArray(bundle?.employees) ? bundle.employees : [];
       const rateHistoryRecords = Array.isArray(bundle?.rateHistory) ? bundle.rateHistory : [];
       const serviceRecords = Array.isArray(bundle?.services) ? bundle.services : [];
@@ -76,9 +108,16 @@ export default function Employees() {
           : DEFAULT_LEAVE_PAY_POLICY,
       );
     } catch (error) {
+      console.error('[DEBUG 13] Employees: fetchEmployeesList failed.', {
+        orgId: activeOrgId,
+        message: error?.message,
+        status: error?.status,
+        data: error?.data,
+      });
       console.error('Error fetching data:', error);
       toast.error("שגיאה בטעינת הנתונים");
     }
+    console.log('[DEBUG 14] Employees: loadData completed. Updating loading state.');
     setIsLoading(false);
   }, [tenantClientReady, activeOrgHasConnection, session, activeOrgId]);
 
@@ -94,6 +133,11 @@ export default function Employees() {
         return variants.some(v => name.includes(v) || id.includes(v));
       });
     }
+    console.log('[DEBUG 15] Employees: filterEmployees applied.', {
+      activeTab,
+      searchTerm,
+      filteredCount: filtered.length,
+    });
     setFilteredEmployees(filtered);
   }, [employees, searchTerm, activeTab]);
 
@@ -113,6 +157,10 @@ export default function Employees() {
 
   const handleToggleActive = async (employee) => {
     try {
+      console.log('[DEBUG 16] Employees: toggling employee status.', {
+        employeeId: employee?.id,
+        currentStatus: employee?.is_active,
+      });
       await updateEmployeeRequest({
         session,
         orgId: activeOrgId,
@@ -120,8 +168,15 @@ export default function Employees() {
         body: { updates: { is_active: !employee.is_active } },
       });
       toast.success('סטטוס העובד עודכן בהצלחה.');
+      console.log('[DEBUG 17] Employees: toggle success, reloading data.');
       loadData();
     } catch (error) {
+      console.error('[DEBUG 18] Employees: failed to toggle employee status.', {
+        employeeId: employee?.id,
+        message: error?.message,
+        status: error?.status,
+        data: error?.data,
+      });
       console.error('Failed to toggle employee status', error);
       toast.error('עדכון סטטוס העובד נכשל.');
     }
