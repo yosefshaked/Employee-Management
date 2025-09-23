@@ -7,6 +7,7 @@ import { useRuntimeConfig } from '../runtime/RuntimeConfigContext.jsx';
 const SupabaseContext = createContext(undefined);
 
 export const SupabaseProvider = ({ children }) => {
+  console.log('[DEBUG 5] SupabaseProvider rendering.');
   const runtimeConfig = useRuntimeConfig();
   const [authClient, setAuthClient] = useState(null);
   const [session, setSession] = useState(null);
@@ -163,6 +164,7 @@ export const SupabaseProvider = ({ children }) => {
   );
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useSupabase = () => {
   const context = useContext(SupabaseContext);
   if (context === undefined) {

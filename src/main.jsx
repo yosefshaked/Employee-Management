@@ -21,6 +21,7 @@ import { OrgProvider } from './org/OrgContext.jsx';
 import OrgSelection from './Pages/OrgSelection.jsx';
 
 function App() {
+  console.log('[DEBUG 4] App component rendering.');
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
@@ -48,13 +49,20 @@ function App() {
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function renderApp(config = null) {
+  console.log('[DEBUG 1] Bootstrap: startApp() called.');
   if (!isAuthClientInitialized()) {
     throw new Error(
       'renderApp was invoked before initializeAuthClient completed. Ensure bootstrap initializes Supabase first.'
     );
   }
 
-  ReactDOM.createRoot(document.getElementById('root')).render(
+  console.log('[DEBUG 2] Bootstrap: Config fetched. Initializing auth client...');
+
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+
+  console.log('[DEBUG 3] Bootstrap: Auth client initialized. Rendering App...');
+
+  root.render(
     <React.StrictMode>
       <RuntimeConfigProvider config={config}>
         <SupabaseProvider>
