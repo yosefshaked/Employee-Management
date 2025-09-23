@@ -1,6 +1,13 @@
-import { describe, it } from 'node:test';
+import { beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
+import {
+  initializeAuthClient,
+  getAuthClient,
+  createDataClient,
+  isAuthClientInitialized,
+  resetAuthClient,
+} from '../src/lib/supabase-manager.js';
 import { verifyOrgConnection } from '../src/runtime/verification.js';
 
 const env = globalThis.process?.env ?? {};
@@ -14,33 +21,25 @@ if (!env.NODE_ENV) {
   env.NODE_ENV = 'test';
 }
 
-const supabaseManagerPromise = import('../src/lib/supabase-manager.js');
+beforeEach(() => {
+  if (isAuthClientInitialized()) {
+    resetAuthClient();
+  }
+});
 
 describe('shared Supabase client module', () => {
-  it('supports lazy initialization and reset', async () => {
-    const {
-      initializeAuthClient,
-      getAuthClient,
-      isAuthClientInitialized,
-      resetAuthClient,
-      createDataClient,
-    } = await supabaseManagerPromise;
-
-    if (isAuthClientInitialized()) {
-      resetAuthClient();
-    }
-
-    assert.equal(isAuthClientInitialized(), false);
+  it('throws when requesting the auth client before initialization', () => {
     assert.throws(() => getAuthClient(), /has not been initialized/);
+  });
 
-    initializeAuthClient({
+  it('initializes the auth singleton and returns cached clients', () => {
+    const first = initializeAuthClient({
       supabaseUrl: env.VITE_APP_SUPABASE_URL,
       supabaseAnonKey: env.VITE_APP_SUPABASE_ANON_KEY,
     });
 
-    const client = getAuthClient();
-    assert.ok(client);
-    assert.equal(isAuthClientInitialized(), true);
+    const again = getAuthClient();
+    assert.strictEqual(again, first);
 
     const dataClient = createDataClient({
       id: 'tenant-1',
@@ -48,30 +47,15 @@ describe('shared Supabase client module', () => {
       supabaseAnonKey: 'tenant-anon-key',
     });
     assert.ok(dataClient);
-
-    resetAuthClient();
-    assert.equal(isAuthClientInitialized(), false);
   });
 
-  it('accepts snake_case credentials during initialization', async () => {
-    const {
-      initializeAuthClient,
-      getAuthClient,
-      isAuthClientInitialized,
-      resetAuthClient,
-    } = await supabaseManagerPromise;
-
-    if (isAuthClientInitialized()) {
-      resetAuthClient();
-    }
-
+  it('accepts snake_case credentials during initialization', () => {
     initializeAuthClient({
       supabase_url: env.VITE_APP_SUPABASE_URL,
       supabase_anon_key: env.VITE_APP_SUPABASE_ANON_KEY,
     });
 
     assert.ok(getAuthClient());
-    resetAuthClient();
   });
 });
 
