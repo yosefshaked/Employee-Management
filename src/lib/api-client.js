@@ -117,13 +117,19 @@ export async function authenticatedFetch(path, { session, accessToken, ...option
   });
   const bearer = `Bearer ${token}`;
 
-  const { headers: customHeaders = {}, body, ...rest } = options;
+  const { headers: incomingHeaders = {}, body, ...rest } = options;
+  const {
+    Authorization: _incomingAuthorization,
+    authorization: _incomingauthorization,
+    ...restOfHeaders
+  } = incomingHeaders;
+
   const headers = {
     'Content-Type': 'application/json',
-    ...customHeaders,
+    ...restOfHeaders,
+    Authorization: bearer,
   };
 
-  headers.Authorization = bearer;
   headers.authorization = bearer;
   headers['X-Supabase-Authorization'] = bearer;
   headers['x-supabase-authorization'] = bearer;
