@@ -7,18 +7,8 @@ function normalizeOrgId(orgId) {
   return orgId.trim();
 }
 
-function resolveSessionToken(session) {
-  const token = session?.access_token || session?.accessToken || null;
-  if (typeof token !== 'string') {
-    return null;
-  }
-  const trimmed = token.trim();
-  return trimmed.length ? trimmed : null;
-}
-
 async function employeesRequest(method, { session, orgId, body, signal, employeeId } = {}) {
-  const token = resolveSessionToken(session);
-  if (!token) {
+  if (!session) {
     throw new Error('נדרשת התחברות כדי לגשת לנתוני העובדים.');
   }
 
@@ -29,12 +19,15 @@ async function employeesRequest(method, { session, orgId, body, signal, employee
 
   const path = employeeId ? `employees/${employeeId}` : 'employees';
   const search = method === 'GET' ? `?org_id=${encodeURIComponent(normalizedOrgId)}` : '';
-  const basePayload = body && typeof body === 'object' ? body : {};
-  const payload = method === 'GET' ? undefined : { ...basePayload, org_id: normalizedOrgId };
+  const hasObjectBody = body && typeof body === 'object' && !(body instanceof FormData);
+  const payload = method === 'GET'
+    ? undefined
+    : hasObjectBody
+      ? { ...body, org_id: normalizedOrgId }
+      : body;
 
   const requestOptions = {
     session,
-    accessToken: token,
     method,
     signal,
   };

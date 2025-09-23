@@ -11,7 +11,7 @@ import RateHistoryManager from './RateHistoryManager';
 import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
-import { authenticatedFetch } from '@/lib/api-client.js';
+import { createEmployee, updateEmployee as updateEmployeeRequest } from '@/api/employees.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -115,7 +115,7 @@ useEffect(() => {
     event.preventDefault();
     setIsLoading(true);
     try {
-      if (!session?.access_token) {
+      if (!session) {
         throw new Error('יש להתחבר מחדש לפני שמירת השינויים.');
       }
       if (!activeOrgId) {
@@ -202,23 +202,23 @@ useEffect(() => {
       }
 
       const payload = {
-        org_id: activeOrgId,
         employee: employeeDetails,
         rate_updates: nextRateUpdates,
         manual_rate_history: manualHistoryEntries,
       };
 
       if (isNewEmployee) {
-        await authenticatedFetch('employees', {
+        await createEmployee({
           session,
-          method: 'POST',
+          orgId: activeOrgId,
           body: payload,
         });
         toast.success('העובד נוצר בהצלחה!');
       } else {
-        await authenticatedFetch(`employees/${employee.id}`, {
+        await updateEmployeeRequest({
           session,
-          method: 'PATCH',
+          orgId: activeOrgId,
+          employeeId: employee.id,
           body: payload,
         });
         toast.success('פרטי העובד עודכנו בהצלחה!');

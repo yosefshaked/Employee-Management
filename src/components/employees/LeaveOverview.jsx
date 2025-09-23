@@ -313,7 +313,7 @@ export default function LeaveOverview({
     }
     setIsSavingOverride(true);
     try {
-      if (!session?.access_token) {
+      if (!session) {
         throw new Error('יש להתחבר מחדש לפני שמירת העקיפה.');
       }
       if (!activeOrgId) {
