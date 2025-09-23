@@ -374,6 +374,15 @@ $$;
 grant execute on function public.setup_assistant_diagnostics() to authenticated;
 `;
 
+const DEDICATED_KEY_SELECT_SQL = `SELECT extensions.sign(
+  json_build_object(
+    'role', 'app_user',
+    'exp', (EXTRACT(epoch FROM (NOW() + INTERVAL '1 year')))::integer,
+    'iat', (EXTRACT(epoch FROM NOW()))::integer
+  ),
+  '__REPLACE_WITH_JWT_SECRET__'
+) AS "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)";`;
+
 export const SETUP_SQL_SCRIPT_STEP_4_JWT = `
 -- Step 4: Create dedicated app role and generate a JWT using your Supabase secret
 DO $$
@@ -390,12 +399,10 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO app_user;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_user;
 
-SELECT extensions.sign(
-  json_build_object(
-    'role', 'app_user',
-    'exp', (EXTRACT(epoch FROM (NOW() + INTERVAL '1 year')))::integer,
-    'iat', (EXTRACT(epoch FROM NOW()))::integer
-  ),
-  '__REPLACE_WITH_JWT_SECRET__'
-) AS "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)";
+${DEDICATED_KEY_SELECT_SQL}
+`;
+
+export const SETUP_SQL_SCRIPT_FETCH_APP_DEDICATED_KEY = `
+-- Helper: Regenerate only the dedicated JWT for copy/paste
+${DEDICATED_KEY_SELECT_SQL}
 `;

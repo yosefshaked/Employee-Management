@@ -13,6 +13,7 @@ import {
   SETUP_SQL_SCRIPT_STEP_2_TABLES,
   SETUP_SQL_SCRIPT_STEP_3_POLICIES,
   SETUP_SQL_SCRIPT_STEP_4_JWT,
+  SETUP_SQL_SCRIPT_FETCH_APP_DEDICATED_KEY,
 } from '@/lib/setup-sql.js';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { resolveControlAccessToken } from '@/lib/api-client.js';
@@ -391,6 +392,9 @@ export default function SetupAssistant() {
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [activeStep, setActiveStep] = useState(1);
   const [jwtSecret, setJwtSecret] = useState('');
+  const [confirmedJwtSecret, setConfirmedJwtSecret] = useState('');
+  const [jwtSecretConfirmed, setJwtSecretConfirmed] = useState(false);
+  const [jwtSecretError, setJwtSecretError] = useState('');
   const [dedicatedKey, setDedicatedKey] = useState('');
   const [dedicatedKeyError, setDedicatedKeyError] = useState('');
   const [isSavingDedicatedKey, setIsSavingDedicatedKey] = useState(false);
@@ -551,6 +555,10 @@ export default function SetupAssistant() {
     setVerifyResults([]);
     setVerifyError('');
     setVerifyErrorInfo(null);
+    setJwtSecret('');
+    setConfirmedJwtSecret('');
+    setJwtSecretConfirmed(false);
+    setJwtSecretError('');
     setDedicatedKey('');
     setDedicatedKeyError('');
     setDedicatedKeySavedAt(activeOrg.dedicated_key_saved_at || null);
@@ -572,12 +580,21 @@ export default function SetupAssistant() {
   const hasDedicatedKeyValue = useMemo(() => Boolean(dedicatedKey.trim()), [dedicatedKey]);
 
   const jwtSecretToken = useMemo(() => {
-    const trimmed = jwtSecret.trim();
+    const trimmed = confirmedJwtSecret.trim();
     return trimmed || 'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE';
-  }, [jwtSecret]);
+  }, [confirmedJwtSecret]);
 
   const step4SqlBlock = useMemo(
     () => SETUP_SQL_SCRIPT_STEP_4_JWT.replace('__REPLACE_WITH_JWT_SECRET__', jwtSecretToken),
+    [jwtSecretToken],
+  );
+
+  const step5FetchKeySqlBlock = useMemo(
+    () =>
+      SETUP_SQL_SCRIPT_FETCH_APP_DEDICATED_KEY.replace(
+        '__REPLACE_WITH_JWT_SECRET__',
+        jwtSecretToken,
+      ),
     [jwtSecretToken],
   );
 
@@ -586,10 +603,10 @@ export default function SetupAssistant() {
       return hasSavedConnection && !hasUnsavedChanges;
     }
     if (activeStep === 4) {
-      return Boolean(jwtSecret.trim());
+      return jwtSecretConfirmed;
     }
     return true;
-  }, [activeStep, hasSavedConnection, hasUnsavedChanges, jwtSecret]);
+  }, [activeStep, hasSavedConnection, hasUnsavedChanges, jwtSecretConfirmed]);
 
   const nextButtonLabel = useMemo(() => {
     switch (activeStep) {
@@ -618,11 +635,16 @@ export default function SetupAssistant() {
         return 'שמור את השינויים לפני המעבר לשלב הבא.';
       }
     }
-    if (activeStep === 4 && !jwtSecret.trim()) {
-      return 'הדביקו את ה-JWT Secret תחת Project Settings -> API -> JWT Secret כדי להמשיך.';
+    if (activeStep === 4) {
+      if (!jwtSecret.trim()) {
+        return 'הדביקו את ה-JWT Secret תחת Project Settings -> API -> JWT Secret כדי להמשיך.';
+      }
+      if (!jwtSecretConfirmed) {
+        return 'אשרו את ה-JWT Secret באמצעות הכפתור כדי להמשיך לשלב האימות.';
+      }
     }
     return '';
-  }, [activeStep, hasConnectionValues, hasSavedConnection, hasUnsavedChanges, jwtSecret]);
+  }, [activeStep, hasConnectionValues, hasSavedConnection, hasUnsavedChanges, jwtSecret, jwtSecretConfirmed]);
 
   const renderStepProgress = () => (
     <ol className="grid gap-3 sm:grid-cols-5">
@@ -873,30 +895,64 @@ export default function SetupAssistant() {
             description="הדביקו את ה-JWT Secret כדי שנפיק SQL עם המפתח הנכון."
           >
             <div className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="jwt_secret">Supabase JWT Secret</Label>
-                <Input
-                  id="jwt_secret"
-                  type="password"
-                  dir="ltr"
-                  placeholder="YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE"
-                  value={jwtSecret}
-                  onChange={handleJwtSecretChange}
-                  onPaste={handleJwtSecretPaste}
-                  autoComplete="off"
-                />
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="jwt_secret">Supabase JWT Secret</Label>
+                  <Input
+                    id="jwt_secret"
+                    type="password"
+                    dir="ltr"
+                    placeholder="YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE"
+                    value={jwtSecret}
+                    onChange={handleJwtSecretChange}
+                    onPaste={handleJwtSecretPaste}
+                    autoComplete="off"
+                  />
+                </div>
                 <p className="text-xs text-slate-500">
-                  מצאו את הערך תחת Project Settings → API → JWT Settings → JWT Secret.
+                  מצאו את הערך תחת Project Settings → API → JWT Settings → JWT Secret, או הדביקו אותו מהמסמך השיתופי.
                 </p>
                 <p className="text-xs text-slate-500">
-                  ה-SQL למטה יתעדכן אוטומטית עם הסוד שהזנתם כדי ליצור את המפתח הייעודי.
+                  אנו לא שומרים את הסוד – לחיצה על הכפתור תאשר אותו ותעדכן את ה-SQL שנריץ ב-Supabase.
                 </p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    type="button"
+                    onClick={handleConfirmJwtSecret}
+                    disabled={
+                      !jwtSecret.trim()
+                      || (jwtSecretConfirmed && confirmedJwtSecret === jwtSecret.trim())
+                    }
+                    className="gap-2"
+                  >
+                    {jwtSecretConfirmed && confirmedJwtSecret === jwtSecret.trim() ? (
+                      <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+                    ) : null}
+                    {jwtSecretConfirmed && confirmedJwtSecret === jwtSecret.trim()
+                      ? 'הסוד אושר'
+                      : 'אשר את ה-JWT Secret'}
+                  </Button>
+                  {jwtSecretConfirmed ? (
+                    <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200">
+                      מוכן ליצירת מפתח
+                    </Badge>
+                  ) : null}
+                </div>
+                {jwtSecretError ? (
+                  <p className="text-xs text-red-600">{jwtSecretError}</p>
+                ) : null}
               </div>
-              <CodeBlock
-                title="בלוק יצירת JWT ייעודי"
-                code={step4SqlBlock}
-                ariaLabel="העתק את בלוק יצירת ה-JWT הייעודי"
-              />
+              {jwtSecretConfirmed ? (
+                <CodeBlock
+                  title="בלוק יצירת JWT ייעודי"
+                  code={step4SqlBlock}
+                  ariaLabel="העתק את בלוק יצירת ה-JWT הייעודי"
+                />
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 text-xs text-slate-500 p-4">
+                  אשרו את הסוד כדי לחשוף את ה-SQL שמייצר את המפתח הייעודי.
+                </div>
+              )}
               <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
                 הריצו את הבלוק כבעלים. הוא יוודא שהתפקיד app_user קיים ויחזיר ערך בשם "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)".
               </p>
@@ -1043,6 +1099,18 @@ export default function SetupAssistant() {
                 <p className="text-sm text-slate-600">
                   לאחר שה-SQL מהשלב הקודם יצר את המפתח "APP_DEDICATED_KEY", הדביקו אותו כאן כדי שנשמור אותו מוצפן.
                 </p>
+                {jwtSecretConfirmed ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                      צריך רק את המפתח המוכן? הריצו את הבלוק המצומצם שמחזיר את הערך להעתקה:
+                    </p>
+                    <CodeBlock
+                      title="בלוק שליפת המפתח הייעודי"
+                      code={step5FetchKeySqlBlock}
+                      ariaLabel="העתק בלוק לשליפת המפתח הייעודי"
+                    />
+                  </div>
+                ) : null}
                 <div className="space-y-2">
                   <Label htmlFor="dedicated_key">APP_DEDICATED_KEY</Label>
                   <Textarea
@@ -1186,8 +1254,26 @@ export default function SetupAssistant() {
     setActiveStep((prev) => Math.max(prev - 1, 1));
   };
 
+  const handleConfirmJwtSecret = () => {
+    const trimmed = jwtSecret.trim();
+    if (!trimmed) {
+      setJwtSecretError('הדביקו את ה-JWT Secret לפני האישור.');
+      setJwtSecretConfirmed(false);
+      setConfirmedJwtSecret('');
+      return;
+    }
+
+    setConfirmedJwtSecret(trimmed);
+    setJwtSecretConfirmed(true);
+    setJwtSecretError('');
+    toast.success('הסוד אושר – ה-SQL מעודכן וניתן להריץ אותו ב-Supabase.');
+  };
+
   const handleJwtSecretChange = (event) => {
     setJwtSecret(event.target.value || '');
+    setJwtSecretConfirmed(false);
+    setConfirmedJwtSecret('');
+    setJwtSecretError('');
   };
 
   const handleJwtSecretPaste = (event) => {
@@ -1197,6 +1283,9 @@ export default function SetupAssistant() {
     event.preventDefault();
     const pasted = event.clipboardData.getData('text') || '';
     setJwtSecret(pasted.trim());
+    setJwtSecretConfirmed(false);
+    setConfirmedJwtSecret('');
+    setJwtSecretError('');
   };
 
   const handleDedicatedKeyPaste = (event) => {
