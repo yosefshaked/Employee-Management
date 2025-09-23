@@ -395,6 +395,12 @@ export default async function (context, req) {
     }
 
     console.log('[API STAGE 3] Decrypting dedicated key...');
+    // --- Start of new debug block ---
+    console.log('[DEBUG] Preparing for decryption...');
+    console.log('[DEBUG] Encrypted Key Payload (from DB):', connectionResult.encryptedKey);
+    console.log('[DEBUG] Encryption Secret (from env):', encryptionSecret ? `[SECRET PRESENT], Length: ${encryptionSecret.length}` : '[SECRET MISSING]');
+    // --- End of new debug block ---
+
     const dedicatedKey = decryptDedicatedKey(connectionResult.encryptedKey, encryptionKey);
     if (!dedicatedKey) {
       return respond(context, 500, { message: 'failed_to_decrypt_key' });
