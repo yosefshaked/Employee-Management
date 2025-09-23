@@ -90,7 +90,10 @@ async function ensureLedgerEntriesForSessions(client, sessions) {
 }
 
 export async function softDeleteWorkSessions(ids, client) {
-  const supa = client || (await import('../supabaseClient.js')).supabase;
+  if (!client) {
+    throw new Error('Supabase client is required for deleting work sessions.');
+  }
+  const supa = client;
   const idsArray = ensureIds(ids);
   const { data, error } = await supa
     .from('WorkSessions')
@@ -111,7 +114,10 @@ export async function softDeleteWorkSession(id, client) {
 }
 
 export async function restoreWorkSessions(ids, client) {
-  const supa = client || (await import('../supabaseClient.js')).supabase;
+  if (!client) {
+    throw new Error('Supabase client is required for restoring work sessions.');
+  }
+  const supa = client;
   const idsArray = ensureIds(ids);
   const { data, error } = await supa
     .from('WorkSessions')
@@ -132,7 +138,10 @@ export async function restoreWorkSession(id, client) {
 }
 
 export async function permanentlyDeleteWorkSessions(ids, client) {
-  const supa = client || (await import('../supabaseClient.js')).supabase;
+  if (!client) {
+    throw new Error('Supabase client is required for permanently deleting work sessions.');
+  }
+  const supa = client;
   const idsArray = ensureIds(ids);
   const { data: rowsToDelete, error: fetchError } = await supa
     .from('WorkSessions')

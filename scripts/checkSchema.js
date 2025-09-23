@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import process from 'node:process';
-import { createClient } from '@supabase/supabase-js';
+import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../api/_shared/supabase-admin.js';
 
 const REQUIRED_COLUMNS = [
   { table: 'WorkSessions', column: 'payable', types: ['boolean'] },
@@ -10,23 +10,27 @@ const REQUIRED_COLUMNS = [
   { table: 'LeaveBalances', column: 'effective_date', types: ['date', 'timestamp with time zone', 'timestamp without time zone'] },
 ];
 
-const supabaseUrl =
-  process.env.APP_SUPABASE_URL ||
-  process.env.SUPABASE_URL ||
-  '';
-const supabaseKey =
-  process.env.APP_SUPABASE_SERVICE_ROLE ||
-  process.env.APP_SUPABASE_ANON_KEY ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.SUPABASE_KEY ||
-  '';
+const adminConfig = readSupabaseAdminConfig(process.env, {
+  supabaseUrl:
+    process.env.APP_SUPABASE_URL ||
+    process.env.SUPABASE_URL ||
+    '',
+  serviceRoleKey:
+    process.env.APP_SUPABASE_SERVICE_ROLE ||
+    process.env.APP_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_KEY ||
+    '',
+});
+
+const { supabaseUrl, serviceRoleKey: supabaseKey } = adminConfig;
 
 if (!supabaseUrl || !supabaseKey) {
   console.error('Missing Supabase credentials. Set APP_SUPABASE_URL and APP_SUPABASE_SERVICE_ROLE (or anon key) to run the schema check.');
   process.exit(1);
 }
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+const supabase = createSupabaseAdminClient({ supabaseUrl, serviceRoleKey: supabaseKey });
 
 async function loadColumns() {
   const targetTables = [...new Set(REQUIRED_COLUMNS.map(item => item.table))];

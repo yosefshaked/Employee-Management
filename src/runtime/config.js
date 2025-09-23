@@ -1,42 +1,172 @@
-const GLOBAL_CONFIG_KEY = '__EMPLOYEE_MANAGEMENT_PUBLIC_CONFIG__';
+import { asError, MissingRuntimeConfigError } from '../lib/error-utils.js';
+export { MissingRuntimeConfigError } from '../lib/error-utils.js';
+
+const IS_DEV = Boolean(import.meta?.env?.DEV);
+
+if (IS_DEV) {
+  console.debug('[runtime/config] module evaluated');
+}
+
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const CACHE = new Map();
 
+let currentConfig = null;
+let readyResolve = () => {};
+let readyPromise = createReadyPromise();
 let lastDiagnostics = {
   orgId: null,
   status: null,
   scope: 'app',
   ok: false,
   error: null,
+  endpoint: null,
   timestamp: null,
   accessToken: null,
   accessTokenPreview: null,
   body: null,
   bodyIsJson: false,
+  bodyText: null,
 };
 
-export class MissingRuntimeConfigError extends Error {
-  constructor(message = 'טעינת ההגדרות נכשלה. ודא שפונקציית /api/config זמינה ומחזירה JSON תקין.') {
-    super(message);
-    this.name = 'MissingRuntimeConfigError';
+const activatedListeners = new Set();
+const clearedListeners = new Set();
+
+function notifyListeners(collection, payload) {
+  if (!collection || collection.size === 0) {
+    return;
+  }
+
+  for (const listener of Array.from(collection)) {
+    try {
+      listener(payload);
+    } catch (error) {
+      console.error('runtime config listener failed', error);
+    }
   }
 }
 
-export function setRuntimeConfig(config) {
-  CACHE.set('app', config);
+function createReadyPromise() {
+  return new Promise((resolve) => {
+    readyResolve = resolve;
+  });
+}
+
+export function onConfigActivated(listener) {
+  if (typeof listener !== 'function') {
+    return () => {};
+  }
+  activatedListeners.add(listener);
+  return () => {
+    activatedListeners.delete(listener);
+  };
+}
+
+export function onConfigCleared(listener) {
+  if (typeof listener !== 'function') {
+    return () => {};
+  }
+  clearedListeners.add(listener);
+  return () => {
+    clearedListeners.delete(listener);
+  };
+}
+
+async function ensureAuthClientInitialized(credentials) {
+  try {
+    const { initializeAuthClient } = await import('../lib/supabase-manager.js');
+    initializeAuthClient(credentials);
+  } catch (error) {
+    throw asError(error, 'טעינת לקוח Supabase נכשלה. ודא שמפתחות הבקרה תקינים.');
+  }
+}
+
+export async function activateConfig(rawConfig, options = {}) {
+  const sanitized = sanitizeConfig(rawConfig, options.source || rawConfig?.source || 'manual');
+
+  if (!sanitized) {
+    throw new MissingRuntimeConfigError('supabase_url ו-anon_key נדרשים להפעלת החיבור.');
+  }
+
+  const normalized = {
+    supabaseUrl: sanitized.supabaseUrl,
+    supabaseAnonKey: sanitized.supabaseAnonKey,
+    source: sanitized.source || options.source || 'manual',
+    orgId: options.orgId ?? null,
+  };
+
+  await ensureAuthClientInitialized(normalized);
+
+  currentConfig = {
+    supabaseUrl: normalized.supabaseUrl,
+    supabaseAnonKey: normalized.supabaseAnonKey,
+    source: normalized.source,
+    orgId: normalized.orgId,
+  };
+
+  if (IS_DEV) {
+    console.debug('[runtime/config] activated', {
+      source: currentConfig.source,
+      hasOrg: Boolean(currentConfig.orgId),
+    });
+  }
+
   if (typeof window !== 'undefined') {
-    window[GLOBAL_CONFIG_KEY] = config;
+    window.__RUNTIME_CONFIG__ = {
+      supabaseUrl: currentConfig.supabaseUrl,
+      supabaseAnonKey: currentConfig.supabaseAnonKey,
+      source: currentConfig.source,
+      orgId: currentConfig.orgId,
+    };
+  }
+
+  CACHE.set('app', { ...normalized });
+  notifyListeners(activatedListeners, {
+    supabaseUrl: currentConfig.supabaseUrl,
+    supabaseAnonKey: currentConfig.supabaseAnonKey,
+    source: currentConfig.source,
+    orgId: currentConfig.orgId,
+  });
+  readyResolve();
+  return { supabaseUrl: currentConfig.supabaseUrl, supabaseAnonKey: currentConfig.supabaseAnonKey };
+}
+
+export function clearConfig() {
+  currentConfig = null;
+  CACHE.delete('app');
+  readyPromise = createReadyPromise();
+  notifyListeners(clearedListeners);
+  if (typeof window !== 'undefined') {
+    window.__RUNTIME_CONFIG__ = null;
+  }
+  if (IS_DEV) {
+    console.debug('[runtime/config] cleared');
   }
 }
 
-export function getRuntimeConfig() {
-  if (CACHE.has('app')) {
-    return CACHE.get('app');
+export function getConfigOrThrow() {
+  if (!currentConfig?.supabaseUrl || !currentConfig?.supabaseAnonKey) {
+    throw new MissingRuntimeConfigError();
   }
-  if (typeof window === 'undefined') {
-    return undefined;
+  return {
+    supabaseUrl: currentConfig.supabaseUrl,
+    supabaseAnonKey: currentConfig.supabaseAnonKey,
+  };
+}
+
+export function getCurrentConfig() {
+  if (!currentConfig?.supabaseUrl || !currentConfig?.supabaseAnonKey) {
+    return null;
   }
-  return window[GLOBAL_CONFIG_KEY];
+  return {
+    supabaseUrl: currentConfig.supabaseUrl,
+    supabaseAnonKey: currentConfig.supabaseAnonKey,
+    source: currentConfig.source || null,
+    orgId: currentConfig.orgId || null,
+  };
+}
+
+export async function waitConfigReady() {
+  return readyPromise;
 }
 
 function sanitizeConfig(raw, source = 'api') {
@@ -84,18 +214,31 @@ function buildTokenPreview(token) {
   return `${trimmed.slice(0, 4)}…${trimmed.slice(-4)}`;
 }
 
-function updateDiagnostics({ orgId, status, scope, ok, error, accessToken, body, bodyIsJson }) {
+function updateDiagnostics({
+  orgId,
+  status,
+  scope,
+  ok,
+  error,
+  accessToken,
+  body,
+  bodyIsJson,
+  endpoint,
+  bodyText,
+}) {
   lastDiagnostics = {
     orgId: orgId || null,
     status: typeof status === 'number' ? status : null,
     scope,
     ok,
     error: error || null,
+    endpoint: endpoint || null,
     timestamp: Date.now(),
     accessToken: accessToken || null,
     accessTokenPreview: buildTokenPreview(accessToken),
     body: bodyIsJson ? body ?? null : null,
     bodyIsJson: Boolean(bodyIsJson && body !== undefined),
+    bodyText: typeof bodyText === 'string' && bodyText.length ? bodyText : null,
   };
 }
 
@@ -110,27 +253,50 @@ function buildCacheKey(scope, orgId) {
   return 'app';
 }
 
-function ensureJsonResponse(response, orgId, scope, accessToken, endpoint) {
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.toLowerCase().includes('application/json')) {
-    updateDiagnostics({
-      orgId,
-      status: response.status,
-      scope,
-      ok: false,
-      error: 'response-not-json',
-      accessToken,
-      body: null,
-      bodyIsJson: false,
-    });
-    const endpointLabel = endpoint || '/api/config';
-    const error = new MissingRuntimeConfigError(
-      `הפונקציה ${endpointLabel} לא מחזירה JSON תקין. ודא שהיא מחזירה תשובה מסוג application/json.`,
-    );
-    error.status = response.status;
-    error.endpoint = endpointLabel;
-    throw error;
+async function ensureJsonResponse(response, orgId, scope, accessToken, endpoint) {
+  const rawContentType = response.headers.get('content-type') || '';
+  const normalizedContentType = typeof rawContentType === 'string' ? rawContentType.toLowerCase() : '';
+
+  if (normalizedContentType.includes('application/json')) {
+    return;
   }
+
+  let bodyText = '';
+  try {
+    bodyText = await response.text();
+  } catch {
+    bodyText = '';
+  }
+
+  const endpointLabel = endpoint || '/api/config';
+  let friendlyMessage = `הפונקציה ${endpointLabel} לא מחזירה JSON תקין. ודא שהיא מחזירה תשובה מסוג application/json.`;
+
+  if ((response.status === 401 || response.status === 403) && scope === 'org') {
+    friendlyMessage =
+      `הפונקציה ${endpointLabel} החזירה ${response.status} ללא JSON. ודא שסיפקת כותרת x-functions-key תקינה או שה- authLevel של הפונקציה הוא "anonymous".`;
+  } else if (response.status === 404) {
+    friendlyMessage = `הפונקציה ${endpointLabel} החזירה 404 ללא JSON. ודא שהנתיב קיים ומחזיר supabase_url ו-anon_key.`;
+  }
+
+  updateDiagnostics({
+    orgId,
+    status: response.status,
+    scope,
+    ok: false,
+    error: friendlyMessage,
+    accessToken,
+    body: null,
+    bodyIsJson: false,
+    endpoint,
+    bodyText,
+    errorReason: 'response-not-json',
+  });
+
+  const error = new MissingRuntimeConfigError(friendlyMessage);
+  error.status = response.status;
+  error.endpoint = endpointLabel;
+  error.bodyText = bodyText;
+  throw asError(error);
 }
 
 export async function loadRuntimeConfig(options = {}) {
@@ -200,34 +366,48 @@ export async function loadRuntimeConfig(options = {}) {
       accessToken,
       body: null,
       bodyIsJson: false,
+      endpoint,
     });
     throw new MissingRuntimeConfigError(
       `לא ניתן ליצור קשר עם הפונקציה ${endpoint}. ודא שהיא פרוסה ופועלת.`,
     );
   }
 
-  ensureJsonResponse(response, targetOrgId, scope, accessToken, endpoint);
+  await ensureJsonResponse(response, targetOrgId, scope, accessToken, endpoint);
 
-  let payload;
+  let rawBodyText = '';
   try {
-    payload = await response.json();
+    rawBodyText = await response.text();
   } catch {
-    updateDiagnostics({
-      orgId: targetOrgId,
-      status: response.status,
-      scope,
-      ok: false,
-      error: 'invalid-json',
-      accessToken,
-      body: null,
-      bodyIsJson: false,
-    });
-    const parsingError = new MissingRuntimeConfigError(
-      `לא ניתן לפענח את תשובת ${endpoint}. ודא שהפונקציה מחזירה JSON תקין.`,
-    );
-    parsingError.status = response.status;
-    parsingError.endpoint = endpoint;
-    throw parsingError;
+    rawBodyText = '';
+  }
+
+  let payload = null;
+  const trimmedBody = rawBodyText.trim();
+  if (trimmedBody) {
+    try {
+      payload = JSON.parse(trimmedBody);
+    } catch {
+      updateDiagnostics({
+        orgId: targetOrgId,
+        status: response.status,
+        scope,
+        ok: false,
+        error: 'invalid-json',
+        accessToken,
+        body: null,
+        bodyIsJson: false,
+        endpoint,
+        bodyText: rawBodyText,
+      });
+      const parsingError = new MissingRuntimeConfigError(
+        `לא ניתן לפענח את תשובת ${endpoint}. ודא שהפונקציה מחזירה JSON תקין.`,
+      );
+      parsingError.status = response.status;
+      parsingError.endpoint = endpoint;
+      parsingError.bodyText = rawBodyText;
+      throw parsingError;
+    }
   }
 
   if (!response.ok) {
@@ -258,12 +438,15 @@ export async function loadRuntimeConfig(options = {}) {
       accessToken,
       body: payload,
       bodyIsJson: typeof payload === 'object' && payload !== null,
+      endpoint,
+      bodyText: rawBodyText,
     });
     const error = new MissingRuntimeConfigError(serverMessage);
     error.status = response.status;
     error.body = payload;
     error.endpoint = endpoint;
-    throw error;
+    error.bodyText = rawBodyText;
+    throw asError(error);
   }
 
   const sanitized = sanitizeConfig(payload, scope === 'org' ? 'org-api' : 'api');
@@ -277,6 +460,8 @@ export async function loadRuntimeConfig(options = {}) {
       accessToken,
       body: payload,
       bodyIsJson: typeof payload === 'object' && payload !== null,
+      endpoint,
+      bodyText: rawBodyText,
     });
     const error = new MissingRuntimeConfigError(
       `הפונקציה ${endpoint} לא סיפקה supabase_url ו-anon_key.`,
@@ -284,7 +469,8 @@ export async function loadRuntimeConfig(options = {}) {
     error.status = response.status;
     error.body = payload;
     error.endpoint = endpoint;
-    throw error;
+    error.bodyText = rawBodyText;
+    throw asError(error);
   }
 
   const normalized = {
@@ -301,12 +487,38 @@ export async function loadRuntimeConfig(options = {}) {
     accessToken,
     body: payload,
     bodyIsJson: typeof payload === 'object' && payload !== null,
+    endpoint,
+    bodyText: rawBodyText,
   });
 
   CACHE.set(cacheKey, normalized);
   if (scope === 'app') {
-    setRuntimeConfig(normalized);
+    await activateConfig(normalized, { source: normalized.source || 'api', orgId: null });
   }
 
   return normalized;
+}
+
+function hasPreloadedConfig(raw) {
+  if (!raw || typeof raw !== 'object') {
+    return false;
+  }
+  const supabaseUrl = raw.supabaseUrl || raw.supabase_url;
+  const supabaseAnonKey = raw.supabaseAnonKey || raw.supabase_anon_key || raw.anon_key;
+  return Boolean(
+    typeof supabaseUrl === 'string' && supabaseUrl.trim() &&
+    typeof supabaseAnonKey === 'string' && supabaseAnonKey.trim(),
+  );
+}
+
+if (typeof window !== 'undefined' && hasPreloadedConfig(window.__RUNTIME_CONFIG__)) {
+  (async () => {
+    try {
+      const preloaded = window.__RUNTIME_CONFIG__;
+      const orgId = preloaded.orgId ?? preloaded.org_id ?? null;
+      await activateConfig(preloaded, { source: preloaded.source || 'preload', orgId });
+    } catch (error) {
+      console.warn('failed to activate preloaded runtime config', error);
+    }
+  })();
 }

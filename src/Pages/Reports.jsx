@@ -8,7 +8,7 @@ import CombinedHoursCard from "@/components/dashboard/CombinedHoursCard.jsx";
 import { selectHourlyHours, selectMeetingHours, selectGlobalHours, selectLeaveDayValue } from "@/selectors.js";
 import { format, startOfMonth } from "date-fns";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { supabase } from "../supabaseClient";
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 
 import ReportsFilters from "../components/reports/ReportsFilters";
 import { parseDateStrict, toISODateString, isValidRange, isFullMonthRange } from '@/lib/date.js';
@@ -19,6 +19,8 @@ import PayrollSummary from "../components/reports/PayrollSummary";
 import ChartsOverview from "../components/reports/ChartsOverview";
 import { computePeriodTotals, createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
 import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, normalizeLeavePayPolicy, isLeaveEntryType } from '@/lib/leave.js';
+import { useOrg } from '@/org/OrgContext.jsx';
+import { fetchLeavePolicySettings, fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -47,6 +49,8 @@ export default function Reports() {
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
+  const { tenantClientReady, activeOrgHasConnection } = useOrg();
+  const { dataClient, authClient, user, loading } = useSupabase();
 
   const getRateForDate = (employeeId, date, serviceId = null) => {
     const employee = employees.find(e => e.id === employeeId);
@@ -155,14 +159,15 @@ export default function Reports() {
   }, [workSessions, employees, services, filters, leavePayPolicy]);
 
   useEffect(() => {
-    loadInitialData();
-  }, []);
-
-  useEffect(() => {
     applyFilters();
   }, [applyFilters]);
 
-  const loadInitialData = async () => {
+  const loadInitialData = useCallback(async () => {
+    if (!tenantClientReady || !activeOrgHasConnection || !dataClient) {
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     try {
       const [
@@ -174,13 +179,13 @@ export default function Reports() {
         leavePayPolicySettings,
         leaveData,
       ] = await Promise.all([
-        supabase.from('Employees').select('*').order('name'),
-        supabase.from('WorkSessions').select('*').eq('deleted', false),
-        supabase.from('Services').select('*'),
-        supabase.from('RateHistory').select('*'),
-        supabase.from('Settings').select('settings_value').eq('key', 'leave_policy').single(),
-        supabase.from('Settings').select('settings_value').eq('key', 'leave_pay_policy').single(),
-        supabase.from('LeaveBalances').select('*')
+        dataClient.from('Employees').select('*').order('name'),
+        dataClient.from('WorkSessions').select('*').eq('deleted', false),
+        dataClient.from('Services').select('*'),
+        dataClient.from('RateHistory').select('*'),
+        fetchLeavePolicySettings(dataClient),
+        fetchLeavePayPolicySettings(dataClient),
+        dataClient.from('LeaveBalances').select('*')
       ]);
 
       if (employeesData.error) throw employeesData.error;
@@ -196,24 +201,26 @@ export default function Reports() {
       setServices(filteredServices);
       setRateHistories(ratesData.data || []);
       setLeaveBalances(sortLeaveLedger(leaveData.data || []));
-      if (leavePolicySettings.error) {
-        if (leavePolicySettings.error.code !== 'PGRST116') throw leavePolicySettings.error;
-        setLeavePolicy(DEFAULT_LEAVE_POLICY);
-      } else {
-        setLeavePolicy(normalizeLeavePolicy(leavePolicySettings.data?.settings_value));
-      }
+      setLeavePolicy(
+        leavePolicySettings.value
+          ? normalizeLeavePolicy(leavePolicySettings.value)
+          : DEFAULT_LEAVE_POLICY,
+      );
 
-      if (leavePayPolicySettings.error) {
-        if (leavePayPolicySettings.error.code !== 'PGRST116') throw leavePayPolicySettings.error;
-        setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
-      } else {
-        setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicySettings.data?.settings_value));
-      }
+      setLeavePayPolicy(
+        leavePayPolicySettings.value
+          ? normalizeLeavePayPolicy(leavePayPolicySettings.value)
+          : DEFAULT_LEAVE_PAY_POLICY,
+      );
     } catch (error) {
       console.error("Error loading data:", error);
     }
     setIsLoading(false);
-  };
+  }, [tenantClientReady, activeOrgHasConnection, dataClient]);
+
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
 
   const getServiceName = (serviceId) => {
     const service = services.find(s => s.id === serviceId);
@@ -272,6 +279,30 @@ export default function Reports() {
   const hourlyHours = selectHourlyHours(workSessions, employees, baseFilters);
   const meetingHours = selectMeetingHours(workSessions, services, employees, baseFilters);
   const globalHours = selectGlobalHours(workSessions, employees, baseFilters);
+
+  if (loading || !authClient) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        טוען חיבור Supabase...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        יש להתחבר כדי להציג את הדוחות.
+      </div>
+    );
+  }
+
+  if (!dataClient) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        בחרו ארגון עם חיבור פעיל כדי להפיק דוחות.
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">

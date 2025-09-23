@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import ReactDOM from 'react-dom/client';
-import { getRuntimeConfigDiagnostics, setRuntimeConfig } from './config.js';
+import { activateConfig, getRuntimeConfigDiagnostics } from './config.js';
 
 const ACTION_SUGGESTIONS = {
   'network-failure': [
@@ -240,7 +240,7 @@ function ConfigErrorScreen({ error }) {
       return;
     }
     try {
-      setRuntimeConfig(lastConfig);
+      await activateConfig(lastConfig, { source: 'manual' });
       const { renderApp } = await import('../main.jsx');
       renderApp(lastConfig);
     } catch (launchError) {

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,9 +7,29 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
-import { supabase } from '@/supabaseClient.js';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { useAuth } from '@/auth/AuthContext.jsx';
+import {
+  activateConfig,
+  clearConfig,
+  loadRuntimeConfig,
+  getRuntimeConfigDiagnostics,
+  MissingRuntimeConfigError,
+} from '@/runtime/config.js';
+import { verifyOrgConnection } from '@/runtime/verification.js';
+import { fetchLeavePolicySettings } from '@/lib/settings-client.js';
+import { asError } from '@/lib/error-utils.js';
 import { mapSupabaseError } from '@/org/errors.js';
+import {
+  activateRuntimeOrg,
+  clearRuntimeOrg,
+  getRuntimeOrgOrThrow,
+  waitRuntimeOrgReady,
+  getRuntimeSupabase,
+  resetRuntimeSupabase,
+} from '@/runtime/org-gate.js';
 import {
   Building2,
   AlertCircle,
@@ -19,6 +39,30 @@ import {
   ShieldAlert,
   ShieldCheck,
 } from 'lucide-react';
+
+const INITIAL_CONNECTION_VALUES = {
+  supabase_url: '',
+  anon_key: '',
+  policy_links_text: '',
+  legal_contact_email: '',
+  legal_terms_url: '',
+  legal_privacy_url: '',
+};
+
+const INITIAL_CONNECTION_TEST = {
+  status: 'idle',
+  message: '',
+  diagnostics: null,
+  supabaseError: null,
+  completedAt: null,
+};
+
+const INITIAL_LEAVE_POLICY_STATUS = {
+  state: 'idle',
+  policy: null,
+  error: null,
+  fetchedAt: null,
+};
 
 const REQUIRED_TABLES = ['Employees', 'WorkSessions', 'LeaveBalances', 'RateHistory', 'Services', 'Settings'];
 
@@ -179,7 +223,7 @@ begin
       into existing_policies
     from pg_policies
     where schemaname = 'public'
-      and tablename = lower(table_name);
+      and lower(tablename) = lower(table_name);
 
     missing_policies := array(
       select policy_name
@@ -198,7 +242,10 @@ begin
         if array_position(missing_policies, required_policy_names[idx]) is not null then
           if required_commands[idx] = 'SELECT' then
             delta_sql := delta_sql || format(
-              'CREATE POLICY "%s" ON public."%s"%s  FOR SELECT TO authenticated%s  USING (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR SELECT TO authenticated%s  USING (true);%s',
+              required_policy_names[idx],
+              table_name,
+              E'\n',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -207,7 +254,10 @@ begin
             );
           elsif required_commands[idx] = 'INSERT' then
             delta_sql := delta_sql || format(
-              'CREATE POLICY "%s" ON public."%s"%s  FOR INSERT TO authenticated%s  WITH CHECK (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR INSERT TO authenticated%s  WITH CHECK (true);%s',
+              required_policy_names[idx],
+              table_name,
+              E'\n',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -216,7 +266,10 @@ begin
             );
           elsif required_commands[idx] = 'UPDATE' then
             delta_sql := delta_sql || format(
-              'CREATE POLICY "%s" ON public."%s"%s  FOR UPDATE TO authenticated%s  USING (true)%s  WITH CHECK (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR UPDATE TO authenticated%s  USING (true)%s  WITH CHECK (true);%s',
+              required_policy_names[idx],
+              table_name,
+              E'\n',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -226,7 +279,10 @@ begin
             );
           elsif required_commands[idx] = 'DELETE' then
             delta_sql := delta_sql || format(
-              'CREATE POLICY "%s" ON public."%s"%s  FOR DELETE TO authenticated%s  USING (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR DELETE TO authenticated%s  USING (true);%s',
+              required_policy_names[idx],
+              table_name,
+              E'\n',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -251,313 +307,146 @@ $$;
 grant execute on function public.setup_assistant_diagnostics() to authenticated;
 `;
 
+
 const RLS_SQL = `-- שלב 2: הפעלת RLS והוספת מדיניות מאובטחת
-alter table public."Employees" enable row level security;
+ALTER TABLE public."Employees" ENABLE ROW LEVEL SECURITY;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Employees'
-      and policyname = 'Authenticated select Employees'
-  ) then
-    create policy "Authenticated select Employees" on public."Employees"
-      for select to authenticated
-      using (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated select Employees" ON public."Employees";
+CREATE POLICY "Authenticated select Employees" ON public."Employees"
+  FOR SELECT TO authenticated
+  USING (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Employees'
-      and policyname = 'Authenticated insert Employees'
-  ) then
-    create policy "Authenticated insert Employees" on public."Employees"
-      for insert to authenticated
-      with check (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated insert Employees" ON public."Employees";
+CREATE POLICY "Authenticated insert Employees" ON public."Employees"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Employees'
-      and policyname = 'Authenticated update Employees'
-  ) then
-    create policy "Authenticated update Employees" on public."Employees"
-      for update to authenticated
-      using (true)
-      with check (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated update Employees" ON public."Employees";
+CREATE POLICY "Authenticated update Employees" ON public."Employees"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Employees'
-      and policyname = 'Authenticated delete Employees'
-  ) then
-    create policy "Authenticated delete Employees" on public."Employees"
-      for delete to authenticated
-      using (true);
-  end if;
-end;
-$$;
+DROP POLICY IF EXISTS "Authenticated delete Employees" ON public."Employees";
+CREATE POLICY "Authenticated delete Employees" ON public."Employees"
+  FOR DELETE TO authenticated
+  USING (true);
 
-alter table public."WorkSessions" enable row level security;
+ALTER TABLE public."WorkSessions" ENABLE ROW LEVEL SECURITY;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'WorkSessions'
-      and policyname = 'Authenticated select WorkSessions'
-  ) then
-    create policy "Authenticated select WorkSessions" on public."WorkSessions"
-      for select to authenticated
-      using (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated select WorkSessions" ON public."WorkSessions";
+CREATE POLICY "Authenticated select WorkSessions" ON public."WorkSessions"
+  FOR SELECT TO authenticated
+  USING (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'WorkSessions'
-      and policyname = 'Authenticated insert WorkSessions'
-  ) then
-    create policy "Authenticated insert WorkSessions" on public."WorkSessions"
-      for insert to authenticated
-      with check (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated insert WorkSessions" ON public."WorkSessions";
+CREATE POLICY "Authenticated insert WorkSessions" ON public."WorkSessions"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'WorkSessions'
-      and policyname = 'Authenticated update WorkSessions'
-  ) then
-    create policy "Authenticated update WorkSessions" on public."WorkSessions"
-      for update to authenticated
-      using (true)
-      with check (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated update WorkSessions" ON public."WorkSessions";
+CREATE POLICY "Authenticated update WorkSessions" ON public."WorkSessions"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'WorkSessions'
-      and policyname = 'Authenticated delete WorkSessions'
-  ) then
-    create policy "Authenticated delete WorkSessions" on public."WorkSessions"
-      for delete to authenticated
-      using (true);
-  end if;
-end;
-$$;
+DROP POLICY IF EXISTS "Authenticated delete WorkSessions" ON public."WorkSessions";
+CREATE POLICY "Authenticated delete WorkSessions" ON public."WorkSessions"
+  FOR DELETE TO authenticated
+  USING (true);
 
-alter table public."LeaveBalances" enable row level security;
+ALTER TABLE public."LeaveBalances" ENABLE ROW LEVEL SECURITY;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'LeaveBalances'
-      and policyname = 'Authenticated select LeaveBalances'
-  ) then
-    create policy "Authenticated select LeaveBalances" on public."LeaveBalances"
-      for select to authenticated
-      using (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated select LeaveBalances" ON public."LeaveBalances";
+CREATE POLICY "Authenticated select LeaveBalances" ON public."LeaveBalances"
+  FOR SELECT TO authenticated
+  USING (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'LeaveBalances'
-      and policyname = 'Authenticated insert LeaveBalances'
-  ) then
-    create policy "Authenticated insert LeaveBalances" on public."LeaveBalances"
-      for insert to authenticated
-      with check (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated insert LeaveBalances" ON public."LeaveBalances";
+CREATE POLICY "Authenticated insert LeaveBalances" ON public."LeaveBalances"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'LeaveBalances'
-      and policyname = 'Authenticated update LeaveBalances'
-  ) then
-    create policy "Authenticated update LeaveBalances" on public."LeaveBalances"
-      for update to authenticated
-      using (true)
-      with check (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated update LeaveBalances" ON public."LeaveBalances";
+CREATE POLICY "Authenticated update LeaveBalances" ON public."LeaveBalances"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'LeaveBalances'
-      and policyname = 'Authenticated delete LeaveBalances'
-  ) then
-    create policy "Authenticated delete LeaveBalances" on public."LeaveBalances"
-      for delete to authenticated
-      using (true);
-  end if;
-end;
-$$;
+DROP POLICY IF EXISTS "Authenticated delete LeaveBalances" ON public."LeaveBalances";
+CREATE POLICY "Authenticated delete LeaveBalances" ON public."LeaveBalances"
+  FOR DELETE TO authenticated
+  USING (true);
 
-alter table public."RateHistory" enable row level security;
+ALTER TABLE public."RateHistory" ENABLE ROW LEVEL SECURITY;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'RateHistory'
-      and policyname = 'Authenticated select RateHistory'
-  ) then
-    create policy "Authenticated select RateHistory" on public."RateHistory"
-      for select to authenticated
-      using (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated select RateHistory" ON public."RateHistory";
+CREATE POLICY "Authenticated select RateHistory" ON public."RateHistory"
+  FOR SELECT TO authenticated
+  USING (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'RateHistory'
-      and policyname = 'Authenticated insert RateHistory'
-  ) then
-    create policy "Authenticated insert RateHistory" on public."RateHistory"
-      for insert to authenticated
-      with check (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated insert RateHistory" ON public."RateHistory";
+CREATE POLICY "Authenticated insert RateHistory" ON public."RateHistory"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'RateHistory'
-      and policyname = 'Authenticated update RateHistory'
-  ) then
-    create policy "Authenticated update RateHistory" on public."RateHistory"
-      for update to authenticated
-      using (true)
-      with check (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated update RateHistory" ON public."RateHistory";
+CREATE POLICY "Authenticated update RateHistory" ON public."RateHistory"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'RateHistory'
-      and policyname = 'Authenticated delete RateHistory'
-  ) then
-    create policy "Authenticated delete RateHistory" on public."RateHistory"
-      for delete to authenticated
-      using (true);
-  end if;
-end;
-$$;
+DROP POLICY IF EXISTS "Authenticated delete RateHistory" ON public."RateHistory";
+CREATE POLICY "Authenticated delete RateHistory" ON public."RateHistory"
+  FOR DELETE TO authenticated
+  USING (true);
 
-alter table public."Services" enable row level security;
+ALTER TABLE public."Services" ENABLE ROW LEVEL SECURITY;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Services'
-      and policyname = 'Authenticated select Services'
-  ) then
-    create policy "Authenticated select Services" on public."Services"
-      for select to authenticated
-      using (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated select Services" ON public."Services";
+CREATE POLICY "Authenticated select Services" ON public."Services"
+  FOR SELECT TO authenticated
+  USING (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Services'
-      and policyname = 'Authenticated insert Services'
-  ) then
-    create policy "Authenticated insert Services" on public."Services"
-      for insert to authenticated
-      with check (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated insert Services" ON public."Services";
+CREATE POLICY "Authenticated insert Services" ON public."Services"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Services'
-      and policyname = 'Authenticated update Services'
-  ) then
-    create policy "Authenticated update Services" on public."Services"
-      for update to authenticated
-      using (true)
-      with check (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated update Services" ON public."Services";
+CREATE POLICY "Authenticated update Services" ON public."Services"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Services'
-      and policyname = 'Authenticated delete Services'
-  ) then
-    create policy "Authenticated delete Services" on public."Services"
-      for delete to authenticated
-      using (true);
-  end if;
-end;
-$$;
+DROP POLICY IF EXISTS "Authenticated delete Services" ON public."Services";
+CREATE POLICY "Authenticated delete Services" ON public."Services"
+  FOR DELETE TO authenticated
+  USING (true);
 
-alter table public."Settings" enable row level security;
+ALTER TABLE public."Settings" ENABLE ROW LEVEL SECURITY;
 
-do $$
-begin
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Settings'
-      and policyname = 'Authenticated select Settings'
-  ) then
-    create policy "Authenticated select Settings" on public."Settings"
-      for select to authenticated
-      using (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated select Settings" ON public."Settings";
+CREATE POLICY "Authenticated select Settings" ON public."Settings"
+  FOR SELECT TO authenticated
+  USING (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Settings'
-      and policyname = 'Authenticated insert Settings'
-  ) then
-    create policy "Authenticated insert Settings" on public."Settings"
-      for insert to authenticated
-      with check (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated insert Settings" ON public."Settings";
+CREATE POLICY "Authenticated insert Settings" ON public."Settings"
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Settings'
-      and policyname = 'Authenticated update Settings'
-  ) then
-    create policy "Authenticated update Settings" on public."Settings"
-      for update to authenticated
-      using (true)
-      with check (true);
-  end if;
+DROP POLICY IF EXISTS "Authenticated update Settings" ON public."Settings";
+CREATE POLICY "Authenticated update Settings" ON public."Settings"
+  FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
 
-  if not exists (
-    select 1 from pg_policies
-    where schemaname = 'public'
-      and tablename = 'Settings'
-      and policyname = 'Authenticated delete Settings'
-  ) then
-    create policy "Authenticated delete Settings" on public."Settings"
-      for delete to authenticated
-      using (true);
-  end if;
-end;
-$$;
-`
+DROP POLICY IF EXISTS "Authenticated delete Settings" ON public."Settings";
+CREATE POLICY "Authenticated delete Settings" ON public."Settings"
+  FOR DELETE TO authenticated
+  USING (true);`;
+
 function formatDateTime(isoString) {
   if (!isoString) return '';
   try {
@@ -569,6 +458,180 @@ function formatDateTime(isoString) {
     console.error('Failed to format datetime', error);
     return '';
   }
+}
+
+function formatDiagnosticsTimestamp(timestamp) {
+  if (!timestamp) return '';
+  try {
+    const iso = new Date(timestamp).toISOString();
+    return formatDateTime(iso);
+  } catch (error) {
+    console.error('Failed to format diagnostics timestamp', error);
+    return '';
+  }
+}
+
+function maskDiagnosticsPayload(payload) {
+  if (Array.isArray(payload)) {
+    return payload.map((item) => maskDiagnosticsPayload(item));
+  }
+
+  if (payload && typeof payload === 'object') {
+    const next = {};
+    for (const [key, value] of Object.entries(payload)) {
+      if (value && typeof value === 'object') {
+        next[key] = maskDiagnosticsPayload(value);
+        continue;
+      }
+      if (typeof value === 'string') {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey.includes('key')) {
+          next[key] = maskSupabaseCredential(value);
+          continue;
+        }
+      }
+      next[key] = value;
+    }
+    return next;
+  }
+
+  return payload;
+}
+
+function maskDiagnosticsText(text) {
+  if (typeof text !== 'string' || !text) {
+    return '';
+  }
+  return text.replace(/[A-Za-z0-9-_]{24,}/g, (match) => maskSupabaseCredential(match));
+}
+
+function interpretDiagnostics(diagnostics) {
+  if (!diagnostics || !diagnostics.error) {
+    return null;
+  }
+
+  const { error, scope, status } = diagnostics;
+  const suggestions = [];
+  let message = null;
+
+  switch (error) {
+    case 'network-failure':
+      message = 'לא ניתן ליצור קשר עם פונקציית ה-API של הארגון.';
+      suggestions.push('ודא שהפונקציה פרוסה ופועלת בסביבת Azure Functions.');
+      suggestions.push('בדוק שאין חסימה על ידי חומת אש או פרוקסי ארגוני.');
+      break;
+    case 'missing-org':
+      message = 'לא נבחר ארגון פעיל עבור הבקשה.';
+      suggestions.push('בחר מחדש ארגון פעיל ונסה שוב.');
+      break;
+    case 'missing-token':
+      message = 'בקשת המפתחות לא כללה אסימון זיהוי.';
+      suggestions.push('התחבר מחדש כדי לרענן את אסימון ה-Supabase.');
+      break;
+    case 'response-not-json':
+      message = 'הפונקציה החזירה תשובה שאינה JSON.';
+      suggestions.push('ודא ש-Content-Type מוגדר ל-application/json ושנעשה שימוש ב-json() בצד השרת.');
+      break;
+    case 'invalid-json':
+      message = 'התגובה מהפונקציה לא ניתנת לפענוח כ-JSON תקין.';
+      suggestions.push('בדוק שהתגובה אינה מכילה הערות או תוכן נוסף מעבר ל-JSON.');
+      break;
+    case 'missing-keys':
+      message = 'התגובה לא הכילה supabase_url ו-anon_key.';
+      suggestions.push('ודא שטבלת org_settings מכילה את פרטי החיבור והפונקציה מחזירה אותם.');
+      break;
+    default: {
+      const normalized = typeof error === 'string' ? error.toLowerCase() : '';
+      if (normalized.includes('missing bearer')) {
+        message = 'הפונקציה סירבה לבקשה ללא כותרת Authorization.';
+        suggestions.push('ודא שהמשתמש מחובר ושהפונקציה קוראת את הכותרת x-supabase-authorization.');
+      } else if (normalized.includes('org not found') || normalized.includes('no access')) {
+        message = 'הפונקציה לא מצאה את הארגון או שאין למשתמש הרשאה.';
+        suggestions.push('בדוק שהמשתמש משויך לארגון ב-Supabase ושלטבלת org_memberships יש את הרשומות הנכונות.');
+      } else {
+        message = typeof error === 'string' ? error : null;
+      }
+      break;
+    }
+  }
+
+  if (!message) {
+    message = 'אירעה שגיאה בטעינת הגדרות הארגון.';
+  }
+
+  if (status && scope === 'org' && (status === 401 || status === 403)) {
+    suggestions.push('ודא שהמפתח הציבורי של הארגון מעודכן והמשתמש בעל הרשאות לקרוא את הנתונים.');
+  }
+
+  return { message, suggestions };
+}
+
+function extractErrorStatus(error) {
+  if (!error) {
+    return null;
+  }
+  if (typeof error.status === 'number') {
+    return error.status;
+  }
+  if (typeof error.statusCode === 'number') {
+    return error.statusCode;
+  }
+  if (typeof error.status === 'string') {
+    const parsed = Number(error.status);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  if (typeof error.statusCode === 'string') {
+    const parsed = Number(error.statusCode);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function describeVerificationError(error) {
+  const status = extractErrorStatus(error);
+  const code = typeof error?.code === 'string' ? error.code.trim() : '';
+  const rawMessage = typeof error?.message === 'string' ? error.message.trim() : '';
+  const normalizedMessage = rawMessage.toLowerCase();
+
+  if (status === 404 || code === 'PGRST301' || normalizedMessage.includes('setup_assistant_diagnostics')) {
+    return 'פונקציית setup_assistant_diagnostics לא נמצאה או שאינה זמינה. ודא שהרצת את בלוק הסכימה בסביבת Supabase.';
+  }
+  if (status === 401) {
+    return 'אסימון Supabase חסר או פג תוקף (401). התחבר מחדש ונסה שוב.';
+  }
+  if (status === 403) {
+    return 'למשתמש אין הרשאה להריץ את בדיקת האימות (403). בדוק שהמשתמש משויך לארגון.';
+  }
+  if (status && status >= 500) {
+    return `שרת Supabase החזיר שגיאה בעת הרצת האימות (סטטוס ${status}).`;
+  }
+  if (rawMessage) {
+    return rawMessage;
+  }
+  return 'בדיקת האימות נכשלה. נסה שוב או פנה לתמיכה.';
+}
+
+function collectVerificationDetails(error, summary) {
+  const status = extractErrorStatus(error);
+  const code = typeof error?.code === 'string' && error.code.trim() ? error.code.trim() : null;
+  const details = [];
+
+  const rawMessage = typeof error?.message === 'string' ? error.message.trim() : '';
+  if (rawMessage && rawMessage !== summary) {
+    details.push(rawMessage);
+  }
+  if (typeof error?.details === 'string' && error.details.trim()) {
+    details.push(error.details.trim());
+  }
+  if (typeof error?.hint === 'string' && error.hint.trim()) {
+    details.push(error.hint.trim());
+  }
+
+  return { status, code, details };
 }
 
 function CopyButton({ text, ariaLabel }) {
@@ -655,33 +718,29 @@ export default function SetupAssistant() {
     recordVerification,
     createOrganization,
   } = useOrg();
-  const [connection, setConnection] = useState({
-    supabase_url: '',
-    anon_key: '',
-    policy_links_text: '',
-    legal_contact_email: '',
-    legal_terms_url: '',
-    legal_privacy_url: '',
-  });
-  const [originalConnection, setOriginalConnection] = useState({
-    supabase_url: '',
-    anon_key: '',
-    policy_links_text: '',
-    legal_contact_email: '',
-    legal_terms_url: '',
-    legal_privacy_url: '',
-  });
+  const { session } = useAuth();
+  const { authClient, dataClient, user, loading } = useSupabase();
+  const supabaseReady = !loading && Boolean(authClient) && Boolean(user);
+  const [connection, setConnection] = useState({ ...INITIAL_CONNECTION_VALUES });
+  const [originalConnection, setOriginalConnection] = useState({ ...INITIAL_CONNECTION_VALUES });
   const [isSavingConnection, setIsSavingConnection] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [verificationStatus, setVerificationStatus] = useState(activeOrg?.setup_completed ? 'success' : 'idle');
+  const [configStatus, setConfigStatus] = useState('idle');
   const [verifyResults, setVerifyResults] = useState([]);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState('');
+  const [verifyErrorInfo, setVerifyErrorInfo] = useState(null);
   const [lastVerifiedAt, setLastVerifiedAt] = useState(activeOrg?.verified_at || null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [newOrgName, setNewOrgName] = useState('');
   const [createOrgError, setCreateOrgError] = useState('');
   const [isCreatingOrg, setIsCreatingOrg] = useState(false);
+  const [connectionTest, setConnectionTest] = useState(INITIAL_CONNECTION_TEST);
+  const [leavePolicyStatus, setLeavePolicyStatus] = useState(INITIAL_LEAVE_POLICY_STATUS);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const clearedRuntimeConfigRef = useRef(false);
+  const activeOrgId = activeOrg?.id || null;
 
   const handleOpenCreateDialog = () => {
     setCreateOrgError('');
@@ -758,19 +817,21 @@ export default function SetupAssistant() {
 
   useEffect(() => {
     if (!activeOrg) {
-      const reset = {
-        supabase_url: '',
-        anon_key: '',
-        policy_links_text: '',
-        legal_contact_email: '',
-        legal_terms_url: '',
-        legal_privacy_url: '',
-      };
-      setConnection(reset);
-      setOriginalConnection(reset);
+      resetRuntimeSupabase();
+      clearConfig();
+      clearRuntimeOrg();
+      setConnection({ ...INITIAL_CONNECTION_VALUES });
+      setOriginalConnection({ ...INITIAL_CONNECTION_VALUES });
       setLastSavedAt(null);
       setVerificationStatus('idle');
       setLastVerifiedAt(null);
+      setConnectionTest(INITIAL_CONNECTION_TEST);
+      setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
+      setVerifyResults([]);
+      setVerifyError('');
+      setVerifyErrorInfo(null);
+      setConfigStatus('idle');
+      clearedRuntimeConfigRef.current = false;
       return;
     }
 
@@ -824,6 +885,12 @@ export default function SetupAssistant() {
       setVerificationStatus('idle');
       setLastVerifiedAt(activeOrg.verified_at || null);
     }
+    setConnectionTest(INITIAL_CONNECTION_TEST);
+    setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
+    setVerifyResults([]);
+    setVerifyError('');
+    setVerifyErrorInfo(null);
+    clearedRuntimeConfigRef.current = false;
   }, [activeOrg, activeOrgConnection]);
 
   const hasUnsavedChanges = useMemo(() => {
@@ -837,16 +904,207 @@ export default function SetupAssistant() {
     );
   }, [connection, originalConnection]);
 
+  useEffect(() => {
+    if (!hasUnsavedChanges) {
+      clearedRuntimeConfigRef.current = false;
+    }
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    if (!activeOrg) {
+      return;
+    }
+    if (!hasSavedConnection) {
+      setConfigStatus('idle');
+      return;
+    }
+    if (hasUnsavedChanges) {
+      return;
+    }
+
+    const supabaseUrl = originalConnection.supabase_url?.trim();
+    const supabaseAnonKey = originalConnection.anon_key?.trim();
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      setConfigStatus('cleared');
+      return;
+    }
+
+    let cancelled = false;
+
+    const applyConfig = async () => {
+      setConfigStatus('activating');
+      try {
+        await activateConfig(
+          { supabaseUrl, supabaseAnonKey },
+          { source: 'org-api', orgId: activeOrg.id },
+        );
+        activateRuntimeOrg({ orgId: activeOrg.id, supabaseUrl, supabaseAnonKey });
+        await waitRuntimeOrgReady();
+        if (!cancelled) {
+          setConfigStatus('activated');
+        }
+      } catch (error) {
+        console.error('Failed to activate connection while syncing setup assistant', error);
+        clearRuntimeOrg();
+        if (!cancelled) {
+          setConfigStatus('cleared');
+        }
+      }
+    };
+
+    applyConfig();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrg, hasSavedConnection, hasUnsavedChanges, originalConnection.supabase_url, originalConnection.anon_key]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!activeOrgId || configStatus !== 'activated') {
+      setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setLeavePolicyStatus((prev) => ({
+      state: 'loading',
+      policy: prev.policy,
+      error: null,
+      fetchedAt: prev.fetchedAt,
+    }));
+
+    const loadLeavePolicyStatus = async () => {
+      try {
+        const runtimeSupabase = await getRuntimeSupabase();
+        if (cancelled) {
+          return;
+        }
+        const { value } = await fetchLeavePolicySettings(runtimeSupabase);
+        if (cancelled) {
+          return;
+        }
+        setLeavePolicyStatus({
+          state: value ? 'configured' : 'missing',
+          policy: value,
+          error: null,
+          fetchedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setLeavePolicyStatus({
+          state: 'error',
+          policy: null,
+          error: asError(error),
+          fetchedAt: new Date().toISOString(),
+        });
+      }
+    };
+
+    loadLeavePolicyStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrgId, configStatus]);
+
   const hasConnectionValues = Boolean(connection.supabase_url.trim() && connection.anon_key.trim());
   const hasSavedConnection = Boolean(
     activeOrgHasConnection
     && originalConnection.supabase_url
     && originalConnection.anon_key
   );
+  const orgSelected = useMemo(() => {
+    if (!activeOrg || configStatus !== 'activated') {
+      return false;
+    }
+    try {
+      const org = getRuntimeOrgOrThrow();
+      return Boolean(org?.orgId && org.orgId === activeOrg.id);
+    } catch {
+      return false;
+    }
+  }, [activeOrg, configStatus]);
 
   const handleConnectionChange = (field) => (event) => {
     const value = event.target.value;
     setConnection((prev) => ({ ...prev, [field]: value }));
+
+    if (clearedRuntimeConfigRef.current) {
+      return;
+    }
+
+    const isSensitiveField = field === 'supabase_url' || field === 'anon_key';
+    if (!isSensitiveField) {
+      return;
+    }
+
+    const originalValue = originalConnection[field] || '';
+    const nextValue = typeof value === 'string' ? value : '';
+
+    if (nextValue === originalValue) {
+      return;
+    }
+
+    resetRuntimeSupabase();
+    clearConfig();
+    clearRuntimeOrg();
+    setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
+    clearedRuntimeConfigRef.current = true;
+    setConfigStatus('cleared');
+  };
+
+  const resolveAccessToken = async () => {
+    if (session?.access_token) {
+      return session.access_token;
+    }
+    if (!authClient) {
+      return null;
+    }
+    try {
+      const { data, error } = await authClient.auth.getSession();
+      if (error) throw error;
+      return data?.session?.access_token || null;
+    } catch (error) {
+      console.error('Failed to resolve access token for connection test', error);
+      return null;
+    }
+  };
+
+  const extractSupabaseError = (error) => {
+    if (!error || typeof error !== 'object') {
+      return null;
+    }
+
+    const message = typeof error.message === 'string' ? error.message : '';
+    const code = typeof error.code === 'string' ? error.code : null;
+    const hint = typeof error.hint === 'string' ? error.hint : null;
+    const rawDetails = error.details;
+    const details = Array.isArray(rawDetails)
+      ? rawDetails.map((detail) => String(detail)).filter(Boolean)
+      : typeof rawDetails === 'string'
+        ? rawDetails.trim()
+          ? [rawDetails.trim()]
+          : []
+        : rawDetails && typeof rawDetails === 'object'
+          ? [JSON.stringify(rawDetails)]
+          : [];
+
+    if (!message && !code && !hint && details.length === 0) {
+      return null;
+    }
+
+    return {
+      message,
+      code,
+      hint,
+      details,
+    };
   };
 
   const handleSaveConnection = async (event) => {
@@ -875,13 +1133,129 @@ export default function SetupAssistant() {
       });
 
       setOriginalConnection({ ...connection });
+      clearedRuntimeConfigRef.current = false;
       setLastSavedAt(now);
+      setConnectionTest(INITIAL_CONNECTION_TEST);
+      setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
       toast.success('חיבור ה-Supabase נשמר בהצלחה.');
     } catch (error) {
       console.error('Failed to save Supabase connection details', error);
       toast.error('שמירת פרטי החיבור נכשלה. בדוק את ההרשאות ונסה שוב.');
     } finally {
       setIsSavingConnection(false);
+    }
+  };
+
+  const handleTestConnection = async () => {
+    if (!activeOrg || isTestingConnection) return;
+    if (!authClient) {
+      toast.error('חיבור Supabase עדיין נטען. נסו שוב בעוד רגע.');
+      return;
+    }
+    if (hasUnsavedChanges) {
+      toast.error('שמור את פרטי החיבור לפני בדיקת הקישוריות.');
+      return;
+    }
+
+    setIsTestingConnection(true);
+    setConnectionTest({ ...INITIAL_CONNECTION_TEST, status: 'running' });
+    setLeavePolicyStatus({
+      state: 'loading',
+      policy: null,
+      error: null,
+      fetchedAt: null,
+    });
+
+    try {
+      const accessToken = await resolveAccessToken();
+
+      if (!accessToken) {
+        throw new MissingRuntimeConfigError('לא אותר אסימון כניסה. התחבר מחדש ונסה שוב.');
+      }
+
+      const config = await loadRuntimeConfig({ accessToken, orgId: activeOrg.id, force: true });
+      resetRuntimeSupabase();
+      setConfigStatus('activating');
+      await activateConfig(
+        {
+          supabaseUrl: config.supabaseUrl,
+          supabaseAnonKey: config.supabaseAnonKey,
+        },
+        { source: config?.source || 'org-api', orgId: activeOrg.id },
+      );
+      activateRuntimeOrg({
+        orgId: activeOrg.id,
+        supabaseUrl: config.supabaseUrl,
+        supabaseAnonKey: config.supabaseAnonKey,
+      });
+      await waitRuntimeOrgReady();
+      setConfigStatus('activated');
+      if (!dataClient) {
+        throw new Error('Supabase client is unavailable for verification.');
+      }
+      const verification = await verifyOrgConnection(dataClient);
+      const diagnostics = getRuntimeConfigDiagnostics();
+      const leavePolicyValue = verification?.settingsValue ?? null;
+      const policyState = leavePolicyValue ? 'configured' : 'missing';
+      const now = new Date().toISOString();
+
+      setLeavePolicyStatus({
+        state: policyState,
+        policy: leavePolicyValue,
+        error: null,
+        fetchedAt: now,
+      });
+
+      setConnectionTest({
+        status: 'success',
+        message:
+          policyState === 'configured'
+            ? 'חיבור Supabase אומת בהצלחה ונמצאה מדיניות leave_policy פעילה בטבלת Settings.'
+            : 'חיבור Supabase אומת בהצלחה. טבלת Settings נגישה אך leave_policy טרם הוגדרה – ניתן להמשיך עם ברירות המחדל עד שתגדירו מדיניות.',
+        diagnostics,
+        supabaseError: null,
+        completedAt: now,
+      });
+      toast.success('חיבור הארגון אומת בהצלחה.');
+    } catch (error) {
+      console.error('Setup assistant connection test failed', error);
+      const diagnostics = getRuntimeConfigDiagnostics();
+      const interpretation = interpretDiagnostics(diagnostics);
+      const supabaseErrorInfo = extractSupabaseError(error);
+      const defaultMessage = error instanceof MissingRuntimeConfigError
+        ? error.message
+        : supabaseErrorInfo?.message
+          || (typeof error?.message === 'string' && error.message.trim()
+            ? error.message
+            : 'בדיקת החיבור נכשלה. ודא שהפונקציה /api/org/{orgId}/keys זמינה ומחזירה JSON תקין.');
+      const message = interpretation?.message || defaultMessage;
+
+      setConnectionTest({
+        status: 'error',
+        message,
+        diagnostics,
+        supabaseError: supabaseErrorInfo,
+        completedAt: new Date().toISOString(),
+      });
+      setLeavePolicyStatus({
+        state: 'error',
+        policy: null,
+        error: asError(error),
+        fetchedAt: new Date().toISOString(),
+      });
+      toast.error(message);
+      clearRuntimeOrg();
+      setConfigStatus('cleared');
+
+      if (error?.status === 401 && authClient) {
+        try {
+          await authClient.auth.refreshSession();
+        } catch (refreshError) {
+          console.error('Failed to refresh session after connection test error', refreshError);
+        }
+      }
+    } finally {
+      setIsTestingConnection(false);
     }
   };
 
@@ -908,13 +1282,47 @@ export default function SetupAssistant() {
       toast.error('קודם שמור את כתובת ה-URL והמפתח לפני הרצת האימות.');
       return;
     }
+    if (!orgSelected) {
+      toast.error('בחר ארגון פעיל לפני הרצת האימות.');
+      return;
+    }
+    if (!supabaseReady) {
+      toast.error('חיבור Supabase עדיין נטען. נסו שוב בעוד רגע.');
+      return;
+    }
     setIsVerifying(true);
     setVerifyError('');
+    setVerifyErrorInfo(null);
     setVerifyResults([]);
     setVerificationStatus('running');
 
     try {
-      const { data, error } = await supabase.rpc('setup_assistant_diagnostics');
+      if (configStatus !== 'activated') {
+        throw new MissingRuntimeConfigError('לא נבחר ארגון פעיל או שהחיבור שלו טרם הוגדר.');
+      }
+
+      let runtimeOrg = null;
+      try {
+        runtimeOrg = getRuntimeOrgOrThrow();
+      } catch {
+        runtimeOrg = null;
+      }
+
+      if (!runtimeOrg || runtimeOrg.orgId !== activeOrg.id) {
+        await waitRuntimeOrgReady();
+        try {
+          runtimeOrg = getRuntimeOrgOrThrow();
+        } catch {
+          runtimeOrg = null;
+        }
+      }
+
+      if (!runtimeOrg || runtimeOrg.orgId !== activeOrg.id) {
+        throw new MissingRuntimeConfigError('לא נבחר ארגון פעיל או שהחיבור שלו טרם הוגדר.');
+      }
+
+      const runtimeSupabase = await getRuntimeSupabase();
+      const { data, error } = await runtimeSupabase.rpc('setup_assistant_diagnostics');
 
       if (error) {
         throw error;
@@ -946,15 +1354,205 @@ export default function SetupAssistant() {
     } catch (error) {
       console.error('Verification failed', error);
       setVerificationStatus('error');
-      if (error?.message?.includes('setup_assistant_diagnostics')) {
-        setVerifyError('לא נמצאה פונקציית האימות. ודא שהרצת את בלוק הסכימה ונסה שוב.');
-      } else {
-        setVerifyError('בדיקת האימות נכשלה. נסה שוב או פנה לתמיכה.');
-      }
-      toast.error('בדיקת האימות נכשלה.');
+      const summary = describeVerificationError(error);
+      const details = collectVerificationDetails(error, summary);
+      setVerifyError(summary);
+      setVerifyErrorInfo(details);
+      toast.error(summary);
     } finally {
       setIsVerifying(false);
     }
+  };
+
+  const renderConnectionTestFeedback = () => {
+    if (connectionTest.status === 'idle') {
+      return null;
+    }
+
+    if (connectionTest.status === 'running') {
+      return (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 text-blue-700 text-sm p-3 flex items-start gap-2">
+          <Loader2 className="w-4 h-4 mt-0.5 animate-spin" aria-hidden="true" />
+          <span>בודק את החיבור השמור מול פונקציית ה-API של הארגון...</span>
+        </div>
+      );
+    }
+
+    if (connectionTest.status === 'success') {
+      return (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm p-3 flex items-start gap-2">
+          <CheckCircle2 className="w-4 h-4 mt-0.5" aria-hidden="true" />
+          <div className="space-y-1">
+            <span>{connectionTest.message || 'חיבור Supabase אומת בהצלחה.'}</span>
+            {connectionTest.completedAt ? (
+              <span className="block text-xs text-emerald-600">
+                בוצע: {formatDateTime(connectionTest.completedAt)}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+
+    if (connectionTest.status === 'error') {
+      return (
+        <div className="rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm p-3 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 mt-0.5" aria-hidden="true" />
+          <div className="space-y-1">
+            <span>{connectionTest.message || 'בדיקת החיבור נכשלה.'}</span>
+            {connectionTest.completedAt ? (
+              <span className="block text-xs text-red-600">
+                בוצע: {formatDateTime(connectionTest.completedAt)}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  const renderConnectionDiagnostics = () => {
+    if (!connectionTest.diagnostics || connectionTest.status === 'running') {
+      return null;
+    }
+
+    const diagnostics = connectionTest.diagnostics;
+    const rows = [
+      { label: 'סטטוס HTTP', value: diagnostics.status ?? '—' },
+      { label: 'טווח', value: diagnostics.scope === 'org' ? 'ארגון' : 'אפליקציה' },
+      ...(diagnostics.endpoint ? [{ label: 'מסלול', value: diagnostics.endpoint }] : []),
+      { label: 'מזהה ארגון', value: diagnostics.orgId || '—' },
+      { label: 'אסימון', value: diagnostics.accessTokenPreview || '—' },
+      { label: 'מצב', value: diagnostics.ok ? 'הצלחה' : 'שגיאה' },
+      { label: 'זמן', value: formatDiagnosticsTimestamp(diagnostics.timestamp) || '—' },
+    ];
+
+    const interpretation = interpretDiagnostics(diagnostics);
+    const supabaseError = connectionTest.supabaseError;
+    const rawBodyText = typeof diagnostics.bodyText === 'string' ? diagnostics.bodyText : '';
+    const hasRawBodyText = Boolean(rawBodyText.trim());
+    const shouldShowRawError = diagnostics.error
+      && (!interpretation || (interpretation && interpretation.message !== diagnostics.error));
+
+    return (
+      <div className="rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-600 p-3 space-y-2">
+        <div className="flex flex-wrap gap-4">
+          {rows.map((row) => (
+            <div key={row.label} className="flex gap-1">
+              <span className="font-medium">{row.label}:</span>
+              <span>{row.value}</span>
+            </div>
+          ))}
+        </div>
+        {interpretation ? (
+          <div className="space-y-2">
+            <p className="text-sm text-slate-700 font-medium">פענוח השגיאה</p>
+            <p className="text-xs sm:text-sm text-slate-600">{interpretation.message}</p>
+            {interpretation.suggestions.length ? (
+              <ul className="list-disc pr-4 text-xs text-slate-500 space-y-1">
+                {interpretation.suggestions.map((suggestion, index) => (
+                  <li key={`${suggestion}-${index}`}>{suggestion}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+        {supabaseError ? (
+          <div className="space-y-2">
+            <p className="text-sm text-slate-700 font-medium">שגיאת Supabase</p>
+            {supabaseError.message ? (
+              <p className="text-xs sm:text-sm text-slate-600">{supabaseError.message}</p>
+            ) : null}
+            {(supabaseError.code || supabaseError.hint) ? (
+              <div className="flex flex-wrap gap-4">
+                {supabaseError.code ? (
+                  <div className="flex gap-1">
+                    <span className="font-medium">קוד:</span>
+                    <span>{supabaseError.code}</span>
+                  </div>
+                ) : null}
+                {supabaseError.hint ? (
+                  <div className="flex gap-1">
+                    <span className="font-medium">רמז:</span>
+                    <span>{supabaseError.hint}</span>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {Array.isArray(supabaseError.details) && supabaseError.details.length ? (
+              <ul className="list-disc pr-4 text-xs text-slate-500 space-y-1">
+                {supabaseError.details.map((detail, index) => (
+                  <li key={`${detail}-${index}`}>{detail}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+        {shouldShowRawError ? (
+          <p className="text-red-600">הודעת שרת: {diagnostics.error}</p>
+        ) : null}
+        {diagnostics.body && diagnostics.bodyIsJson ? (
+          <pre
+            dir="ltr"
+            className="bg-white border border-slate-200 rounded-lg p-3 text-[11px] leading-relaxed overflow-x-auto text-slate-700"
+          >
+            {JSON.stringify(maskDiagnosticsPayload(diagnostics.body), null, 2)}
+          </pre>
+        ) : null}
+        {hasRawBodyText && !diagnostics.bodyIsJson ? (
+          <pre
+            dir="ltr"
+            className="bg-white border border-slate-200 rounded-lg p-3 text-[11px] leading-relaxed overflow-x-auto text-slate-700"
+          >
+            {maskDiagnosticsText(rawBodyText)}
+          </pre>
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderLeavePolicyStatusNotice = () => {
+    if (leavePolicyStatus.state === 'idle') {
+      return null;
+    }
+
+    if (leavePolicyStatus.state === 'loading') {
+      return (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-600 p-3 flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+          <span>טוען את סטטוס leave_policy מטבלת Settings...</span>
+        </div>
+      );
+    }
+
+    if (leavePolicyStatus.state === 'configured') {
+      return (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-xs text-emerald-700 p-3">
+          נמצאה מדיניות leave_policy בטבלת Settings. ניתן לערוך אותה במסך ההגדרות לאחר סיום האשף.
+        </div>
+      );
+    }
+
+    if (leavePolicyStatus.state === 'missing') {
+      return (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 text-xs text-amber-700 p-3">
+          טבלת Settings נגישה אך אינה מכילה ערך leave_policy. האפליקציה תשתמש בערכי ברירת המחדל עד שתשמרו מדיניות במסך ההגדרות.
+        </div>
+      );
+    }
+
+    if (leavePolicyStatus.state === 'error') {
+      const message = leavePolicyStatus.error?.message || 'שגיאה בקריאת leave_policy.';
+      return (
+        <div className="rounded-xl border border-red-200 bg-red-50 text-xs text-red-700 p-3">
+          <span>שגיאה בטעינת leave_policy: {message}</span>
+        </div>
+      );
+    }
+
+    return null;
   };
 
   const renderConnectionStatusBadge = () => {
@@ -1187,8 +1785,36 @@ export default function SetupAssistant() {
                   ) : null}
                   {isSavingConnection ? 'שומר...' : 'שמור חיבור'}
                 </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleTestConnection}
+                  disabled={
+                    !activeOrg
+                    || isTestingConnection
+                    || hasUnsavedChanges
+                    || !hasConnectionValues
+                    || !supabaseReady
+                  }
+                  className="gap-2"
+                >
+                  {isTestingConnection ? (
+                    <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <ShieldCheck className="w-4 h-4" aria-hidden="true" />
+                  )}
+                  {isTestingConnection ? 'מריץ בדיקה...' : 'בדוק חיבור שמור'}
+                </Button>
               </div>
             </div>
+            {hasUnsavedChanges ? (
+              <p className="text-xs text-amber-600">
+                שמור את השינויים לפני בדיקת החיבור.
+              </p>
+            ) : null}
+            {renderConnectionTestFeedback()}
+            {renderConnectionDiagnostics()}
+            {renderLeavePolicyStatusNotice()}
           </form>
         </StepSection>
 
@@ -1201,7 +1827,7 @@ export default function SetupAssistant() {
             <CodeBlock title="בלוק סכימה מלא" code={SCHEMA_SQL} ariaLabel="העתק את בלוק הסכימה" />
             <CodeBlock title="בלוק RLS ומדיניות" code={RLS_SQL} ariaLabel="העתק את בלוק ה-RLS" />
             <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
-              לאחר הרצת שני הבלוקים, עבור לשלב האימות כדי לוודא שהטבלאות, המדיניות ופונקציית הבדיקה קיימות. ניתן להפעיל את ה-SQL כמה פעמים – כל הפקודות ממוסגרות עם IF NOT EXISTS כדי למנוע שגיאות כפולות.
+              לאחר הרצת שני הבלוקים, עבור לשלב האימות כדי לוודא שהטבלאות, המדיניות ופונקציית הבדיקה קיימות. ניתן להפעיל את ה-SQL כמה פעמים – כל המדיניות נמחקות עם DROP POLICY IF EXISTS לפני יצירתן מחדש כדי לאפס תצורות שגויות ללא שגיאות כפולות.
             </p>
           </div>
         </StepSection>
@@ -1224,7 +1850,14 @@ export default function SetupAssistant() {
                 <Button
                   type="button"
                   onClick={handleVerify}
-                  disabled={isVerifying || !hasSavedConnection}
+                  disabled={
+                    isVerifying ||
+                    !hasSavedConnection ||
+                    !orgSelected ||
+                    hasUnsavedChanges ||
+                    configStatus !== 'activated' ||
+                    !supabaseReady
+                  }
                   className="gap-2"
                 >
                   {isVerifying ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}
@@ -1233,10 +1866,31 @@ export default function SetupAssistant() {
               </div>
             </div>
 
+            {hasUnsavedChanges ? (
+              <p className="text-xs text-amber-600">
+                שמור את פרטי החיבור לפני הרצת האימות.
+              </p>
+            ) : null}
+
             {verifyError ? (
               <div className="rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm p-3 flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 mt-0.5" aria-hidden="true" />
-                <span>{verifyError}</span>
+                <div className="space-y-2">
+                  <span className="block">{verifyError}</span>
+                  {verifyErrorInfo ? (
+                    <ul className="list-disc pr-4 text-xs text-red-600 space-y-1">
+                      {verifyErrorInfo.status !== null && verifyErrorInfo.status !== undefined ? (
+                        <li>סטטוס HTTP: {verifyErrorInfo.status}</li>
+                      ) : null}
+                      {verifyErrorInfo.code ? <li>קוד Supabase: {verifyErrorInfo.code}</li> : null}
+                      {Array.isArray(verifyErrorInfo.details)
+                        ? verifyErrorInfo.details.map((detail, index) => (
+                            <li key={`${detail}-${index}`}>{detail}</li>
+                          ))
+                        : null}
+                    </ul>
+                  ) : null}
+                </div>
               </div>
             ) : null}
 

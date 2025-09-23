@@ -8,8 +8,10 @@ import EmployeeList from "../components/employees/EmployeeList";
 import { searchVariants } from "@/lib/layoutSwap";
 import EmployeeForm from "../components/employees/EmployeeForm";
 import LeaveOverview from "../components/employees/LeaveOverview.jsx";
-import { supabase } from "../supabaseClient";
+import { useOrg } from '@/org/OrgContext.jsx';
+import { fetchLeavePolicySettings, fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
 import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, normalizeLeavePayPolicy } from "@/lib/leave.js";
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -39,17 +41,31 @@ export default function Employees() {
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
+  const { tenantClientReady, activeOrgHasConnection } = useOrg();
+  const { dataClient, authClient, user, loading } = useSupabase();
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
+    if (!tenantClientReady || !activeOrgHasConnection || !dataClient) {
+      setIsLoading(false);
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const [employeesData, ratesData, servicesData, leavePolicySettings, leaveLedgerData, leavePayPolicySettings] = await Promise.all([
-        supabase.from('Employees').select('*').order('name'),
-        supabase.from('RateHistory').select('*'),
-        supabase.from('Services').select('*'),
-        supabase.from('Settings').select('settings_value').eq('key', 'leave_policy').single(),
-        supabase.from('LeaveBalances').select('*'),
-        supabase.from('Settings').select('settings_value').eq('key', 'leave_pay_policy').single(),
+      const [
+        employeesData,
+        ratesData,
+        servicesData,
+        leavePolicySettings,
+        leaveLedgerData,
+        leavePayPolicySettings,
+      ] = await Promise.all([
+        dataClient.from('Employees').select('*').order('name'),
+        dataClient.from('RateHistory').select('*'),
+        dataClient.from('Services').select('*'),
+        fetchLeavePolicySettings(dataClient),
+        dataClient.from('LeaveBalances').select('*'),
+        fetchLeavePayPolicySettings(dataClient),
       ]);
 
       if (employeesData.error) throw employeesData.error;
@@ -63,25 +79,23 @@ export default function Employees() {
       setServices(filteredServices);
       setLeaveBalances(sortLeaveLedger(leaveLedgerData.data || []));
 
-      if (leavePolicySettings.error) {
-        if (leavePolicySettings.error.code !== 'PGRST116') throw leavePolicySettings.error;
-        setLeavePolicy(DEFAULT_LEAVE_POLICY);
-      } else {
-        setLeavePolicy(normalizeLeavePolicy(leavePolicySettings.data?.settings_value));
-      }
+      setLeavePolicy(
+        leavePolicySettings.value
+          ? normalizeLeavePolicy(leavePolicySettings.value)
+          : DEFAULT_LEAVE_POLICY,
+      );
 
-      if (leavePayPolicySettings.error) {
-        if (leavePayPolicySettings.error.code !== 'PGRST116') throw leavePayPolicySettings.error;
-        setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
-      } else {
-        setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicySettings.data?.settings_value));
-      }
+      setLeavePayPolicy(
+        leavePayPolicySettings.value
+          ? normalizeLeavePayPolicy(leavePayPolicySettings.value)
+          : DEFAULT_LEAVE_PAY_POLICY,
+      );
     } catch (error) {
       console.error('Error fetching data:', error);
       toast.error("שגיאה בטעינת הנתונים");
     }
     setIsLoading(false);
-  };
+  }, [tenantClientReady, activeOrgHasConnection, dataClient]);
 
   const filterEmployees = useCallback(() => {
     let filtered = employees;
@@ -98,11 +112,14 @@ export default function Employees() {
     setFilteredEmployees(filtered);
   }, [employees, searchTerm, activeTab]);
 
-  useEffect(() => { loadData(); }, []);
+  useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { filterEmployees(); }, [filterEmployees]);
 
   const handleSubmit = async ({ employeeData, serviceRates, rateHistory }) => {
     try {
+      if (!dataClient) {
+        throw new Error('חיבור Supabase אינו זמין.');
+      }
       // Separate the rate from the main employee data to avoid saving it in the Employees table
       const { current_rate, ...employeeDetails } = employeeData;
       const annualLeave = Number(employeeDetails.annual_leave_days);
@@ -112,13 +129,13 @@ export default function Employees() {
 
       // Step 1: Insert or Update the employee in the 'Employees' table
       if (isNewEmployee) {
-        const { data, error } = await supabase.from('Employees').insert([employeeDetails]).select('id').single();
+        const { data, error } = await dataClient.from('Employees').insert([employeeDetails]).select('id').single();
         if (error) throw error;
         employeeId = data.id;
         toast.success("העובד נוצר בהצלחה!");
       } else {
         employeeId = editingEmployee.id;
-        const { error } = await supabase.from('Employees').update(employeeDetails).eq('id', employeeId);
+        const { error } = await dataClient.from('Employees').update(employeeDetails).eq('id', employeeId);
         if (error) throw error;
         toast.success("פרטי העובד עודכנו בהצלחה!");
       }
@@ -188,7 +205,7 @@ export default function Employees() {
 
       // Step 3: Upsert all prepared rate updates into 'RateHistory'
       if (rateUpdates.length > 0) {
-        const { error } = await supabase.from('RateHistory').upsert(rateUpdates, { onConflict: 'employee_id,service_id,effective_date' });
+        const { error } = await dataClient.from('RateHistory').upsert(rateUpdates, { onConflict: 'employee_id,service_id,effective_date' });
         if (error) throw error;
       }
 
@@ -205,7 +222,7 @@ export default function Employees() {
             ...(id ? { id } : {}),
           }));
         if (entriesToUpsert.length > 0) {
-          const { error } = await supabase
+          const { error } = await dataClient
             .from('RateHistory')
             .upsert(entriesToUpsert, { onConflict: 'id' });
           if (error) throw error;
@@ -230,9 +247,34 @@ export default function Employees() {
   };
 
   const handleToggleActive = async (employee) => {
-    const { error } = await supabase.from('Employees').update({ is_active: !employee.is_active }).eq('id', employee.id);
+    if (!dataClient) return;
+    const { error } = await dataClient.from('Employees').update({ is_active: !employee.is_active }).eq('id', employee.id);
     if (!error) loadData();
   };
+
+  if (loading || !authClient) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        טוען חיבור Supabase...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        יש להתחבר כדי להציג את רשימת העובדים.
+      </div>
+    );
+  }
+
+  if (!dataClient) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        בחרו ארגון עם חיבור פעיל כדי להמשיך.
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">

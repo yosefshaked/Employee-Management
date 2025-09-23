@@ -11,6 +11,8 @@ import ReportsErrorBoundary from './components/reports/ReportsErrorBoundary.js';
 import Services from './Pages/Services.jsx';
 import Settings from './Pages/Settings.jsx';
 import { RuntimeConfigProvider } from './runtime/RuntimeConfigContext.jsx';
+import { SupabaseProvider } from './context/SupabaseContext.jsx';
+import { isAuthClientInitialized } from './lib/supabase-manager.js';
 import Diagnostics from './runtime/Diagnostics.jsx';
 import Login from './Pages/Login.jsx';
 import { AuthProvider } from './auth/AuthContext.jsx';
@@ -46,16 +48,24 @@ function App() {
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function renderApp(config = null) {
+  if (!isAuthClientInitialized()) {
+    throw new Error(
+      'renderApp was invoked before initializeAuthClient completed. Ensure bootstrap initializes Supabase first.'
+    );
+  }
+
   ReactDOM.createRoot(document.getElementById('root')).render(
     <React.StrictMode>
       <RuntimeConfigProvider config={config}>
-        <AuthProvider>
-          <OrgProvider>
-            <HashRouter>
-              <App />
-            </HashRouter>
-          </OrgProvider>
-        </AuthProvider>
+        <SupabaseProvider>
+          <AuthProvider>
+            <OrgProvider>
+              <HashRouter>
+                <App />
+              </HashRouter>
+            </OrgProvider>
+          </AuthProvider>
+        </SupabaseProvider>
       </RuntimeConfigProvider>
     </React.StrictMode>,
   );

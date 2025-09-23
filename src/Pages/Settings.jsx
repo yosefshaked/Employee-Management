@@ -11,10 +11,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { Plus, Save, Trash2, PlugZap, Sparkles } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { supabase } from '@/supabaseClient';
 import SetupAssistant from '@/components/settings/SetupAssistant.jsx';
 import OrgMembersCard from '@/components/settings/OrgMembersCard.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
 import {
   DEFAULT_LEAVE_POLICY,
   HOLIDAY_TYPE_LABELS,
@@ -27,6 +27,7 @@ import {
   normalizeLeavePayPolicy,
   DEFAULT_LEGAL_INFO_URL,
 } from '@/lib/leave.js';
+import { fetchLeavePolicySettings, fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
 
 function createNewRule() {
   const today = new Date().toISOString().slice(0, 10);
@@ -110,7 +111,7 @@ function HolidayRuleRow({ rule, onChange, onRemove, onSave, allowHalfDay, isSavi
 }
 
 export default function Settings() {
-  const { activeOrg, activeOrgHasConnection } = useOrg();
+  const { activeOrg, activeOrgHasConnection, tenantClientReady } = useOrg();
   const [policy, setPolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const [isLoading, setIsLoading] = useState(true);
@@ -118,6 +119,7 @@ export default function Settings() {
   const [isSavingLeavePayPolicy, setIsSavingLeavePayPolicy] = useState(false);
   const setupDialogAutoOpenRef = useRef(!activeOrgHasConnection);
   const [isSetupDialogOpen, setIsSetupDialogOpen] = useState(!activeOrgHasConnection);
+  const { dataClient, authClient, user, loading } = useSupabase();
 
   useEffect(() => {
     if (activeOrgHasConnection) {
@@ -138,53 +140,59 @@ export default function Settings() {
     }
   };
   useEffect(() => {
-    if (!activeOrgHasConnection) {
+    if (!activeOrgHasConnection || !tenantClientReady) {
       setPolicy(DEFAULT_LEAVE_POLICY);
       setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
       setIsLoading(false);
       return;
     }
 
+    let cancelled = false;
+
     const loadPolicy = async () => {
       setIsLoading(true);
       try {
-        const [policyResponse, leavePayPolicyResponse] = await Promise.all([
-          supabase
-            .from('Settings')
-            .select('settings_value')
-            .eq('key', 'leave_policy')
-            .single(),
-          supabase
-            .from('Settings')
-            .select('settings_value')
-            .eq('key', 'leave_pay_policy')
-            .single(),
+        if (!dataClient) {
+          throw new Error('חיבור Supabase אינו זמין.');
+        }
+
+        const [leavePolicyResult, leavePayPolicyResult] = await Promise.all([
+          fetchLeavePolicySettings(dataClient),
+          fetchLeavePayPolicySettings(dataClient),
         ]);
 
-        if (policyResponse.error) {
-          if (policyResponse.error.code !== 'PGRST116') throw policyResponse.error;
-          setPolicy(DEFAULT_LEAVE_POLICY);
-        } else {
-          setPolicy(normalizeLeavePolicy(policyResponse.data?.settings_value));
+        if (cancelled) {
+          return;
         }
 
-        if (leavePayPolicyResponse.error) {
-          if (leavePayPolicyResponse.error.code !== 'PGRST116') throw leavePayPolicyResponse.error;
-          setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
-        } else {
-          setLeavePayPolicy(normalizeLeavePayPolicy(leavePayPolicyResponse.data?.settings_value));
-        }
+        setPolicy(
+          leavePolicyResult.value
+            ? normalizeLeavePolicy(leavePolicyResult.value)
+            : DEFAULT_LEAVE_POLICY,
+        );
+
+        setLeavePayPolicy(
+          leavePayPolicyResult.value
+            ? normalizeLeavePayPolicy(leavePayPolicyResult.value)
+            : DEFAULT_LEAVE_PAY_POLICY,
+        );
       } catch (error) {
         console.error('Error loading leave policy', error);
         toast.error('שגיאה בטעינת הגדרות החופשה');
         setPolicy(DEFAULT_LEAVE_POLICY);
         setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
       }
-      setIsLoading(false);
     };
 
     loadPolicy();
-  }, [activeOrgHasConnection]);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrgHasConnection, tenantClientReady, dataClient]);
 
   const handleToggle = (key) => (checked) => {
     setPolicy(prev => ({ ...prev, [key]: checked }));
@@ -234,7 +242,10 @@ export default function Settings() {
     setIsSaving(true);
     try {
       const normalized = normalizeLeavePolicy(policy);
-      const { error } = await supabase
+      if (!dataClient) {
+        throw new Error('חיבור Supabase אינו זמין.');
+      }
+      const { error } = await dataClient
         .from('Settings')
         .upsert({
           key: 'leave_policy',
@@ -298,7 +309,10 @@ export default function Settings() {
     setIsSavingLeavePayPolicy(true);
     try {
       const normalized = normalizeLeavePayPolicy(leavePayPolicy);
-      const { error } = await supabase
+      if (!dataClient) {
+        throw new Error('חיבור Supabase אינו זמין.');
+      }
+      const { error } = await dataClient
         .from('Settings')
         .upsert({
           key: 'leave_pay_policy',
@@ -326,6 +340,30 @@ export default function Settings() {
 
   const upcomingHoliday = findHolidayForDate(policy);
   const resolvedLegalInfoUrl = (leavePayPolicy.legal_info_url || '').trim() || DEFAULT_LEGAL_INFO_URL;
+
+  if (loading || !authClient) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        טוען חיבור Supabase...
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        יש להתחבר כדי להגדיר את הארגון.
+      </div>
+    );
+  }
+
+  if (!dataClient && activeOrgHasConnection) {
+    return (
+      <div className="p-6 text-center text-slate-500">
+        ממתין לטעינת חיבור Supabase של הארגון.
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 p-4 md:p-8">
