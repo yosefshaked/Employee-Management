@@ -567,8 +567,15 @@ export default async function (context, req) {
     }
 
     return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET,POST,PATCH,PUT,DELETE' });
+  // WARNING: Exposing error details in production is a security risk. This is a temporary debugging measure.
   } catch (error) {
-    console.error('API crashed with error:', error);
-    return respond(context, 500, { message: 'internal_server_error' });
+    console.error('[API CRASH] The function crashed unexpectedly.', error);
+
+    // This is the critical change: we return the actual error details.
+    return respond(context, 500, {
+      message: 'internal_server_error',
+      error_message: error.message,
+      error_stack: error.stack,
+    });
   }
 }
