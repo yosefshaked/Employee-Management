@@ -12,10 +12,9 @@ import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
 import {
   SETUP_SQL_SCRIPT_STEP_2_TABLES,
   SETUP_SQL_SCRIPT_STEP_3_POLICIES,
-  SETUP_SQL_SCRIPT_STEP_4_JWT,
-  SETUP_SQL_SCRIPT_FETCH_APP_DEDICATED_KEY,
   SETUP_SQL_ADD_DEDICATED_KEY_PLAINTEXT_COLUMN,
 } from '@/lib/setup-sql.js';
+import { SECURE_API_WORKER_SOURCE } from '@/lib/edge-function-code.js';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { resolveControlAccessToken } from '@/lib/api-client.js';
 import { verifyOrgConnection } from '@/runtime/verification.js';
@@ -71,7 +70,7 @@ const WIZARD_STEPS = [
   { number: 1, title: 'Step 1: Connect to Supabase' },
   { number: 2, title: 'Step 2: Create Tables' },
   { number: 3, title: 'Step 3: Create Rules & Policies' },
-  { number: 4, title: 'Step 4: Create Dedicated JWT' },
+  { number: 4, title: 'Step 4: Deploy Edge Function' },
   { number: 5, title: 'Step 5: Verification & Save' },
 ];
 
@@ -392,14 +391,10 @@ export default function SetupAssistant() {
   const [leavePolicyStatus, setLeavePolicyStatus] = useState(INITIAL_LEAVE_POLICY_STATUS);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
   const [activeStep, setActiveStep] = useState(1);
-  const [jwtSecret, setJwtSecret] = useState('');
-  const [confirmedJwtSecret, setConfirmedJwtSecret] = useState('');
-  const [jwtSecretConfirmed, setJwtSecretConfirmed] = useState(false);
-  const [jwtSecretError, setJwtSecretError] = useState('');
-  const [dedicatedKey, setDedicatedKey] = useState('');
-  const [dedicatedKeyError, setDedicatedKeyError] = useState('');
-  const [isSavingDedicatedKey, setIsSavingDedicatedKey] = useState(false);
-  const [dedicatedKeySavedAt, setDedicatedKeySavedAt] = useState(activeOrg?.dedicated_key_saved_at || null);
+  const [serviceRoleKey, setServiceRoleKey] = useState('');
+  const [serviceRoleKeyError, setServiceRoleKeyError] = useState('');
+  const [isSavingServiceRoleKey, setIsSavingServiceRoleKey] = useState(false);
+  const [serviceRoleKeySavedAt, setServiceRoleKeySavedAt] = useState(activeOrg?.dedicated_key_saved_at || null);
   const activeOrgId = activeOrg?.id || null;
 
   const hasConnectionValues = Boolean(connection.supabase_url.trim() && connection.anon_key.trim());
@@ -495,9 +490,9 @@ export default function SetupAssistant() {
       setVerifyResults([]);
       setVerifyError('');
       setVerifyErrorInfo(null);
-      setDedicatedKey('');
-      setDedicatedKeyError('');
-      setDedicatedKeySavedAt(null);
+      setServiceRoleKey('');
+      setServiceRoleKeyError('');
+      setServiceRoleKeySavedAt(null);
       return;
     }
 
@@ -556,13 +551,9 @@ export default function SetupAssistant() {
     setVerifyResults([]);
     setVerifyError('');
     setVerifyErrorInfo(null);
-    setJwtSecret('');
-    setConfirmedJwtSecret('');
-    setJwtSecretConfirmed(false);
-    setJwtSecretError('');
-    setDedicatedKey('');
-    setDedicatedKeyError('');
-    setDedicatedKeySavedAt(activeOrg.dedicated_key_saved_at || null);
+    setServiceRoleKey('');
+    setServiceRoleKeyError('');
+    setServiceRoleKeySavedAt(activeOrg.dedicated_key_saved_at || null);
   }, [activeOrg, activeOrgConnection]);
 
   const hasUnsavedChanges = useMemo(() => {
@@ -578,36 +569,14 @@ export default function SetupAssistant() {
 
   const totalWizardSteps = WIZARD_STEPS.length;
 
-  const hasDedicatedKeyValue = useMemo(() => Boolean(dedicatedKey.trim()), [dedicatedKey]);
-
-  const jwtSecretToken = useMemo(() => {
-    const trimmed = confirmedJwtSecret.trim();
-    return trimmed || 'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE';
-  }, [confirmedJwtSecret]);
-
-  const step4SqlBlock = useMemo(
-    () => SETUP_SQL_SCRIPT_STEP_4_JWT.replace('__REPLACE_WITH_JWT_SECRET__', jwtSecretToken),
-    [jwtSecretToken],
-  );
-
-  const step5FetchKeySqlBlock = useMemo(
-    () =>
-      SETUP_SQL_SCRIPT_FETCH_APP_DEDICATED_KEY.replace(
-        '__REPLACE_WITH_JWT_SECRET__',
-        jwtSecretToken,
-      ),
-    [jwtSecretToken],
-  );
+  const hasServiceRoleKeyValue = useMemo(() => Boolean(serviceRoleKey.trim()), [serviceRoleKey]);
 
   const canProceedToNextStep = useMemo(() => {
     if (activeStep === 1) {
       return hasSavedConnection && !hasUnsavedChanges;
     }
-    if (activeStep === 4) {
-      return jwtSecretConfirmed;
-    }
     return true;
-  }, [activeStep, hasSavedConnection, hasUnsavedChanges, jwtSecretConfirmed]);
+  }, [activeStep, hasSavedConnection, hasUnsavedChanges]);
 
   const nextButtonLabel = useMemo(() => {
     switch (activeStep) {
@@ -616,7 +585,7 @@ export default function SetupAssistant() {
       case 2:
         return 'המשך למדיניות RLS';
       case 3:
-        return 'המשך ליצירת JWT';
+        return 'המשך לפריסת הפונקציה';
       case 4:
         return 'המשך לאימות ולשמירה';
       default:
@@ -636,16 +605,8 @@ export default function SetupAssistant() {
         return 'שמור את השינויים לפני המעבר לשלב הבא.';
       }
     }
-    if (activeStep === 4) {
-      if (!jwtSecret.trim()) {
-        return 'הדביקו את ה-JWT Secret תחת Project Settings -> API -> JWT Secret כדי להמשיך.';
-      }
-      if (!jwtSecretConfirmed) {
-        return 'אשרו את ה-JWT Secret באמצעות הכפתור כדי להמשיך לשלב האימות.';
-      }
-    }
     return '';
-  }, [activeStep, hasConnectionValues, hasSavedConnection, hasUnsavedChanges, jwtSecret, jwtSecretConfirmed]);
+  }, [activeStep, hasConnectionValues, hasSavedConnection, hasUnsavedChanges]);
 
   const renderStepProgress = () => (
     <ol className="grid gap-3 sm:grid-cols-5">
@@ -892,70 +853,30 @@ export default function SetupAssistant() {
         return (
           <StepSection
             number={4}
-            title="שלב 4: יצירת JWT ייעודי"
-            description="הדביקו את ה-JWT Secret כדי שנפיק SQL עם המפתח הנכון."
+            title="שלב 4: פריסת פונקציית Edge"
+            description="מעתיקים את קוד ה-Edge Function ומפרסים אותו בפרויקט הלקוח."
           >
             <div className="space-y-6">
               <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label htmlFor="jwt_secret">Supabase JWT Secret</Label>
-                  <Input
-                    id="jwt_secret"
-                    type="password"
-                    dir="ltr"
-                    placeholder="YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE"
-                    value={jwtSecret}
-                    onChange={handleJwtSecretChange}
-                    onPaste={handleJwtSecretPaste}
-                    autoComplete="off"
-                  />
-                </div>
-                <p className="text-xs text-slate-500">
-                  מצאו את הערך תחת Project Settings → API → JWT Settings → JWT Secret, או הדביקו אותו מהמסמך השיתופי.
+                <p className="text-sm text-slate-600">
+                  המערכת עוברת כעת לאדריכלות עם Supabase Edge Functions. כדי להשלים את ההתקנה, פרסו את הפונקציה המאובטחת בתוך פרויקט הלקוח.
                 </p>
-                <p className="text-xs text-slate-500">
-                  אנו לא שומרים את הסוד – לחיצה על הכפתור תאשר אותו ותעדכן את ה-SQL שנריץ ב-Supabase.
-                </p>
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button
-                    type="button"
-                    onClick={handleConfirmJwtSecret}
-                    disabled={
-                      !jwtSecret.trim()
-                      || (jwtSecretConfirmed && confirmedJwtSecret === jwtSecret.trim())
-                    }
-                    className="gap-2"
-                  >
-                    {jwtSecretConfirmed && confirmedJwtSecret === jwtSecret.trim() ? (
-                      <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
-                    ) : null}
-                    {jwtSecretConfirmed && confirmedJwtSecret === jwtSecret.trim()
-                      ? 'הסוד אושר'
-                      : 'אשר את ה-JWT Secret'}
-                  </Button>
-                  {jwtSecretConfirmed ? (
-                    <Badge className="bg-emerald-100 text-emerald-700 border border-emerald-200">
-                      מוכן ליצירת מפתח
-                    </Badge>
-                  ) : null}
-                </div>
-                {jwtSecretError ? (
-                  <p className="text-xs text-red-600">{jwtSecretError}</p>
-                ) : null}
+                <ol className="list-decimal pr-5 space-y-2 text-sm text-slate-600">
+                  <li>הריצו את בלוקי ה-SQL מהשלבים הקודמים בעורך ה-Supabase.</li>
+                  <li>צרו פונקציה חדשה בשם <code className="rounded bg-slate-100 px-1">secure-api-worker</code> והדביקו לתוכה את הקוד המצורף.</li>
+                  <li>
+                    פרסו את הפונקציה עם הפקודה{' '}
+                    <code className="rounded bg-slate-100 px-1">supabase functions deploy secure-api-worker</code> (נדרש חיבור ל-CLI).
+                  </li>
+                </ol>
               </div>
-              {jwtSecretConfirmed ? (
-                <CodeBlock
-                  title="בלוק יצירת JWT ייעודי"
-                  code={step4SqlBlock}
-                  ariaLabel="העתק את בלוק יצירת ה-JWT הייעודי"
-                />
-              ) : (
-                <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 text-xs text-slate-500 p-4">
-                  אשרו את הסוד כדי לחשוף את ה-SQL שמייצר את המפתח הייעודי.
-                </div>
-              )}
+              <CodeBlock
+                title="קוד פונקציית secure-api-worker"
+                code={SECURE_API_WORKER_SOURCE}
+                ariaLabel="העתק את קוד פונקציית ה-Edge"
+              />
               <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
-                הריצו את הבלוק כבעלים. הוא יוודא שהתפקיד app_user קיים ויחזיר ערך בשם "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)".
+                לאחר הפריסה ודאו שהפונקציה זמינה בנתיב <code className="bg-slate-100 px-1 rounded">/functions/v1/secure-api-worker</code> כדי שהפרוקסי יוכל לקרוא לה.
               </p>
             </div>
           </StepSection>
@@ -964,15 +885,15 @@ export default function SetupAssistant() {
         return (
           <StepSection
             number={5}
-            title="שלב 5: אימות ושמירת המפתח"
-            description="הריצו אימות, פענחו תקלות והחזירו את המפתח הייעודי לאפליקציה."
+            title="שלב 5: אימות ושמירת המפתחות"
+            description="הריצו אימות, פענחו תקלות והחזירו את Supabase service_role_key כדי שהפרוקסי יוכל לגשת לפונקציה."
             statusBadge={renderStepFiveStatusBadges()}
           >
             <div className="space-y-8">
               <div className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <p className="text-sm text-slate-600">
-                    הבדיקה משתמשת בפונקציית setup_assistant_diagnostics ומחזירה SQL משלים במידה שחסרות פעולות. אין צורך במפתחות שירות – הבדיקה רצה עם המפתח הציבורי (anon) בלבד.
+                    הבדיקה משתמשת בפונקציית setup_assistant_diagnostics ומחזירה SQL משלים במידה שחסרות פעולות. אין צורך במפתחות שירות עבור הבדיקה – היא רצה עם המפתח הציבורי (anon) בלבד.
                   </p>
                   <div className="flex items-center gap-3">
                     {lastVerifiedAt ? (
@@ -1108,44 +1029,32 @@ export default function SetupAssistant() {
                   />
                 </div>
                 <p className="text-sm text-slate-600">
-                  לאחר שה-SQL מהשלב הקודם יצר את המפתח "APP_DEDICATED_KEY", הדביקו אותו כאן כדי שנשמור אותו כטקסט גולמי עבור מצב המעבדה.
+                  לאחר פריסת הפונקציה, הדביקו כאן את הערך <code className="bg-slate-100 px-1 rounded">service_role_key</code> של פרויקט הלקוח. המפתח נשמר בשרת כדי שהפרוקסי יוכל להחתים את הבקשות לפונקציה.
                 </p>
-                {jwtSecretConfirmed ? (
-                  <div className="space-y-2">
-                    <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
-                      צריך רק את המפתח המוכן? הריצו את הבלוק המצומצם שמחזיר את הערך להעתקה:
-                    </p>
-                    <CodeBlock
-                      title="בלוק שליפת המפתח הייעודי"
-                      code={step5FetchKeySqlBlock}
-                      ariaLabel="העתק בלוק לשליפת המפתח הייעודי"
-                    />
-                  </div>
-                ) : null}
                 <div className="space-y-2">
-                  <Label htmlFor="dedicated_key">APP_DEDICATED_KEY</Label>
+                  <Label htmlFor="service_role_key">Supabase SERVICE_ROLE_KEY</Label>
                   <Textarea
-                    id="dedicated_key"
+                    id="service_role_key"
                     dir="ltr"
                     rows={3}
-                    value={dedicatedKey}
-                    onChange={handleDedicatedKeyChange}
-                    onPaste={handleDedicatedKeyPaste}
+                    value={serviceRoleKey}
+                    onChange={handleServiceRoleKeyChange}
+                    onPaste={handleServiceRoleKeyPaste}
                     placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
                   />
-                  <p className="text-xs text-slate-400">(טיפ: בחרו את הערך בעורך ה-SQL, העתיקו והדביקו כאן.)</p>
+                  <p className="text-xs text-slate-400">(טיפ: מצאו את הערך תחת Project Settings → API → Service key והעתיקו אותו לכאן.)</p>
                 </div>
-                {dedicatedKeyError ? <p className="text-xs text-red-600">{dedicatedKeyError}</p> : null}
+                {serviceRoleKeyError ? <p className="text-xs text-red-600">{serviceRoleKeyError}</p> : null}
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  {dedicatedKeySavedAt ? (
-                    <span className="text-xs text-slate-500">נשמר לאחרונה: {formatDateTime(dedicatedKeySavedAt)}</span>
+                  {serviceRoleKeySavedAt ? (
+                    <span className="text-xs text-slate-500">נשמר לאחרונה: {formatDateTime(serviceRoleKeySavedAt)}</span>
                   ) : null}
                   <div className="flex flex-wrap items-center gap-2">
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={handleDedicatedKeyClipboardPaste}
-                      disabled={isSavingDedicatedKey}
+                      onClick={handleServiceRoleKeyClipboardPaste}
+                      disabled={isSavingServiceRoleKey}
                       className="gap-2"
                     >
                       <ClipboardCopy className="w-4 h-4" aria-hidden="true" />
@@ -1154,22 +1063,22 @@ export default function SetupAssistant() {
                     <Button
                       type="button"
                       variant="ghost"
-                      onClick={handleClearDedicatedKey}
-                      disabled={isSavingDedicatedKey || (!hasDedicatedKeyValue && !dedicatedKeyError)}
+                      onClick={handleClearServiceRoleKey}
+                      disabled={isSavingServiceRoleKey || (!hasServiceRoleKeyValue && !serviceRoleKeyError)}
                       className="gap-2"
                     >
                       נקה
                     </Button>
                     <Button
                       type="button"
-                      onClick={handleSaveDedicatedKey}
-                      disabled={!hasDedicatedKeyValue || isSavingDedicatedKey || !activeOrg || !supabaseReady}
+                      onClick={handleSaveServiceRoleKey}
+                      disabled={!hasServiceRoleKeyValue || isSavingServiceRoleKey || !activeOrg || !supabaseReady}
                       className="gap-2"
                     >
-                      {isSavingDedicatedKey ? (
+                      {isSavingServiceRoleKey ? (
                         <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
                       ) : null}
-                      {isSavingDedicatedKey ? 'שומר...' : 'שמור מפתח'}
+                      {isSavingServiceRoleKey ? 'שומר...' : 'שמור Service Role Key'}
                     </Button>
                   </div>
                 </div>
@@ -1265,41 +1174,7 @@ export default function SetupAssistant() {
     setActiveStep((prev) => Math.max(prev - 1, 1));
   };
 
-  const handleConfirmJwtSecret = () => {
-    const trimmed = jwtSecret.trim();
-    if (!trimmed) {
-      setJwtSecretError('הדביקו את ה-JWT Secret לפני האישור.');
-      setJwtSecretConfirmed(false);
-      setConfirmedJwtSecret('');
-      return;
-    }
-
-    setConfirmedJwtSecret(trimmed);
-    setJwtSecretConfirmed(true);
-    setJwtSecretError('');
-    toast.success('הסוד אושר – ה-SQL מעודכן וניתן להריץ אותו ב-Supabase.');
-  };
-
-  const handleJwtSecretChange = (event) => {
-    setJwtSecret(event.target.value || '');
-    setJwtSecretConfirmed(false);
-    setConfirmedJwtSecret('');
-    setJwtSecretError('');
-  };
-
-  const handleJwtSecretPaste = (event) => {
-    if (!event?.clipboardData) {
-      return;
-    }
-    event.preventDefault();
-    const pasted = event.clipboardData.getData('text') || '';
-    setJwtSecret(pasted.trim());
-    setJwtSecretConfirmed(false);
-    setConfirmedJwtSecret('');
-    setJwtSecretError('');
-  };
-
-  const handleDedicatedKeyPaste = (event) => {
+  const handleServiceRoleKeyPaste = (event) => {
     if (!event?.clipboardData) {
       return;
     }
@@ -1308,16 +1183,16 @@ export default function SetupAssistant() {
     if (!pasted) {
       return;
     }
-    setDedicatedKey(pasted.trim());
-    setDedicatedKeyError('');
+    setServiceRoleKey(pasted.trim());
+    setServiceRoleKeyError('');
   };
 
-  const handleDedicatedKeyChange = (event) => {
-    setDedicatedKey(event.target.value || '');
-    setDedicatedKeyError('');
+  const handleServiceRoleKeyChange = (event) => {
+    setServiceRoleKey(event.target.value || '');
+    setServiceRoleKeyError('');
   };
 
-  const handleDedicatedKeyClipboardPaste = async () => {
+  const handleServiceRoleKeyClipboardPaste = async () => {
     if (!navigator?.clipboard?.readText) {
       toast.error('הדבקה אוטומטית אינה זמינה בדפדפן זה. השתמש ב-Ctrl+V להדבקה ידנית.');
       return;
@@ -1326,45 +1201,45 @@ export default function SetupAssistant() {
     try {
       const text = await navigator.clipboard.readText();
       if (!text) {
-        toast.error('הלוח ריק. העתק את המפתח מה-SQL ונסה שוב.');
+        toast.error('הלוח ריק. העתק את המפתח מ-Supabase ונסה שוב.');
         return;
       }
-      setDedicatedKey(text.trim());
-      setDedicatedKeyError('');
-      toast.success('המפתח הועתק מהלוח.');
+      setServiceRoleKey(text.trim());
+      setServiceRoleKeyError('');
+      toast.success('מפתח השירות הועתק מהלוח.');
     } catch (error) {
-      console.error('Failed to read dedicated key from clipboard', error);
+      console.error('Failed to read service role key from clipboard', error);
       toast.error('לא ניתן לקרוא את הלוח. אפשר הרשאות הדבקה ונסה שוב.');
     }
   };
 
-  const handleClearDedicatedKey = () => {
-    setDedicatedKey('');
-    setDedicatedKeyError('');
+  const handleClearServiceRoleKey = () => {
+    setServiceRoleKey('');
+    setServiceRoleKeyError('');
   };
 
-  const handleSaveDedicatedKey = async () => {
-    if (!activeOrg || isSavingDedicatedKey) {
+  const handleSaveServiceRoleKey = async () => {
+    if (!activeOrg || isSavingServiceRoleKey) {
       return;
     }
 
-    const trimmedKey = dedicatedKey.trim();
+    const trimmedKey = serviceRoleKey.trim();
     if (!trimmedKey) {
-      const message = 'יש להדביק את המפתח הייעודי לפני השמירה.';
-      setDedicatedKeyError(message);
+      const message = 'יש להדביק את ה-service_role_key לפני השמירה.';
+      setServiceRoleKeyError(message);
       toast.error(message);
       return;
     }
 
     if (!authClient) {
       const message = 'לקוח Supabase אינו זמין כרגע. רענן את הדף ונסה שוב.';
-      setDedicatedKeyError(message);
+      setServiceRoleKeyError(message);
       toast.error(message);
       return;
     }
 
-    setIsSavingDedicatedKey(true);
-    setDedicatedKeyError('');
+    setIsSavingServiceRoleKey(true);
+    setServiceRoleKeyError('');
 
     try {
       const { data: sessionData, error: sessionError } = await authClient.auth.getSession();
@@ -1386,6 +1261,7 @@ export default function SetupAssistant() {
         body: JSON.stringify({
           org_id: activeOrg.id,
           dedicated_key: trimmedKey,
+          service_role_key: trimmedKey,
         }),
       });
 
@@ -1399,7 +1275,7 @@ export default function SetupAssistant() {
       if (!response.ok) {
         const message = typeof payload?.message === 'string' && payload.message
           ? payload.message
-          : 'שמירת המפתח הייעודי נכשלה. בדוק את ההרשאות ונסה שוב.';
+          : 'שמירת המפתח נכשלה. בדוק את עמודת dedicated_key_plaintext ואת ההרשאות.';
         throw new Error(message);
       }
 
@@ -1407,18 +1283,16 @@ export default function SetupAssistant() {
         ? payload.saved_at
         : new Date().toISOString();
 
-      setDedicatedKey('');
-      setDedicatedKeySavedAt(savedAt);
-      toast.success('המפתח הייעודי נשמר בהצלחה.');
+      setServiceRoleKey('');
+      setServiceRoleKeySavedAt(savedAt);
+      toast.success('ה-Service Role Key נשמר בהצלחה. הפרוקסי יוכל כעת לקרוא לפונקציה המאובטחת.');
     } catch (error) {
-      console.error('Failed to save dedicated key for organization', error);
-      const message = typeof error?.message === 'string' && error.message
-        ? error.message
-        : 'שמירת המפתח הייעודי נכשלה. בדוק את ההרשאות ונסה שוב.';
-      setDedicatedKeyError(message);
+      console.error('Failed to save service role key', error);
+      const message = mapSupabaseError(error) || 'שמירת המפתח נכשלה. בדוק את החיבור ונסה שוב.';
+      setServiceRoleKeyError(message);
       toast.error(message);
     } finally {
-      setIsSavingDedicatedKey(false);
+      setIsSavingServiceRoleKey(false);
     }
   };
 
@@ -1922,26 +1796,26 @@ export default function SetupAssistant() {
     return null;
   };
 
-  const renderDedicatedKeyStatusBadge = () => {
-    if (isSavingDedicatedKey) {
+  const renderServiceRoleKeyStatusBadge = () => {
+    if (isSavingServiceRoleKey) {
       return (
         <Badge className="gap-1 bg-slate-100 text-slate-600 border border-slate-200">
           <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-          <span>שומר מפתח</span>
+          <span>שומר Service Role Key</span>
         </Badge>
       );
     }
 
-    if (dedicatedKeySavedAt) {
+    if (serviceRoleKeySavedAt) {
       return (
         <Badge className="gap-1 bg-emerald-100 text-emerald-700 border border-emerald-200">
           <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
-          <span>מפתח שמור</span>
+          <span>Service Role Key שמור</span>
         </Badge>
       );
     }
 
-    if (hasDedicatedKeyValue) {
+    if (hasServiceRoleKeyValue) {
       return (
         <Badge className="gap-1 bg-amber-100 text-amber-800 border border-amber-200">
           <AlertCircle className="w-4 h-4" aria-hidden="true" />
@@ -1953,7 +1827,7 @@ export default function SetupAssistant() {
     return (
       <Badge className="gap-1 bg-slate-100 text-slate-600 border border-slate-200">
         <AlertCircle className="w-4 h-4" aria-hidden="true" />
-        <span>נדרש מפתח</span>
+        <span>נדרש Service Role Key</span>
       </Badge>
     );
   };
@@ -1964,9 +1838,9 @@ export default function SetupAssistant() {
     if (verificationBadge) {
       badges.push({ key: 'verification', node: verificationBadge });
     }
-    const dedicatedBadge = renderDedicatedKeyStatusBadge();
-    if (dedicatedBadge) {
-      badges.push({ key: 'dedicated', node: dedicatedBadge });
+    const serviceRoleBadge = renderServiceRoleKeyStatusBadge();
+    if (serviceRoleBadge) {
+      badges.push({ key: 'service-role', node: serviceRoleBadge });
     }
     if (!badges.length) {
       return null;
@@ -2002,7 +1876,7 @@ export default function SetupAssistant() {
             ) : null}
           </CardTitle>
           <p className="text-sm text-slate-600 mt-2">
-            התקדמו שלב-אחר-שלב: חיבור Supabase, יצירת סכימה, הפעלת מדיניות RLS, הפקת JWT ייעודי ולבסוף אימות ושמירה. בכל שלב תמצאו הוראות מדויקות וכפתורי העתקה מהירים.
+            התקדמו שלב-אחר-שלב: חיבור Supabase, יצירת סכימה, הפעלת מדיניות RLS, פריסת פונקציית ה-Edge ולבסוף אימות ושמירת ה-Service Role Key. בכל שלב תמצאו הוראות מדויקות וכפתורי העתקה מהירים.
           </p>
           <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500 mt-3">
             <span>ההגדרות נשמרות עבור: {activeOrg?.name || 'ארגון ללא שם'}</span>

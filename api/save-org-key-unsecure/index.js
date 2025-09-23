@@ -75,14 +75,19 @@ export default async function handler(context, req) {
   const userId = authResult.data.user.id;
   const body = parseRequestBody(req);
   const orgId = normalizeString(body.org_id || body.orgId);
-  const dedicatedKey = normalizeString(body.dedicated_key || body.dedicatedKey);
+  const dedicatedKey = normalizeString(
+    body.service_role_key
+      || body.serviceRoleKey
+      || body.dedicated_key
+      || body.dedicatedKey,
+  );
 
   if (!orgId || !isValidOrgId(orgId)) {
     return respond(context, 400, { message: 'invalid org id' });
   }
 
   if (!dedicatedKey) {
-    return respond(context, 400, { message: 'missing dedicated key' });
+    return respond(context, 400, { message: 'missing service role key' });
   }
 
   const membershipResult = await supabase
