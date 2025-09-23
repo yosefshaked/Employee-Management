@@ -229,4 +229,31 @@ end;
 $$;
 
 grant execute on function public.setup_assistant_diagnostics() to authenticated;
+
+-- שלב 3: יצירת תפקיד מאובטח ומוגבל הרשאות עבור האפליקציה
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'app_user') THEN
+    CREATE ROLE app_user;
+  END IF;
+END
+$$;
+
+GRANT USAGE ON SCHEMA public TO app_user;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO app_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO app_user;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_user;
+
+-- שלב 4: יצירת מפתח גישה ייעודי (JWT) עבור התפקיד החדש
+-- החלף את 'YOUR_SUPER_SECRET_JWT_SIGNATURE' בסוד חזק ובטוח
+-- שים לב: המפתח הזה יהיה תקף לשנה אחת
+SELECT sign(
+  json_build_object(
+    'role', 'app_user',
+    'exp', (EXTRACT(epoch FROM (NOW() + INTERVAL '1 year')))::integer,
+    'iat', (EXTRACT(epoch FROM NOW()))::integer
+  ),
+  current_setting('app.settings.jwt_secret') -- This uses the project's own secret
+) AS "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)";
 `;

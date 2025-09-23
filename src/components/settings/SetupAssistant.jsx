@@ -514,6 +514,10 @@ export default function SetupAssistant() {
   const [connectionTest, setConnectionTest] = useState(INITIAL_CONNECTION_TEST);
   const [leavePolicyStatus, setLeavePolicyStatus] = useState(INITIAL_LEAVE_POLICY_STATUS);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [dedicatedKey, setDedicatedKey] = useState('');
+  const [dedicatedKeyError, setDedicatedKeyError] = useState('');
+  const [isSavingDedicatedKey, setIsSavingDedicatedKey] = useState(false);
+  const [dedicatedKeySavedAt, setDedicatedKeySavedAt] = useState(activeOrg?.dedicated_key_saved_at || null);
   const activeOrgId = activeOrg?.id || null;
 
   const handleOpenCreateDialog = () => {
@@ -601,6 +605,9 @@ export default function SetupAssistant() {
       setVerifyResults([]);
       setVerifyError('');
       setVerifyErrorInfo(null);
+      setDedicatedKey('');
+      setDedicatedKeyError('');
+      setDedicatedKeySavedAt(null);
       return;
     }
 
@@ -659,6 +666,9 @@ export default function SetupAssistant() {
     setVerifyResults([]);
     setVerifyError('');
     setVerifyErrorInfo(null);
+    setDedicatedKey('');
+    setDedicatedKeyError('');
+    setDedicatedKeySavedAt(activeOrg.dedicated_key_saved_at || null);
   }, [activeOrg, activeOrgConnection]);
 
   const hasUnsavedChanges = useMemo(() => {
@@ -671,6 +681,8 @@ export default function SetupAssistant() {
       || connection.legal_privacy_url !== originalConnection.legal_privacy_url
     );
   }, [connection, originalConnection]);
+
+  const hasDedicatedKeyValue = useMemo(() => Boolean(dedicatedKey.trim()), [dedicatedKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -747,6 +759,127 @@ export default function SetupAssistant() {
 
     setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
     setConnectionTest(INITIAL_CONNECTION_TEST);
+  };
+
+  const handleDedicatedKeyPaste = (event) => {
+    if (!event?.clipboardData) {
+      return;
+    }
+    event.preventDefault();
+    const pasted = event.clipboardData.getData('text') || '';
+    if (!pasted) {
+      return;
+    }
+    setDedicatedKey(pasted.trim());
+    setDedicatedKeyError('');
+  };
+
+  const handleDedicatedKeyClipboardPaste = async () => {
+    if (!navigator?.clipboard?.readText) {
+      toast.error('הדבקה אוטומטית אינה זמינה בדפדפן זה. השתמש ב-Ctrl+V להדבקה ידנית.');
+      return;
+    }
+
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) {
+        toast.error('הלוח ריק. העתק את המפתח מה-SQL ונסה שוב.');
+        return;
+      }
+      setDedicatedKey(text.trim());
+      setDedicatedKeyError('');
+      toast.success('המפתח הועתק מהלוח.');
+    } catch (error) {
+      console.error('Failed to read dedicated key from clipboard', error);
+      toast.error('לא ניתן לקרוא את הלוח. אפשר הרשאות הדבקה ונסה שוב.');
+    }
+  };
+
+  const handleClearDedicatedKey = () => {
+    setDedicatedKey('');
+    setDedicatedKeyError('');
+  };
+
+  const handleSaveDedicatedKey = async () => {
+    if (!activeOrg || isSavingDedicatedKey) {
+      return;
+    }
+
+    const trimmedKey = dedicatedKey.trim();
+    if (!trimmedKey) {
+      const message = 'יש להדביק את המפתח הייעודי לפני השמירה.';
+      setDedicatedKeyError(message);
+      toast.error(message);
+      return;
+    }
+
+    if (!authClient) {
+      const message = 'לקוח Supabase אינו זמין כרגע. רענן את הדף ונסה שוב.';
+      setDedicatedKeyError(message);
+      toast.error(message);
+      return;
+    }
+
+    setIsSavingDedicatedKey(true);
+    setDedicatedKeyError('');
+
+    try {
+      const { data: sessionData, error: sessionError } = await authClient.auth.getSession();
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const accessToken = sessionData?.session?.access_token || null;
+      if (!accessToken) {
+        throw new Error('נדרש להתחבר מחדש לפני שמירת המפתח הייעודי.');
+      }
+
+      const response = await fetch('/api/save-org-credentials', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${accessToken}`,
+          'x-supabase-authorization': `Bearer ${accessToken}`,
+          'X-Supabase-Authorization': `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          org_id: activeOrg.id,
+          dedicated_key: trimmedKey,
+        }),
+      });
+
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+
+      if (!response.ok) {
+        const message = typeof payload?.message === 'string' && payload.message
+          ? payload.message
+          : 'שמירת המפתח הייעודי נכשלה. בדוק את ההרשאות ונסה שוב.';
+        throw new Error(message);
+      }
+
+      const savedAt = typeof payload?.saved_at === 'string' && payload.saved_at
+        ? payload.saved_at
+        : new Date().toISOString();
+
+      setDedicatedKey('');
+      setDedicatedKeySavedAt(savedAt);
+      toast.success('המפתח הייעודי נשמר בהצלחה.');
+    } catch (error) {
+      console.error('Failed to save dedicated key for organization', error);
+      const message = typeof error?.message === 'string' && error.message
+        ? error.message
+        : 'שמירת המפתח הייעודי נכשלה. בדוק את ההרשאות ונסה שוב.';
+      setDedicatedKeyError(message);
+      toast.error(message);
+    } finally {
+      setIsSavingDedicatedKey(false);
+    }
   };
 
   const extractSupabaseError = (error) => {
@@ -1249,6 +1382,42 @@ export default function SetupAssistant() {
     return null;
   };
 
+  const renderDedicatedKeyStatusBadge = () => {
+    if (isSavingDedicatedKey) {
+      return (
+        <Badge className="gap-1 bg-slate-100 text-slate-600 border border-slate-200">
+          <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+          <span>שומר מפתח</span>
+        </Badge>
+      );
+    }
+
+    if (dedicatedKeySavedAt) {
+      return (
+        <Badge className="gap-1 bg-emerald-100 text-emerald-700 border border-emerald-200">
+          <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+          <span>מפתח שמור</span>
+        </Badge>
+      );
+    }
+
+    if (hasDedicatedKeyValue) {
+      return (
+        <Badge className="gap-1 bg-amber-100 text-amber-800 border border-amber-200">
+          <AlertCircle className="w-4 h-4" aria-hidden="true" />
+          <span>מוכן לשמירה</span>
+        </Badge>
+      );
+    }
+
+    return (
+      <Badge className="gap-1 bg-slate-100 text-slate-600 border border-slate-200">
+        <AlertCircle className="w-4 h-4" aria-hidden="true" />
+        <span>נדרש מפתח</span>
+      </Badge>
+    );
+  };
+
   const connectionHelperText = hasSavedConnection
     ? 'ניתן לעדכן את הפרטים בכל עת – הם נשמרים בהגדרות הארגון.'
     : 'נשמור עבורך את הכתובת והמפתח בחשבון הארגון כדי שכל המנהלים יוכלו להמשיך את העבודה.';
@@ -1271,7 +1440,7 @@ export default function SetupAssistant() {
           ) : null}
         </CardTitle>
         <p className="text-sm text-slate-600 mt-2">
-          שלושה צעדים קצרים: חיבור המפתחות, הרצת ה-SQL המאובטח, ואימות שהטבלאות ומדיניות ה-RLS קיימות. האשף פועל בכיוון ימין-לשמאל ומספק כפתורי העתקה לכל בלוק.
+          ארבעה צעדים קצרים: חיבור המפתחות, הרצת ה-SQL המאובטח, אימות שהטבלאות ומדיניות ה-RLS קיימות, ולבסוף שמירת המפתח הייעודי שהופק עבורך. האשף פועל בכיוון ימין-לשמאל ומספק כפתורי העתקה לכל בלוק.
         </p>
         <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500 mt-3">
           <span>ההגדרות נשמרות עבור: {activeOrg?.name || 'ארגון ללא שם'}</span>
@@ -1567,6 +1736,80 @@ export default function SetupAssistant() {
                 })}
               </div>
             ) : null}
+          </div>
+        </StepSection>
+
+        <StepSection
+          number={4}
+          title="שמירת המפתח הייעודי"
+          description="הדבק את המפתח (JWT) שהופק עבור התפקיד app_user כדי שנשמור אותו מוצפן בבקרת הארגון."
+          statusBadge={renderDedicatedKeyStatusBadge()}
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              לאחר הרצת שלב המפתח ב-SQL יוצג בטבלה ערך בשם "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)". העתק את הערך הזה והדבק
+              כאן – המפתח נשמר מוצפן וניתן להחליפו בכל עת על ידי הרצת ה-SQL מחדש.
+            </p>
+            <div className="space-y-2">
+              <Label htmlFor="dedicated_key">המפתח הייעודי של האפליקציה</Label>
+              <Textarea
+                id="dedicated_key"
+                dir="ltr"
+                rows={3}
+                value={dedicatedKey}
+                readOnly
+                onPaste={handleDedicatedKeyPaste}
+                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+              />
+              <p className="text-xs text-slate-500">
+                השדה לקריאה בלבד כדי למנוע שינוי לא רצוי. ניתן להשתמש בקיצור Ctrl+V (או ⌘+V) או בכפתור ההדבקה להלן.
+              </p>
+            </div>
+            {dedicatedKeyError ? (
+              <p className="text-xs text-red-600">{dedicatedKeyError}</p>
+            ) : null}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {dedicatedKeySavedAt ? (
+                <span className="text-xs text-slate-500">נשמר לאחרונה: {formatDateTime(dedicatedKeySavedAt)}</span>
+              ) : null}
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleDedicatedKeyClipboardPaste}
+                  disabled={isSavingDedicatedKey}
+                  className="gap-2"
+                >
+                  <ClipboardCopy className="w-4 h-4" aria-hidden="true" />
+                  הדבק מהמחשב
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={handleClearDedicatedKey}
+                  disabled={isSavingDedicatedKey || (!hasDedicatedKeyValue && !dedicatedKeyError)}
+                  className="gap-2"
+                >
+                  נקה
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleSaveDedicatedKey}
+                  disabled={
+                    !hasDedicatedKeyValue
+                    || isSavingDedicatedKey
+                    || !activeOrg
+                    || !supabaseReady
+                  }
+                  className="gap-2"
+                >
+                  {isSavingDedicatedKey ? (
+                    <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                  ) : null}
+                  {isSavingDedicatedKey ? 'שומר...' : 'שמור מפתח'}
+                </Button>
+              </div>
+            </div>
           </div>
         </StepSection>
       </CardContent>

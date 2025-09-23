@@ -82,6 +82,7 @@ function normalizeOrgRecord(record, organizationOverride, connectionOverride) {
     verified_at: organization.verified_at || null,
     created_at: organization.created_at,
     updated_at: organization.updated_at,
+    dedicated_key_saved_at: organization.dedicated_key_saved_at || null,
     has_connection: Boolean(
       connectionOverride?.supabaseUrl && connectionOverride?.supabaseAnonKey,
     ),
@@ -258,7 +259,7 @@ export function OrgProvider({ children }) {
         const { data: organizationsData, error: organizationsError } = await client
           .from('organizations')
           .select(
-            'id, name, slug, policy_links, legal_settings, setup_completed, verified_at, created_at, updated_at',
+            'id, name, slug, policy_links, legal_settings, setup_completed, verified_at, created_at, updated_at, dedicated_key_saved_at',
           )
           .in('id', orgIds);
 
