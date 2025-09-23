@@ -1,3 +1,5 @@
+import { resolveControlAccessToken } from '@/lib/api-client.js'
+
 export type CurrentUserProfile = {
   id: string
   email: string | null
@@ -33,9 +35,10 @@ function buildHeaders(options: FetchCurrentUserOptions) {
   }
 
   if (options.accessToken) {
-    const token = options.accessToken.startsWith('Bearer ')
+    const rawToken = options.accessToken.startsWith('Bearer ')
       ? options.accessToken.slice('Bearer '.length)
       : options.accessToken
+    const token = resolveControlAccessToken(rawToken)
     const bearer = `Bearer ${token}`
     headers.authorization = bearer
     headers.Authorization = bearer

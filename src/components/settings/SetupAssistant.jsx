@@ -11,6 +11,7 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
 import { SETUP_SQL_SCRIPT } from '@/lib/setup-sql.js';
 import { useOrg } from '@/org/OrgContext.jsx';
+import { resolveControlAccessToken } from '@/lib/api-client.js';
 import { verifyOrgConnection } from '@/runtime/verification.js';
 import { fetchLeavePolicySettings } from '@/lib/settings-client.js';
 import { asError } from '@/lib/error-utils.js';
@@ -829,19 +830,16 @@ export default function SetupAssistant() {
         throw sessionError;
       }
 
-      const accessToken = sessionData?.session?.access_token || null;
-      if (!accessToken) {
-        throw new Error('נדרש להתחבר מחדש לפני שמירת המפתח הייעודי.');
-      }
-
+      const token = resolveControlAccessToken(sessionData?.session);
+      const bearer = `Bearer ${token}`;
       const response = await fetch('/api/save-org-credentials', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          authorization: `Bearer ${accessToken}`,
-          Authorization: `Bearer ${accessToken}`,
-          'x-supabase-authorization': `Bearer ${accessToken}`,
-          'X-Supabase-Authorization': `Bearer ${accessToken}`,
+          authorization: bearer,
+          Authorization: bearer,
+          'x-supabase-authorization': bearer,
+          'X-Supabase-Authorization': bearer,
         },
         body: JSON.stringify({
           org_id: activeOrg.id,
