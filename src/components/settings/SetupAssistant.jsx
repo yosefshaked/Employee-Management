@@ -1063,6 +1063,9 @@ export default function SetupAssistant() {
     if (session?.access_token) {
       return session.access_token;
     }
+    if (!authClient) {
+      return null;
+    }
     try {
       const { data, error } = await authClient.auth.getSession();
       if (error) throw error;
@@ -1145,6 +1148,10 @@ export default function SetupAssistant() {
 
   const handleTestConnection = async () => {
     if (!activeOrg || isTestingConnection) return;
+    if (!authClient) {
+      toast.error('חיבור Supabase עדיין נטען. נסו שוב בעוד רגע.');
+      return;
+    }
     if (hasUnsavedChanges) {
       toast.error('שמור את פרטי החיבור לפני בדיקת הקישוריות.');
       return;
@@ -1240,7 +1247,7 @@ export default function SetupAssistant() {
       clearRuntimeOrg();
       setConfigStatus('cleared');
 
-      if (error?.status === 401) {
+      if (error?.status === 401 && authClient) {
         try {
           await authClient.auth.refreshSession();
         } catch (refreshError) {

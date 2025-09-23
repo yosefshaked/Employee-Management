@@ -167,6 +167,12 @@ export function OrgProvider({ children }) {
     dataClient,
     setActiveOrg: setSupabaseActiveOrg,
   } = useSupabase();
+  const requireAuthClient = useCallback(() => {
+    if (!authClient) {
+      throw new Error('לקוח Supabase אינו זמין. נסו שוב לאחר שהחיבור הושלם.');
+    }
+    return authClient;
+  }, [authClient]);
   const [status, setStatus] = useState('idle');
   const [organizations, setOrganizations] = useState([]);
   const [activeOrgId, setActiveOrgId] = useState(null);
@@ -204,19 +210,24 @@ export function OrgProvider({ children }) {
       return { organizations: [], invites: [] };
     }
 
+    if (!authClient) {
+      return { organizations: [], invites: [] };
+    }
+
     loadingRef.current = true;
     setStatus((prev) => (prev === 'idle' ? 'loading' : prev));
     setError(null);
 
     try {
-      const membershipPromise = authClient
+      const client = authClient;
+      const membershipPromise = client
         .from('org_memberships')
         .select('id, role, org_id, user_id, created_at')
         .eq('user_id', user.id)
         .order('created_at', { ascending: true });
 
       const invitesPromise = user.email
-        ? authClient
+        ? client
             .from('org_invitations')
             .select('id, org_id, email, status, invited_by, created_at, expires_at')
             .eq('email', user.email.toLowerCase())
@@ -243,7 +254,7 @@ export function OrgProvider({ children }) {
       const connectionMap = new Map();
 
       if (orgIds.length) {
-        const { data: organizationsData, error: organizationsError } = await authClient
+        const { data: organizationsData, error: organizationsError } = await client
           .from('organizations')
           .select(
             'id, name, slug, policy_links, legal_settings, setup_completed, verified_at, created_at, updated_at',
@@ -266,7 +277,7 @@ export function OrgProvider({ children }) {
         .filter(Boolean);
 
       if (orgIds.length) {
-        const { data: settingsData, error: settingsError } = await authClient
+        const { data: settingsData, error: settingsError } = await client
           .from('org_settings')
           .select('org_id, supabase_url, anon_key, metadata, updated_at')
           .in('org_id', orgIds);
@@ -325,14 +336,19 @@ export function OrgProvider({ children }) {
         return;
       }
 
+      if (!authClient) {
+        return;
+      }
+
       try {
+        const client = authClient;
         const [membersResponse, invitesResponse] = await Promise.all([
-          authClient
+          client
             .from('org_memberships')
             .select('id, org_id, user_id, role, created_at')
             .eq('org_id', orgId)
             .order('created_at', { ascending: true }),
-          authClient
+          client
             .from('org_invitations')
             .select('id, org_id, email, status, invited_by, created_at, expires_at')
             .eq('org_id', orgId)
@@ -407,12 +423,21 @@ export function OrgProvider({ children }) {
       return;
     }
 
+    if (!authClient) {
+      setActiveOrgConfig(null);
+      setConfigStatus('idle');
+      setSupabaseActiveOrg(null);
+      return;
+    }
+
     const requestId = configRequestRef.current + 1;
     configRequestRef.current = requestId;
     setConfigStatus('loading');
 
+    const client = authClient;
+
     try {
-      const { data: sessionData, error: sessionError } = await authClient.auth.getSession();
+      const { data: sessionData, error: sessionError } = await client.auth.getSession();
 
       if (configRequestRef.current !== requestId) {
         return;
@@ -480,7 +505,7 @@ export function OrgProvider({ children }) {
       if (error?.status === 401) {
         toast.error('פג תוקף כניסה/חסר Bearer');
         try {
-          await authClient.auth.refreshSession();
+          await client.auth.refreshSession();
         } catch (refreshError) {
           console.error('Failed to refresh Supabase session after 401', refreshError);
         }
@@ -536,6 +561,10 @@ export function OrgProvider({ children }) {
       return;
     }
 
+    if (!authClient) {
+      return;
+    }
+
     if (!user) {
       resetState();
       lastUserIdRef.current = null;
@@ -577,7 +606,7 @@ export function OrgProvider({ children }) {
     return () => {
       isActive = false;
     };
-  }, [authStatus, user, loadMemberships, determineStatus, resetState, applyActiveOrg, loadOrgDirectory]);
+  }, [authStatus, authClient, user, loadMemberships, determineStatus, resetState, applyActiveOrg, loadOrgDirectory]);
 
   useEffect(() => {
     if (!activeOrgId) return;
@@ -638,11 +667,12 @@ export function OrgProvider({ children }) {
   const syncOrgSettings = useCallback(
     async (orgId, supabaseUrl, supabaseAnonKey) => {
       if (!orgId) throw new Error('זיהוי ארגון חסר.');
+      const client = requireAuthClient();
       const normalizedUrl = supabaseUrl ? supabaseUrl.trim() : '';
       const normalizedKey = supabaseAnonKey ? supabaseAnonKey.trim() : '';
 
       if (!normalizedUrl || !normalizedKey) {
-        const { error } = await authClient
+        const { error } = await client
           .from('org_settings')
           .delete()
           .eq('org_id', orgId);
@@ -685,7 +715,7 @@ export function OrgProvider({ children }) {
         updated_at: new Date().toISOString(),
       };
 
-      const { error } = await authClient
+      const { error } = await client
         .from('org_settings')
         .upsert(payload, { onConflict: 'org_id' });
       if (error) throw error;
@@ -724,13 +754,14 @@ export function OrgProvider({ children }) {
         });
       }
     },
-    [authClient, activeOrgId],
+    [requireAuthClient, activeOrgId],
   );
 
   const createOrganization = useCallback(
     async ({ name, supabaseUrl, supabaseAnonKey, policyLinks = [], legalSettings = {} }) => {
+      const client = requireAuthClient();
       if (!user?.id && !session?.user?.id) {
-        const { data: authUser, error: authError } = await authClient.auth.getUser();
+        const { data: authUser, error: authError } = await client.auth.getUser();
         if (authError) {
           console.error('Failed to resolve authenticated user for organization creation', authError);
           throw new Error('לא ניתן היה לאמת את המשתמש. נסה להתחבר מחדש.');
@@ -798,7 +829,7 @@ export function OrgProvider({ children }) {
         if (Object.keys(updates).length) {
           updates.updated_at = now;
 
-          const { error: updateError } = await authClient
+          const { error: updateError } = await client
             .from('organizations')
             .update(updates)
             .eq('id', effectiveOrgId);
@@ -821,21 +852,22 @@ export function OrgProvider({ children }) {
         throw new Error(message);
       }
     },
-    [authClient, user, session, refreshOrganizations, selectOrg, syncOrgSettings],
+    [requireAuthClient, user, session, refreshOrganizations, selectOrg, syncOrgSettings],
   );
 
   const updateOrganizationMetadata = useCallback(
     async (orgId, updates) => {
       if (!orgId) throw new Error('זיהוי ארגון חסר.');
+      const client = requireAuthClient();
       const payload = { ...updates, updated_at: new Date().toISOString() };
-      const { error } = await authClient
+      const { error } = await client
         .from('organizations')
         .update(payload)
         .eq('id', orgId);
       if (error) throw error;
       await refreshOrganizations();
     },
-    [authClient, refreshOrganizations],
+    [requireAuthClient, refreshOrganizations],
   );
 
   const updateConnection = useCallback(
@@ -875,7 +907,8 @@ export function OrgProvider({ children }) {
       const normalizedEmail = (email || '').trim().toLowerCase();
       if (!normalizedEmail) throw new Error('יש להזין כתובת אימייל תקינה.');
 
-      const { data, error } = await authClient
+      const client = requireAuthClient();
+      const { data, error } = await client
         .from('org_invitations')
         .insert({
           org_id: orgId,
@@ -891,26 +924,28 @@ export function OrgProvider({ children }) {
       toast.success('הזמנה נשלחה.');
       return data;
     },
-    [authClient, user, loadOrgDirectory],
+    [requireAuthClient, user, loadOrgDirectory],
   );
 
   const revokeInvite = useCallback(
     async (inviteId) => {
       if (!inviteId) return;
-      const { error } = await authClient
+      const client = requireAuthClient();
+      const { error } = await client
         .from('org_invitations')
         .update({ status: 'revoked', revoked_at: new Date().toISOString() })
         .eq('id', inviteId);
       if (error) throw error;
       if (activeOrgId) await loadOrgDirectory(activeOrgId);
     },
-    [authClient, activeOrgId, loadOrgDirectory],
+    [requireAuthClient, activeOrgId, loadOrgDirectory],
   );
 
   const removeMember = useCallback(
     async (membershipId) => {
       if (!membershipId) return;
-      const { error } = await authClient
+      const client = requireAuthClient();
+      const { error } = await client
         .from('org_memberships')
         .delete()
         .eq('id', membershipId);
@@ -920,14 +955,15 @@ export function OrgProvider({ children }) {
         await refreshOrganizations();
       }
     },
-    [authClient, activeOrgId, loadOrgDirectory, refreshOrganizations],
+    [requireAuthClient, activeOrgId, loadOrgDirectory, refreshOrganizations],
   );
 
   const acceptInvite = useCallback(
     async (inviteId) => {
       if (!inviteId || !user) throw new Error('הזמנה אינה זמינה.');
 
-      const { data: inviteData, error: inviteError } = await authClient
+      const client = requireAuthClient();
+      const { data: inviteData, error: inviteError } = await client
         .from('org_invitations')
         .select('id, org_id, status')
         .eq('id', inviteId)
@@ -942,7 +978,7 @@ export function OrgProvider({ children }) {
 
       const now = new Date().toISOString();
 
-      const { error: membershipError } = await authClient
+      const { error: membershipError } = await client
         .from('org_memberships')
         .insert({
           org_id: inviteData.org_id,
@@ -955,7 +991,7 @@ export function OrgProvider({ children }) {
         throw membershipError;
       }
 
-      const { error: updateError } = await authClient
+      const { error: updateError } = await client
         .from('org_invitations')
         .update({ status: 'accepted', accepted_at: now })
         .eq('id', inviteId);
@@ -966,7 +1002,7 @@ export function OrgProvider({ children }) {
       await selectOrg(inviteData.org_id);
       toast.success('הצטרפת לארגון בהצלחה.');
     },
-    [authClient, user, refreshOrganizations, selectOrg],
+    [requireAuthClient, user, refreshOrganizations, selectOrg],
   );
 
   const activeOrgConnection = useMemo(() => {
