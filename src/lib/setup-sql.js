@@ -1,3 +1,5 @@
+export const JWT_SECRET_PLACEHOLDER = 'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE';
+
 export const SETUP_SQL_SCRIPT_STEP_2_TABLES = `
 -- Step 2: Create required extensions and core tables
 CREATE EXTENSION IF NOT EXISTS pgjwt WITH SCHEMA extensions;
@@ -373,6 +375,49 @@ $$;
 
 grant execute on function public.setup_assistant_diagnostics() to authenticated;
 `;
+
+export const SETUP_SQL_SCRIPT_STEP_4_JWT = `
+-- Step 4: Provision the app_user role and generate the dedicated JWT key
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'app_user') THEN
+    CREATE ROLE app_user;
+  END IF;
+END
+$$;
+
+GRANT USAGE ON SCHEMA public TO app_user;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO app_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO app_user;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_user;
+
+SELECT extensions.sign(
+  json_build_object(
+    'role', 'app_user',
+    'exp', (EXTRACT(epoch FROM (NOW() + INTERVAL '1 year')))::integer,
+    'iat', (EXTRACT(epoch FROM NOW()))::integer
+  ),
+  '${JWT_SECRET_PLACEHOLDER}'
+) AS "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)";
+`;
+
+export function buildFullSetupSql(jwtSecret = '') {
+  const normalizedSecret = typeof jwtSecret === 'string' ? jwtSecret.trim() : '';
+  const script = [
+    SETUP_SQL_SCRIPT_STEP_2_TABLES,
+    SETUP_SQL_SCRIPT_STEP_3_POLICIES,
+    SETUP_SQL_SCRIPT_STEP_4_JWT,
+  ].join('\n\n');
+
+  if (!normalizedSecret) {
+    return script;
+  }
+
+  return script.split(JWT_SECRET_PLACEHOLDER).join(normalizedSecret);
+}
+
+export const SETUP_SQL_FULL_SCRIPT_WITH_PLACEHOLDER = buildFullSetupSql();
 
 export const SETUP_SQL_ADD_DEDICATED_KEY_PLAINTEXT_COLUMN = `
 ALTER TABLE public.organizations
