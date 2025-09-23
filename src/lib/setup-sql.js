@@ -1,4 +1,6 @@
 export const SETUP_SQL_SCRIPT = `
+CREATE EXTENSION IF NOT EXISTS pgjwt WITH SCHEMA extensions;
+
 -- שלב 1: יצירת סכימה מלאה ו-אובייקט עזר לאימות
 set search_path = public;
 
