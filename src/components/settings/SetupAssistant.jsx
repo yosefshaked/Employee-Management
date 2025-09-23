@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,27 +9,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
+import { SETUP_SQL_SCRIPT } from '@/lib/setup-sql.js';
 import { useOrg } from '@/org/OrgContext.jsx';
-import { useAuth } from '@/auth/AuthContext.jsx';
-import {
-  activateConfig,
-  clearConfig,
-  loadRuntimeConfig,
-  getRuntimeConfigDiagnostics,
-  MissingRuntimeConfigError,
-} from '@/runtime/config.js';
 import { verifyOrgConnection } from '@/runtime/verification.js';
 import { fetchLeavePolicySettings } from '@/lib/settings-client.js';
 import { asError } from '@/lib/error-utils.js';
 import { mapSupabaseError } from '@/org/errors.js';
-import {
-  activateRuntimeOrg,
-  clearRuntimeOrg,
-  getRuntimeOrgOrThrow,
-  waitRuntimeOrgReady,
-  getRuntimeSupabase,
-  resetRuntimeSupabase,
-} from '@/runtime/org-gate.js';
 import {
   Building2,
   AlertCircle,
@@ -74,238 +59,6 @@ const TABLE_LABELS = {
   Services: 'שירותים והצעות',
   Settings: 'הגדרות ארגון',
 };
-
-const SCHEMA_SQL = `-- שלב 1: יצירת סכימה מלאה ו-אובייקט עזר לאימות
-set search_path = public;
-
-create extension if not exists "pgcrypto";
-
-create table if not exists public."Employees" (
-  "id" uuid not null default gen_random_uuid(),
-  "name" text not null,
-  "employee_id" text not null,
-  "employee_type" text,
-  "current_rate" numeric,
-  "phone" text,
-  "email" text,
-  "start_date" date,
-  "is_active" boolean default true,
-  "notes" text,
-  "working_days" jsonb,
-  "annual_leave_days" numeric default 12,
-  "leave_pay_method" text,
-  "leave_fixed_day_rate" numeric,
-  "metadata" jsonb,
-  constraint "Employees_pkey" primary key ("id")
-);
-
-create table if not exists public."Services" (
-  "id" uuid not null default gen_random_uuid(),
-  "name" text not null,
-  "duration_minutes" bigint,
-  "payment_model" text,
-  "color" text,
-  "metadata" jsonb,
-  constraint "Services_pkey" primary key ("id")
-);
-
-create table if not exists public."RateHistory" (
-  "id" uuid not null default gen_random_uuid(),
-  "rate" numeric not null,
-  "effective_date" date not null,
-  "notes" text,
-  "employee_id" uuid not null default gen_random_uuid(),
-  "service_id" uuid default gen_random_uuid(),
-  "metadata" jsonb,
-  constraint "RateHistory_pkey" primary key ("id"),
-  constraint "RateHistory_employee_id_fkey" foreign key ("employee_id") references public."Employees"("id"),
-  constraint "RateHistory_service_id_fkey" foreign key ("service_id") references public."Services"("id")
-);
-
-create table if not exists public."WorkSessions" (
-  "id" uuid not null default gen_random_uuid(),
-  "employee_id" uuid not null default gen_random_uuid(),
-  "service_id" uuid default gen_random_uuid(),
-  "date" date not null,
-  "session_type" text,
-  "hours" numeric,
-  "sessions_count" bigint,
-  "students_count" bigint,
-  "rate_used" numeric,
-  "total_payment" numeric,
-  "notes" text,
-  "created_at" timestamptz default now(),
-  "entry_type" text not null default 'hours',
-  "payable" boolean,
-  "metadata" jsonb,
-  "deleted" boolean not null default false,
-  "deleted_at" timestamptz,
-  constraint "WorkSessions_pkey" primary key ("id"),
-  constraint "WorkSessions_employee_id_fkey" foreign key ("employee_id") references public."Employees"("id"),
-  constraint "WorkSessions_service_id_fkey" foreign key ("service_id") references public."Services"("id")
-);
-
-create table if not exists public."LeaveBalances" (
-  "id" bigint generated always as identity primary key,
-  "created_at" timestamptz not null default now(),
-  "employee_id" uuid not null default gen_random_uuid(),
-  "leave_type" text not null,
-  "balance" numeric not null default 0,
-  "effective_date" date not null,
-  "notes" text,
-  "metadata" jsonb,
-  constraint "LeaveBalances_employee_id_fkey" foreign key ("employee_id") references public."Employees"("id")
-);
-
-create table if not exists public."Settings" (
-  "id" uuid not null default gen_random_uuid(),
-  "created_at" timestamptz not null default now(),
-  "settings_value" jsonb not null,
-  "updated_at" timestamptz default now(),
-  "key" text not null unique,
-  "metadata" jsonb,
-  constraint "Settings_pkey" primary key ("id")
-);
-
-create index if not exists "RateHistory_employee_service_idx" on public."RateHistory" ("employee_id", "service_id", "effective_date");
-create index if not exists "LeaveBalances_employee_date_idx" on public."LeaveBalances" ("employee_id", "effective_date");
-create index if not exists "WorkSessions_employee_date_idx" on public."WorkSessions" ("employee_id", "date");
-create index if not exists "WorkSessions_service_idx" on public."WorkSessions" ("service_id");
-create index if not exists "WorkSessions_deleted_idx" on public."WorkSessions" ("deleted") where "deleted" = true;
-
-create or replace function public.setup_assistant_diagnostics()
-returns table (
-  table_name text,
-  has_table boolean,
-  rls_enabled boolean,
-  missing_policies text[],
-  delta_sql text
-)
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  required_tables constant text[] := array['Employees', 'WorkSessions', 'LeaveBalances', 'RateHistory', 'Services', 'Settings'];
-  required_policy_names text[];
-  required_commands constant text[] := array['SELECT', 'INSERT', 'UPDATE', 'DELETE'];
-  table_reg regclass;
-  existing_policies text[];
-  idx integer;
-begin
-  foreach table_name in array required_tables loop
-    required_policy_names := array[
-      format('Authenticated select %s', table_name),
-      format('Authenticated insert %s', table_name),
-      format('Authenticated update %s', table_name),
-      format('Authenticated delete %s', table_name)
-    ];
-
-    table_reg := to_regclass(format('public.%I', table_name));
-    has_table := table_reg is not null;
-    rls_enabled := false;
-    missing_policies := array[]::text[];
-    delta_sql := '';
-
-    if not has_table then
-      missing_policies := required_policy_names;
-      delta_sql := format('-- הטבלה "%s" חסרה. הרץ את בלוק הסכימה המלא.', table_name);
-      return next;
-      continue;
-    end if;
-
-    select coalesce(c.relrowsecurity, false)
-      into rls_enabled
-    from pg_class c
-    where c.oid = table_reg;
-
-    select coalesce(array_agg(policyname order by policyname), array[]::text[])
-      into existing_policies
-    from pg_policies
-    where schemaname = 'public'
-      and lower(tablename) = lower(table_name);
-
-    missing_policies := array(
-      select policy_name
-      from unnest(required_policy_names) as policy_name
-      where not (policy_name = any(existing_policies))
-    );
-
-    if not rls_enabled then
-      delta_sql := delta_sql || format('ALTER TABLE public."%s" ENABLE ROW LEVEL SECURITY;', table_name) || E'\n';
-    end if;
-
-    if array_length(missing_policies, 1) is null then
-      missing_policies := array[]::text[];
-    else
-      for idx in 1..array_length(required_policy_names, 1) loop
-        if array_position(missing_policies, required_policy_names[idx]) is not null then
-          if required_commands[idx] = 'SELECT' then
-            delta_sql := delta_sql || format(
-              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR SELECT TO authenticated%s  USING (true);%s',
-              required_policy_names[idx],
-              table_name,
-              E'\n',
-              required_policy_names[idx],
-              table_name,
-              E'\n',
-              E'\n',
-              E'\n'
-            );
-          elsif required_commands[idx] = 'INSERT' then
-            delta_sql := delta_sql || format(
-              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR INSERT TO authenticated%s  WITH CHECK (true);%s',
-              required_policy_names[idx],
-              table_name,
-              E'\n',
-              required_policy_names[idx],
-              table_name,
-              E'\n',
-              E'\n',
-              E'\n'
-            );
-          elsif required_commands[idx] = 'UPDATE' then
-            delta_sql := delta_sql || format(
-              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR UPDATE TO authenticated%s  USING (true)%s  WITH CHECK (true);%s',
-              required_policy_names[idx],
-              table_name,
-              E'\n',
-              required_policy_names[idx],
-              table_name,
-              E'\n',
-              E'\n',
-              E'\n',
-              E'\n'
-            );
-          elsif required_commands[idx] = 'DELETE' then
-            delta_sql := delta_sql || format(
-              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR DELETE TO authenticated%s  USING (true);%s',
-              required_policy_names[idx],
-              table_name,
-              E'\n',
-              required_policy_names[idx],
-              table_name,
-              E'\n',
-              E'\n',
-              E'\n'
-            );
-          end if;
-        end if;
-      end loop;
-    end if;
-    if delta_sql = '' then
-      delta_sql := null;
-    end if;
-
-    return next;
-  end loop;
-
-  return;
-end;
-$$;
-
-grant execute on function public.setup_assistant_diagnostics() to authenticated;
-`;
 
 
 const RLS_SQL = `-- שלב 2: הפעלת RLS והוספת מדיניות מאובטחת
@@ -566,6 +319,23 @@ function interpretDiagnostics(diagnostics) {
   return { message, suggestions };
 }
 
+function createDiagnosticsSnapshot(orgId, overrides = {}) {
+  return {
+    status: null,
+    scope: 'org',
+    endpoint: null,
+    orgId: orgId || null,
+    accessTokenPreview: null,
+    ok: false,
+    timestamp: Date.now(),
+    error: null,
+    body: null,
+    bodyIsJson: false,
+    bodyText: null,
+    ...overrides,
+  };
+}
+
 function extractErrorStatus(error) {
   if (!error) {
     return null;
@@ -711,22 +481,27 @@ function StepSection({ number, title, description, statusBadge, children }) {
 
 export default function SetupAssistant() {
   const {
-    activeOrg,
+    activeOrg: orgActiveOrg,
     activeOrgConnection,
     activeOrgHasConnection,
     updateConnection,
     recordVerification,
     createOrganization,
   } = useOrg();
-  const { session } = useAuth();
-  const { authClient, dataClient, user, loading } = useSupabase();
+  const {
+    authClient,
+    dataClient,
+    user,
+    loading,
+    activeOrg: supabaseActiveOrg,
+  } = useSupabase();
+  const activeOrg = orgActiveOrg ?? supabaseActiveOrg ?? null;
   const supabaseReady = !loading && Boolean(authClient) && Boolean(user);
   const [connection, setConnection] = useState({ ...INITIAL_CONNECTION_VALUES });
   const [originalConnection, setOriginalConnection] = useState({ ...INITIAL_CONNECTION_VALUES });
   const [isSavingConnection, setIsSavingConnection] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const [verificationStatus, setVerificationStatus] = useState(activeOrg?.setup_completed ? 'success' : 'idle');
-  const [configStatus, setConfigStatus] = useState('idle');
   const [verifyResults, setVerifyResults] = useState([]);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyError, setVerifyError] = useState('');
@@ -739,7 +514,6 @@ export default function SetupAssistant() {
   const [connectionTest, setConnectionTest] = useState(INITIAL_CONNECTION_TEST);
   const [leavePolicyStatus, setLeavePolicyStatus] = useState(INITIAL_LEAVE_POLICY_STATUS);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
-  const clearedRuntimeConfigRef = useRef(false);
   const activeOrgId = activeOrg?.id || null;
 
   const handleOpenCreateDialog = () => {
@@ -817,9 +591,6 @@ export default function SetupAssistant() {
 
   useEffect(() => {
     if (!activeOrg) {
-      resetRuntimeSupabase();
-      clearConfig();
-      clearRuntimeOrg();
       setConnection({ ...INITIAL_CONNECTION_VALUES });
       setOriginalConnection({ ...INITIAL_CONNECTION_VALUES });
       setLastSavedAt(null);
@@ -830,8 +601,6 @@ export default function SetupAssistant() {
       setVerifyResults([]);
       setVerifyError('');
       setVerifyErrorInfo(null);
-      setConfigStatus('idle');
-      clearedRuntimeConfigRef.current = false;
       return;
     }
 
@@ -890,7 +659,6 @@ export default function SetupAssistant() {
     setVerifyResults([]);
     setVerifyError('');
     setVerifyErrorInfo(null);
-    clearedRuntimeConfigRef.current = false;
   }, [activeOrg, activeOrgConnection]);
 
   const hasUnsavedChanges = useMemo(() => {
@@ -905,65 +673,9 @@ export default function SetupAssistant() {
   }, [connection, originalConnection]);
 
   useEffect(() => {
-    if (!hasUnsavedChanges) {
-      clearedRuntimeConfigRef.current = false;
-    }
-  }, [hasUnsavedChanges]);
-
-  useEffect(() => {
-    if (!activeOrg) {
-      return;
-    }
-    if (!hasSavedConnection) {
-      setConfigStatus('idle');
-      return;
-    }
-    if (hasUnsavedChanges) {
-      return;
-    }
-
-    const supabaseUrl = originalConnection.supabase_url?.trim();
-    const supabaseAnonKey = originalConnection.anon_key?.trim();
-
-    if (!supabaseUrl || !supabaseAnonKey) {
-      setConfigStatus('cleared');
-      return;
-    }
-
     let cancelled = false;
 
-    const applyConfig = async () => {
-      setConfigStatus('activating');
-      try {
-        await activateConfig(
-          { supabaseUrl, supabaseAnonKey },
-          { source: 'org-api', orgId: activeOrg.id },
-        );
-        activateRuntimeOrg({ orgId: activeOrg.id, supabaseUrl, supabaseAnonKey });
-        await waitRuntimeOrgReady();
-        if (!cancelled) {
-          setConfigStatus('activated');
-        }
-      } catch (error) {
-        console.error('Failed to activate connection while syncing setup assistant', error);
-        clearRuntimeOrg();
-        if (!cancelled) {
-          setConfigStatus('cleared');
-        }
-      }
-    };
-
-    applyConfig();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeOrg, hasSavedConnection, hasUnsavedChanges, originalConnection.supabase_url, originalConnection.anon_key]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    if (!activeOrgId || configStatus !== 'activated') {
+    if (!activeOrgId || !dataClient) {
       setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
       return () => {
         cancelled = true;
@@ -979,11 +691,7 @@ export default function SetupAssistant() {
 
     const loadLeavePolicyStatus = async () => {
       try {
-        const runtimeSupabase = await getRuntimeSupabase();
-        if (cancelled) {
-          return;
-        }
-        const { value } = await fetchLeavePolicySettings(runtimeSupabase);
+        const { value } = await fetchLeavePolicySettings(dataClient);
         if (cancelled) {
           return;
         }
@@ -1011,7 +719,7 @@ export default function SetupAssistant() {
     return () => {
       cancelled = true;
     };
-  }, [activeOrgId, configStatus]);
+  }, [activeOrgId, dataClient]);
 
   const hasConnectionValues = Boolean(connection.supabase_url.trim() && connection.anon_key.trim());
   const hasSavedConnection = Boolean(
@@ -1019,25 +727,11 @@ export default function SetupAssistant() {
     && originalConnection.supabase_url
     && originalConnection.anon_key
   );
-  const orgSelected = useMemo(() => {
-    if (!activeOrg || configStatus !== 'activated') {
-      return false;
-    }
-    try {
-      const org = getRuntimeOrgOrThrow();
-      return Boolean(org?.orgId && org.orgId === activeOrg.id);
-    } catch {
-      return false;
-    }
-  }, [activeOrg, configStatus]);
+  const orgSelected = useMemo(() => Boolean(activeOrg?.id), [activeOrg?.id]);
 
   const handleConnectionChange = (field) => (event) => {
     const value = event.target.value;
     setConnection((prev) => ({ ...prev, [field]: value }));
-
-    if (clearedRuntimeConfigRef.current) {
-      return;
-    }
 
     const isSensitiveField = field === 'supabase_url' || field === 'anon_key';
     if (!isSensitiveField) {
@@ -1051,29 +745,8 @@ export default function SetupAssistant() {
       return;
     }
 
-    resetRuntimeSupabase();
-    clearConfig();
-    clearRuntimeOrg();
     setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
-    clearedRuntimeConfigRef.current = true;
-    setConfigStatus('cleared');
-  };
-
-  const resolveAccessToken = async () => {
-    if (session?.access_token) {
-      return session.access_token;
-    }
-    if (!authClient) {
-      return null;
-    }
-    try {
-      const { data, error } = await authClient.auth.getSession();
-      if (error) throw error;
-      return data?.session?.access_token || null;
-    } catch (error) {
-      console.error('Failed to resolve access token for connection test', error);
-      return null;
-    }
+    setConnectionTest(INITIAL_CONNECTION_TEST);
   };
 
   const extractSupabaseError = (error) => {
@@ -1133,7 +806,6 @@ export default function SetupAssistant() {
       });
 
       setOriginalConnection({ ...connection });
-      clearedRuntimeConfigRef.current = false;
       setLastSavedAt(now);
       setConnectionTest(INITIAL_CONNECTION_TEST);
       setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
@@ -1148,7 +820,7 @@ export default function SetupAssistant() {
 
   const handleTestConnection = async () => {
     if (!activeOrg || isTestingConnection) return;
-    if (!authClient) {
+    if (!dataClient) {
       toast.error('חיבור Supabase עדיין נטען. נסו שוב בעוד רגע.');
       return;
     }
@@ -1167,37 +839,14 @@ export default function SetupAssistant() {
     });
 
     try {
-      const accessToken = await resolveAccessToken();
-
-      if (!accessToken) {
-        throw new MissingRuntimeConfigError('לא אותר אסימון כניסה. התחבר מחדש ונסה שוב.');
-      }
-
-      const config = await loadRuntimeConfig({ accessToken, orgId: activeOrg.id, force: true });
-      resetRuntimeSupabase();
-      setConfigStatus('activating');
-      await activateConfig(
-        {
-          supabaseUrl: config.supabaseUrl,
-          supabaseAnonKey: config.supabaseAnonKey,
-        },
-        { source: config?.source || 'org-api', orgId: activeOrg.id },
-      );
-      activateRuntimeOrg({
-        orgId: activeOrg.id,
-        supabaseUrl: config.supabaseUrl,
-        supabaseAnonKey: config.supabaseAnonKey,
-      });
-      await waitRuntimeOrgReady();
-      setConfigStatus('activated');
-      if (!dataClient) {
-        throw new Error('Supabase client is unavailable for verification.');
-      }
       const verification = await verifyOrgConnection(dataClient);
-      const diagnostics = getRuntimeConfigDiagnostics();
       const leavePolicyValue = verification?.settingsValue ?? null;
       const policyState = leavePolicyValue ? 'configured' : 'missing';
       const now = new Date().toISOString();
+      const diagnostics = createDiagnosticsSnapshot(activeOrg.id, {
+        status: 200,
+        ok: true,
+      });
 
       setLeavePolicyStatus({
         state: policyState,
@@ -1211,7 +860,7 @@ export default function SetupAssistant() {
         message:
           policyState === 'configured'
             ? 'חיבור Supabase אומת בהצלחה ונמצאה מדיניות leave_policy פעילה בטבלת Settings.'
-            : 'חיבור Supabase אומת בהצלחה. טבלת Settings נגישה אך leave_policy טרם הוגדרה – ניתן להמשיך עם ברירות המחדל עד שתגדירו מדיניות.',
+            : 'חיבור Supabase אומת בהצלחה. טבלת Settings נגישה אך leave_policy טרם הוגדרה – ניתן להמשיך עם ברירות המחדל עד שתגדרו מדיניות.',
         diagnostics,
         supabaseError: null,
         completedAt: now,
@@ -1219,20 +868,20 @@ export default function SetupAssistant() {
       toast.success('חיבור הארגון אומת בהצלחה.');
     } catch (error) {
       console.error('Setup assistant connection test failed', error);
-      const diagnostics = getRuntimeConfigDiagnostics();
-      const interpretation = interpretDiagnostics(diagnostics);
       const supabaseErrorInfo = extractSupabaseError(error);
-      const defaultMessage = error instanceof MissingRuntimeConfigError
-        ? error.message
-        : supabaseErrorInfo?.message
-          || (typeof error?.message === 'string' && error.message.trim()
-            ? error.message
-            : 'בדיקת החיבור נכשלה. ודא שהפונקציה /api/org/{orgId}/keys זמינה ומחזירה JSON תקין.');
-      const message = interpretation?.message || defaultMessage;
+      const normalizedError = asError(error);
+      const fallbackMessage = supabaseErrorInfo?.message
+        || (typeof normalizedError?.message === 'string' && normalizedError.message.trim()
+          ? normalizedError.message
+          : 'בדיקת החיבור נכשלה. ודא שהפונקציה /api/org/{orgId}/keys זמינה ומחזירה JSON תקין.');
+      const diagnostics = createDiagnosticsSnapshot(activeOrg?.id ?? null, {
+        ok: false,
+        error: fallbackMessage,
+      });
 
       setConnectionTest({
         status: 'error',
-        message,
+        message: fallbackMessage,
         diagnostics,
         supabaseError: supabaseErrorInfo,
         completedAt: new Date().toISOString(),
@@ -1240,20 +889,10 @@ export default function SetupAssistant() {
       setLeavePolicyStatus({
         state: 'error',
         policy: null,
-        error: asError(error),
+        error: normalizedError,
         fetchedAt: new Date().toISOString(),
       });
-      toast.error(message);
-      clearRuntimeOrg();
-      setConfigStatus('cleared');
-
-      if (error?.status === 401 && authClient) {
-        try {
-          await authClient.auth.refreshSession();
-        } catch (refreshError) {
-          console.error('Failed to refresh session after connection test error', refreshError);
-        }
-      }
+      toast.error(fallbackMessage);
     } finally {
       setIsTestingConnection(false);
     }
@@ -1290,6 +929,10 @@ export default function SetupAssistant() {
       toast.error('חיבור Supabase עדיין נטען. נסו שוב בעוד רגע.');
       return;
     }
+    if (!dataClient) {
+      toast.error('חיבור Supabase עדיין נטען. נסו שוב בעוד רגע.');
+      return;
+    }
     setIsVerifying(true);
     setVerifyError('');
     setVerifyErrorInfo(null);
@@ -1297,32 +940,7 @@ export default function SetupAssistant() {
     setVerificationStatus('running');
 
     try {
-      if (configStatus !== 'activated') {
-        throw new MissingRuntimeConfigError('לא נבחר ארגון פעיל או שהחיבור שלו טרם הוגדר.');
-      }
-
-      let runtimeOrg = null;
-      try {
-        runtimeOrg = getRuntimeOrgOrThrow();
-      } catch {
-        runtimeOrg = null;
-      }
-
-      if (!runtimeOrg || runtimeOrg.orgId !== activeOrg.id) {
-        await waitRuntimeOrgReady();
-        try {
-          runtimeOrg = getRuntimeOrgOrThrow();
-        } catch {
-          runtimeOrg = null;
-        }
-      }
-
-      if (!runtimeOrg || runtimeOrg.orgId !== activeOrg.id) {
-        throw new MissingRuntimeConfigError('לא נבחר ארגון פעיל או שהחיבור שלו טרם הוגדר.');
-      }
-
-      const runtimeSupabase = await getRuntimeSupabase();
-      const { data, error } = await runtimeSupabase.rpc('setup_assistant_diagnostics');
+      const { data, error } = await dataClient.rpc('setup_assistant_diagnostics');
 
       if (error) {
         throw error;
@@ -1635,32 +1253,8 @@ export default function SetupAssistant() {
     ? 'ניתן לעדכן את הפרטים בכל עת – הם נשמרים בהגדרות הארגון.'
     : 'נשמור עבורך את הכתובת והמפתח בחשבון הארגון כדי שכל המנהלים יוכלו להמשיך את העבודה.';
 
-  if (!activeOrg) {
-    return (
-      <>
-        <Card className="border-0 shadow-xl bg-white/90" dir="rtl">
-          <CardHeader className="border-b border-slate-200">
-            <CardTitle className="text-2xl font-semibold text-slate-900">אשף הגדרה ראשוני ל-Supabase</CardTitle>
-            <p className="text-sm text-slate-600 mt-2">
-              בחר או צור ארגון לפני שמגדירים חיבור ל-Supabase. ניתן לבצע זאת ממסך בחירת הארגון או בלחיצה על הכפתור שלמטה.
-            </p>
-          </CardHeader>
-          <CardContent className="py-8 space-y-4">
-            <p className="text-sm text-slate-500 text-center">אין ארגון פעיל כרגע.</p>
-            <div className="flex flex-col items-center gap-3">
-              <Button onClick={handleOpenCreateDialog} className="gap-2">
-                <Building2 className="w-4 h-4" aria-hidden="true" />
-                צור ארגון חדש
-              </Button>
-              <p className="text-xs text-slate-500 text-center max-w-sm">
-                לאחר יצירת הארגון ניתן לחזור לאשף ולשמור כאן את פרטי החיבור ל-Supabase.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-        {renderCreateOrgDialog()}
-      </>
-    );
+  if (!activeOrg || (activeOrgHasConnection && !dataClient)) {
+    return <div>Loading organization data...</div>;
   }
 
   return (
@@ -1794,6 +1388,7 @@ export default function SetupAssistant() {
                     || isTestingConnection
                     || hasUnsavedChanges
                     || !hasConnectionValues
+                    || !dataClient
                     || !supabaseReady
                   }
                   className="gap-2"
@@ -1824,7 +1419,7 @@ export default function SetupAssistant() {
           description="הרץ את בלוק הסכימה ולאחריו את בלוק מדיניות ה-RLS בעורך ה-SQL של Supabase. מומלץ להריץ כבעלים בלבד."
         >
           <div className="space-y-6">
-            <CodeBlock title="בלוק סכימה מלא" code={SCHEMA_SQL} ariaLabel="העתק את בלוק הסכימה" />
+            <CodeBlock title="בלוק סכימה מלא" code={SETUP_SQL_SCRIPT} ariaLabel="העתק את בלוק הסכימה" />
             <CodeBlock title="בלוק RLS ומדיניות" code={RLS_SQL} ariaLabel="העתק את בלוק ה-RLS" />
             <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
               לאחר הרצת שני הבלוקים, עבור לשלב האימות כדי לוודא שהטבלאות, המדיניות ופונקציית הבדיקה קיימות. ניתן להפעיל את ה-SQL כמה פעמים – כל המדיניות נמחקות עם DROP POLICY IF EXISTS לפני יצירתן מחדש כדי לאפס תצורות שגויות ללא שגיאות כפולות.
@@ -1855,7 +1450,7 @@ export default function SetupAssistant() {
                     !hasSavedConnection ||
                     !orgSelected ||
                     hasUnsavedChanges ||
-                    configStatus !== 'activated' ||
+                    !dataClient ||
                     !supabaseReady
                   }
                   className="gap-2"

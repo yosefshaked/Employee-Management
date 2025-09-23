@@ -161,6 +161,7 @@ function deriveNameFromMetadata(metadata) {
 }
 
 export function OrgProvider({ children }) {
+  console.log('[DEBUG 7] OrgProvider rendering.');
   const { status: authStatus, user, session } = useAuth();
   const {
     authClient,
