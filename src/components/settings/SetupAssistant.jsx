@@ -1761,6 +1761,9 @@ export default function SetupAssistant() {
                 onPaste={handleDedicatedKeyPaste}
                 placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
               />
+              <p className="text-xs text-slate-400">
+                (טיפ: לחץ על המפתח בעורך ה-SQL כדי לבחור אותו, ואז לחץ Ctrl+C כדי להעתיק)
+              </p>
               <p className="text-xs text-slate-500">
                 השדה לקריאה בלבד כדי למנוע שינוי לא רצוי. ניתן להשתמש בקיצור Ctrl+V (או ⌘+V) או בכפתור ההדבקה להלן.
               </p>
