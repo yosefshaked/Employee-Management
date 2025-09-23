@@ -9,9 +9,9 @@ import { searchVariants } from "@/lib/layoutSwap";
 import EmployeeForm from "../components/employees/EmployeeForm";
 import LeaveOverview from "../components/employees/LeaveOverview.jsx";
 import { useOrg } from '@/org/OrgContext.jsx';
-import { fetchLeavePolicySettings, fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
 import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, normalizeLeavePayPolicy } from "@/lib/leave.js";
 import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { fetchEmployeesList, updateEmployee as updateEmployeeRequest } from '@/api/employees.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -41,53 +41,38 @@ export default function Employees() {
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
-  const { tenantClientReady, activeOrgHasConnection } = useOrg();
-  const { dataClient, authClient, user, loading } = useSupabase();
+  const { tenantClientReady, activeOrgHasConnection, activeOrg, activeOrgId } = useOrg();
+  const { authClient, user, loading, session } = useSupabase();
 
   const loadData = useCallback(async () => {
-    if (!tenantClientReady || !activeOrgHasConnection || !dataClient) {
+    if (!tenantClientReady || !activeOrgHasConnection || !session || !activeOrgId) {
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
     try {
-      const [
-        employeesData,
-        ratesData,
-        servicesData,
-        leavePolicySettings,
-        leaveLedgerData,
-        leavePayPolicySettings,
-      ] = await Promise.all([
-        dataClient.from('Employees').select('*').order('name'),
-        dataClient.from('RateHistory').select('*'),
-        dataClient.from('Services').select('*'),
-        fetchLeavePolicySettings(dataClient),
-        dataClient.from('LeaveBalances').select('*'),
-        fetchLeavePayPolicySettings(dataClient),
-      ]);
+      const bundle = await fetchEmployeesList({ session, orgId: activeOrgId });
+      const employeeRecords = Array.isArray(bundle?.employees) ? bundle.employees : [];
+      const rateHistoryRecords = Array.isArray(bundle?.rateHistory) ? bundle.rateHistory : [];
+      const serviceRecords = Array.isArray(bundle?.services) ? bundle.services : [];
+      const leaveLedgerRecords = Array.isArray(bundle?.leaveBalances) ? bundle.leaveBalances : [];
 
-      if (employeesData.error) throw employeesData.error;
-      if (ratesData.error) throw ratesData.error;
-      if (servicesData.error) throw servicesData.error;
-      if (leaveLedgerData.error) throw leaveLedgerData.error;
-
-      setEmployees(employeesData.data);
-      setRateHistories(ratesData.data);
-      const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
+      setEmployees(employeeRecords);
+      setRateHistories(rateHistoryRecords);
+      const filteredServices = serviceRecords.filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
       setServices(filteredServices);
-      setLeaveBalances(sortLeaveLedger(leaveLedgerData.data || []));
+      setLeaveBalances(sortLeaveLedger(leaveLedgerRecords));
 
       setLeavePolicy(
-        leavePolicySettings.value
-          ? normalizeLeavePolicy(leavePolicySettings.value)
+        bundle?.leavePolicy
+          ? normalizeLeavePolicy(bundle.leavePolicy)
           : DEFAULT_LEAVE_POLICY,
       );
 
       setLeavePayPolicy(
-        leavePayPolicySettings.value
-          ? normalizeLeavePayPolicy(leavePayPolicySettings.value)
+        bundle?.leavePayPolicy
+          ? normalizeLeavePayPolicy(bundle.leavePayPolicy)
           : DEFAULT_LEAVE_PAY_POLICY,
       );
     } catch (error) {
@@ -95,7 +80,7 @@ export default function Employees() {
       toast.error("שגיאה בטעינת הנתונים");
     }
     setIsLoading(false);
-  }, [tenantClientReady, activeOrgHasConnection, dataClient]);
+  }, [tenantClientReady, activeOrgHasConnection, session, activeOrgId]);
 
   const filterEmployees = useCallback(() => {
     let filtered = employees;
@@ -115,141 +100,31 @@ export default function Employees() {
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { filterEmployees(); }, [filterEmployees]);
 
-  const handleSubmit = async ({ employeeData, serviceRates, rateHistory }) => {
-    try {
-      if (!dataClient) {
-        throw new Error('חיבור Supabase אינו זמין.');
-      }
-      // Separate the rate from the main employee data to avoid saving it in the Employees table
-      const { current_rate, ...employeeDetails } = employeeData;
-      const annualLeave = Number(employeeDetails.annual_leave_days);
-      employeeDetails.annual_leave_days = Number.isNaN(annualLeave) ? 0 : annualLeave;
-      const isNewEmployee = !editingEmployee;
-      let employeeId;
-
-      // Step 1: Insert or Update the employee in the 'Employees' table
-      if (isNewEmployee) {
-        const { data, error } = await dataClient.from('Employees').insert([employeeDetails]).select('id').single();
-        if (error) throw error;
-        employeeId = data.id;
-        toast.success("העובד נוצר בהצלחה!");
-      } else {
-        employeeId = editingEmployee.id;
-        const { error } = await dataClient.from('Employees').update(employeeDetails).eq('id', employeeId);
-        if (error) throw error;
-        toast.success("פרטי העובד עודכנו בהצלחה!");
-      }
-
-      // Step 2: Prepare the rate updates for the 'RateHistory' table only when rates change
-      const rateUpdates = [];
-      const today = new Date().toISOString().split('T')[0];
-      const effective_date = isNewEmployee
-        ? (employeeDetails.start_date || today)
-        : today;
-      const notes = isNewEmployee ? 'תעריף התחלתי' : 'שינוי תעריף';
-
-      let latestRates = {};
-      let existingHistory = [];
-      if (!isNewEmployee) {
-        existingHistory = rateHistory || rateHistories.filter(r => r.employee_id === employeeId);
-        existingHistory.forEach(r => {
-          if (!latestRates[r.service_id] || new Date(r.effective_date) > new Date(latestRates[r.service_id].effective_date)) {
-            latestRates[r.service_id] = r;
-          }
-        });
-      }
-
-      // Handle hourly and global employees
-      if (employeeData.employee_type === 'hourly' || employeeData.employee_type === 'global') {
-        const rateValue = parseFloat(current_rate);
-        const existingRate = latestRates[GENERIC_RATE_SERVICE_ID]
-          ? parseFloat(latestRates[GENERIC_RATE_SERVICE_ID].rate)
-          : null;
-        if (!isNaN(rateValue) && (isNewEmployee || existingRate === null || rateValue !== existingRate)) {
-          if (existingHistory.some(r => r.service_id === GENERIC_RATE_SERVICE_ID && r.effective_date === today)) {
-            toast.error("כבר קיים שינוי תעריף להיום. ניתן לערוך אותו באזור היסטוריית התעריפים.");
-            return;
-          }
-          rateUpdates.push({
-            employee_id: employeeId,
-            service_id: GENERIC_RATE_SERVICE_ID,
-            effective_date,
-            rate: rateValue,
-            notes,
-          });
-        }
-      }
-
-      // Handle instructor employees
-      if (employeeData.employee_type === 'instructor') {
-        for (const serviceId of Object.keys(serviceRates)) {
-          const rateValue = parseFloat(serviceRates[serviceId]);
-          const existingRate = latestRates[serviceId]
-            ? parseFloat(latestRates[serviceId].rate)
-            : null;
-          if (!isNaN(rateValue) && (isNewEmployee || existingRate === null || rateValue !== existingRate)) {
-            if (existingHistory.some(r => r.service_id === serviceId && r.effective_date === today)) {
-              toast.error("כבר קיים שינוי תעריף להיום. ניתן לערוך אותו באזור היסטוריית התעריפים.");
-              return;
-            }
-            rateUpdates.push({
-              employee_id: employeeId,
-              service_id: serviceId,
-              effective_date,
-              rate: rateValue,
-              notes,
-            });
-          }
-        }
-      }
-
-      // Step 3: Upsert all prepared rate updates into 'RateHistory'
-      if (rateUpdates.length > 0) {
-        const { error } = await dataClient.from('RateHistory').upsert(rateUpdates, { onConflict: 'employee_id,service_id,effective_date' });
-        if (error) throw error;
-      }
-
-      // Step 3b: Handle manual rate history edits for existing employees
-      if (!isNewEmployee && rateHistory) {
-        const rateUpdateKeys = new Set(
-          rateUpdates.map(r => `${r.service_id}-${r.effective_date}`)
-        );
-        const entriesToUpsert = rateHistory
-          .filter(r => !rateUpdateKeys.has(`${r.service_id}-${r.effective_date}`))
-          .map(({ id, ...rest }) => ({
-            ...rest,
-            employee_id: employeeId,
-            ...(id ? { id } : {}),
-          }));
-        if (entriesToUpsert.length > 0) {
-          const { error } = await dataClient
-            .from('RateHistory')
-            .upsert(entriesToUpsert, { onConflict: 'id' });
-          if (error) throw error;
-        }
-      }
-
-      // Step 4: Cleanup and reload
-      setShowForm(false);
-      setEditingEmployee(null);
-      loadData();
-
-    } catch (error) {
-      console.error("Error in handleSubmit:", error);
-      toast.error(`שגיאה בשמירת הנתונים: ${error.message}`);
-      throw error;
-    }
-  };
-
   const handleEdit = (employee) => {
     setEditingEmployee(employee);
     setShowForm(true);
   };
 
+  const handleFormSuccess = () => {
+    setShowForm(false);
+    setEditingEmployee(null);
+    loadData();
+  };
+
   const handleToggleActive = async (employee) => {
-    if (!dataClient) return;
-    const { error } = await dataClient.from('Employees').update({ is_active: !employee.is_active }).eq('id', employee.id);
-    if (!error) loadData();
+    try {
+      await updateEmployeeRequest({
+        session,
+        orgId: activeOrgId,
+        employeeId: employee.id,
+        body: { updates: { is_active: !employee.is_active } },
+      });
+      toast.success('סטטוס העובד עודכן בהצלחה.');
+      loadData();
+    } catch (error) {
+      console.error('Failed to toggle employee status', error);
+      toast.error('עדכון סטטוס העובד נכשל.');
+    }
   };
 
   if (loading || !authClient) {
@@ -268,7 +143,7 @@ export default function Employees() {
     );
   }
 
-  if (!dataClient) {
+  if (!activeOrgHasConnection || !activeOrg) {
     return (
       <div className="p-6 text-center text-slate-500">
         בחרו ארגון עם חיבור פעיל כדי להמשיך.
@@ -292,7 +167,9 @@ export default function Employees() {
         {showForm ? (
           <EmployeeForm
             employee={editingEmployee}
-            onSubmit={handleSubmit}
+            services={services}
+            rateHistories={rateHistories}
+            onSuccess={handleFormSuccess}
             onCancel={() => { setShowForm(false); setEditingEmployee(null); }}
           />
         ) : (

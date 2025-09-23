@@ -21,6 +21,8 @@ import {
 import { toast } from 'sonner';
 import { Loader2, ShieldCheck, Info } from 'lucide-react';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
+import { updateEmployee } from '@/api/employees.js';
 import { selectLeaveRemaining, selectHolidayForDate } from '@/selectors.js';
 import {
   DEFAULT_LEAVE_POLICY,
@@ -76,7 +78,8 @@ export default function LeaveOverview({
   const [overrideRate, setOverrideRate] = useState('');
   const [isSavingOverride, setIsSavingOverride] = useState(false);
   const [isOverrideDialogOpen, setIsOverrideDialogOpen] = useState(false);
-  const { dataClient, authClient, user, loading } = useSupabase();
+  const { dataClient, authClient, user, loading, session } = useSupabase();
+  const { activeOrgId } = useOrg();
 
   const usageOptions = useMemo(() => {
     return LEAVE_TYPE_OPTIONS.filter(option => leavePolicy.allow_half_day || option.value !== 'half_day');
@@ -310,19 +313,23 @@ export default function LeaveOverview({
     }
     setIsSavingOverride(true);
     try {
-      if (!dataClient) {
-        throw new Error('חיבור Supabase אינו זמין.');
+      if (!session) {
+        throw new Error('יש להתחבר מחדש לפני שמירת העקיפה.');
+      }
+      if (!activeOrgId) {
+        throw new Error('בחרו ארגון פעיל לפני שמירת העקיפה.');
       }
       const methodToSave = normalizedOverrideMethod || null;
       const payload = {
         leave_pay_method: methodToSave,
         leave_fixed_day_rate: methodToSave === 'fixed_rate' ? rateToSave : null,
       };
-      const { error } = await dataClient
-        .from('Employees')
-        .update(payload)
-        .eq('id', overrideEmployeeId);
-      if (error) throw error;
+      await updateEmployee({
+        session,
+        orgId: activeOrgId,
+        employeeId: overrideEmployeeId,
+        body: { updates: payload },
+      });
       toast.success('עקיפת השיטה נשמרה בהצלחה');
       if (onRefresh) {
         await onRefresh();

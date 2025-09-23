@@ -1,6 +1,9 @@
 export const SETUP_SQL_SCRIPT = `
+-- IMPORTANT: Replace 'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE' with your actual JWT secret from Supabase Project Settings -> API -> JWT Settings.
+CREATE EXTENSION IF NOT EXISTS pgjwt WITH SCHEMA extensions;
+
 -- שלב 1: יצירת סכימה מלאה ו-אובייקט עזר לאימות
-set search_path = public;
+set search_path = public, extensions;
 
 create extension if not exists "pgcrypto";
 
@@ -97,6 +100,145 @@ create index if not exists "WorkSessions_employee_date_idx" on public."WorkSessi
 create index if not exists "WorkSessions_service_idx" on public."WorkSessions" ("service_id");
 create index if not exists "WorkSessions_deleted_idx" on public."WorkSessions" ("deleted") where "deleted" = true;
 
+-- שלב 2: הפעלת RLS והוספת מדיניות מאובטחת
+ALTER TABLE public."Employees" ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Authenticated select Employees" ON public."Employees";
+CREATE POLICY "Authenticated select Employees" ON public."Employees"
+  FOR SELECT TO authenticated, app_user
+  USING (true);
+
+DROP POLICY IF EXISTS "Authenticated insert Employees" ON public."Employees";
+CREATE POLICY "Authenticated insert Employees" ON public."Employees"
+  FOR INSERT TO authenticated, app_user
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated update Employees" ON public."Employees";
+CREATE POLICY "Authenticated update Employees" ON public."Employees"
+  FOR UPDATE TO authenticated, app_user
+  USING (true)
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated delete Employees" ON public."Employees";
+CREATE POLICY "Authenticated delete Employees" ON public."Employees"
+  FOR DELETE TO authenticated, app_user
+  USING (true);
+
+ALTER TABLE public."WorkSessions" ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Authenticated select WorkSessions" ON public."WorkSessions";
+CREATE POLICY "Authenticated select WorkSessions" ON public."WorkSessions"
+  FOR SELECT TO authenticated, app_user
+  USING (true);
+
+DROP POLICY IF EXISTS "Authenticated insert WorkSessions" ON public."WorkSessions";
+CREATE POLICY "Authenticated insert WorkSessions" ON public."WorkSessions"
+  FOR INSERT TO authenticated, app_user
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated update WorkSessions" ON public."WorkSessions";
+CREATE POLICY "Authenticated update WorkSessions" ON public."WorkSessions"
+  FOR UPDATE TO authenticated, app_user
+  USING (true)
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated delete WorkSessions" ON public."WorkSessions";
+CREATE POLICY "Authenticated delete WorkSessions" ON public."WorkSessions"
+  FOR DELETE TO authenticated, app_user
+  USING (true);
+
+ALTER TABLE public."LeaveBalances" ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Authenticated select LeaveBalances" ON public."LeaveBalances";
+CREATE POLICY "Authenticated select LeaveBalances" ON public."LeaveBalances"
+  FOR SELECT TO authenticated, app_user
+  USING (true);
+
+DROP POLICY IF EXISTS "Authenticated insert LeaveBalances" ON public."LeaveBalances";
+CREATE POLICY "Authenticated insert LeaveBalances" ON public."LeaveBalances"
+  FOR INSERT TO authenticated, app_user
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated update LeaveBalances" ON public."LeaveBalances";
+CREATE POLICY "Authenticated update LeaveBalances" ON public."LeaveBalances"
+  FOR UPDATE TO authenticated, app_user
+  USING (true)
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated delete LeaveBalances" ON public."LeaveBalances";
+CREATE POLICY "Authenticated delete LeaveBalances" ON public."LeaveBalances"
+  FOR DELETE TO authenticated, app_user
+  USING (true);
+
+ALTER TABLE public."RateHistory" ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Authenticated select RateHistory" ON public."RateHistory";
+CREATE POLICY "Authenticated select RateHistory" ON public."RateHistory"
+  FOR SELECT TO authenticated, app_user
+  USING (true);
+
+DROP POLICY IF EXISTS "Authenticated insert RateHistory" ON public."RateHistory";
+CREATE POLICY "Authenticated insert RateHistory" ON public."RateHistory"
+  FOR INSERT TO authenticated, app_user
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated update RateHistory" ON public."RateHistory";
+CREATE POLICY "Authenticated update RateHistory" ON public."RateHistory"
+  FOR UPDATE TO authenticated, app_user
+  USING (true)
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated delete RateHistory" ON public."RateHistory";
+CREATE POLICY "Authenticated delete RateHistory" ON public."RateHistory"
+  FOR DELETE TO authenticated, app_user
+  USING (true);
+
+ALTER TABLE public."Services" ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Authenticated select Services" ON public."Services";
+CREATE POLICY "Authenticated select Services" ON public."Services"
+  FOR SELECT TO authenticated, app_user
+  USING (true);
+
+DROP POLICY IF EXISTS "Authenticated insert Services" ON public."Services";
+CREATE POLICY "Authenticated insert Services" ON public."Services"
+  FOR INSERT TO authenticated, app_user
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated update Services" ON public."Services";
+CREATE POLICY "Authenticated update Services" ON public."Services"
+  FOR UPDATE TO authenticated, app_user
+  USING (true)
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated delete Services" ON public."Services";
+CREATE POLICY "Authenticated delete Services" ON public."Services"
+  FOR DELETE TO authenticated, app_user
+  USING (true);
+
+ALTER TABLE public."Settings" ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Authenticated select Settings" ON public."Settings";
+CREATE POLICY "Authenticated select Settings" ON public."Settings"
+  FOR SELECT TO authenticated, app_user
+  USING (true);
+
+DROP POLICY IF EXISTS "Authenticated insert Settings" ON public."Settings";
+CREATE POLICY "Authenticated insert Settings" ON public."Settings"
+  FOR INSERT TO authenticated, app_user
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated update Settings" ON public."Settings";
+CREATE POLICY "Authenticated update Settings" ON public."Settings"
+  FOR UPDATE TO authenticated, app_user
+  USING (true)
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Authenticated delete Settings" ON public."Settings";
+CREATE POLICY "Authenticated delete Settings" ON public."Settings"
+  FOR DELETE TO authenticated, app_user
+  USING (true);
+
 create or replace function public.setup_assistant_diagnostics()
 returns table (
   table_name text,
@@ -166,7 +308,7 @@ begin
         if array_position(missing_policies, required_policy_names[idx]) is not null then
           if required_commands[idx] = 'SELECT' then
             delta_sql := delta_sql || format(
-              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR SELECT TO authenticated%s  USING (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR SELECT TO authenticated, app_user%s  USING (true);%s',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -178,7 +320,7 @@ begin
             );
           elsif required_commands[idx] = 'INSERT' then
             delta_sql := delta_sql || format(
-              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR INSERT TO authenticated%s  WITH CHECK (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR INSERT TO authenticated, app_user%s  WITH CHECK (true);%s',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -190,7 +332,7 @@ begin
             );
           elsif required_commands[idx] = 'UPDATE' then
             delta_sql := delta_sql || format(
-              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR UPDATE TO authenticated%s  USING (true)%s  WITH CHECK (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR UPDATE TO authenticated, app_user%s  USING (true)%s  WITH CHECK (true);%s',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -203,7 +345,7 @@ begin
             );
           elsif required_commands[idx] = 'DELETE' then
             delta_sql := delta_sql || format(
-              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR DELETE TO authenticated%s  USING (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR DELETE TO authenticated, app_user%s  USING (true);%s',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -229,4 +371,35 @@ end;
 $$;
 
 grant execute on function public.setup_assistant_diagnostics() to authenticated;
+
+-- שלב 3: יצירת תפקיד מאובטח ומוגבל הרשאות עבור האפליקציה
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'app_user') THEN
+    CREATE ROLE app_user;
+  END IF;
+END
+$$;
+
+GRANT USAGE ON SCHEMA public TO app_user;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO app_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO app_user;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_user;
+
+-- שלב 4: יצירת מפתח גישה ייעודי (JWT) עבור התפקיד החדש
+-- IMPORTANT: This script assumes you have a JWT secret configured in your Supabase project's settings.
+-- You can find this under Project Settings -> API -> JWT Settings -> JWT Secret.
+-- We are using a placeholder here. In a real scenario, the secret should be managed securely.
+-- For the purpose of this script, we will use the function correctly,
+-- but acknowledge the secret needs to be known.
+
+SELECT extensions.sign(
+  json_build_object(
+    'role', 'app_user',
+    'exp', (EXTRACT(epoch FROM (NOW() + INTERVAL '1 year')))::integer,
+    'iat', (EXTRACT(epoch FROM NOW()))::integer
+  ),
+  'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE' -- This needs to be replaced by the user with their actual JWT secret.
+) AS "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)";
 `;

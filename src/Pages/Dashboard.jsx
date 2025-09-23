@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
+import { fetchEmployeesList } from '@/api/employees.js';
 import QuickStats from '../components/dashboard/QuickStats';
 import MonthlyCalendar from '../components/dashboard/MonthlyCalendar';
 import RecentActivity from '../components/dashboard/RecentActivity';
@@ -17,29 +18,30 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
-  const { tenantClientReady, activeOrgHasConnection } = useOrg();
-  const { dataClient, authClient, user, loading } = useSupabase();
+  const { tenantClientReady, activeOrgHasConnection, activeOrgId } = useOrg();
+  const { dataClient, authClient, user, loading, session } = useSupabase();
 
   const loadData = useCallback(async () => {
-    if (!tenantClientReady || !activeOrgHasConnection || !dataClient) {
+    if (!tenantClientReady || !activeOrgHasConnection || !dataClient || !session || !activeOrgId) {
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
     try {
-      const [employeesData, sessionsData, servicesData, leavePayPolicySettings] = await Promise.all([
-        dataClient.from('Employees').select('*').eq('is_active', true),
+      const bundle = await fetchEmployeesList({ session, orgId: activeOrgId });
+      const employeeRecords = Array.isArray(bundle?.employees) ? bundle.employees : [];
+      setEmployees(employeeRecords.filter((emp) => emp?.is_active !== false));
+
+      const [sessionsData, servicesData, leavePayPolicySettings] = await Promise.all([
         // === התיקון הסופי והנכון באמת: מיון לפי created_at ===
         dataClient.from('WorkSessions').select('*').eq('deleted', false).order('created_at', { ascending: false }),
         dataClient.from('Services').select('*'),
         fetchLeavePayPolicySettings(dataClient),
       ]);
 
-      if (employeesData.error) throw employeesData.error;
       if (sessionsData.error) throw sessionsData.error;
       if (servicesData.error) throw servicesData.error;
-      setEmployees(employeesData.data || []);
       const safeSessions = (sessionsData.data || []).filter(session => !session?.deleted);
       setWorkSessions(safeSessions);
       const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
@@ -55,7 +57,7 @@ export default function Dashboard() {
       toast.error("שגיאה בטעינת נתוני הדשבורד");
     }
     setIsLoading(false);
-  }, [tenantClientReady, activeOrgHasConnection, dataClient]);
+  }, [tenantClientReady, activeOrgHasConnection, dataClient, session, activeOrgId]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
