@@ -572,23 +572,35 @@ export default function SetupAssistant() {
           <StepSection
             number={2}
             title="שלב 2: פריסת פונקציית ה-Edge"
-            description="פרסו את הפונקציה המאובטחת בפרויקט Supabase של הלקוח."
+            description="פרסו את הפונקציה המאובטחת דרך ממשק הדפדפן של Supabase (ללא CLI)."
           >
             <div className="space-y-6">
               <p className="text-sm text-slate-600">
-                אנו עוברים לאדריכלות מאובטחת המבוססת על Supabase Edge Functions. בצעו את הצעדים הבאים בפרויקט של הלקוח:
+                כל ההגדרה נעשית ישירות מלוח הבקרה של Supabase. בצעו את השלבים הבאים בפרויקט של הלקוח:
               </p>
               <ol className="list-decimal pr-5 space-y-2 text-sm text-slate-600">
-                <li>צרו פונקציה חדשה בשם <code className="rounded bg-slate-100 px-1">secure-api-worker</code>.</li>
-                <li>פתחו את <code className="rounded bg-slate-100 px-1">index.ts</code> והדביקו את הקוד המלא המצורף.</li>
                 <li>
-                  פרסו את הפונקציה עם הפקודה{' '}
-                  <code className="rounded bg-slate-100 px-1">
-                    supabase functions deploy secure-api-worker --no-verify-jwt
-                  </code>{' '}
-                  (דורש חיבור ל-CLI).
+                  היכנסו ללוח הבקרה של Supabase, פתחו את הפרויקט ובחרו בתפריט{' '}
+                  <strong>Edge Functions</strong>.
+                </li>
+                <li>
+                  לחצו על <strong>New Function</strong>, הזינו את השם{' '}
+                  <code className="rounded bg-slate-100 px-1">secure-api-worker</code>, בחרו באפשרות "Empty Function" ואשרו את
+                  היצירה.
+                </li>
+                <li>
+                  בחלון העריכה שנפתח הדביקו את הקוד המלא בקובץ{' '}
+                  <code className="rounded bg-slate-100 px-1">index.ts</code>, ודאו שהאפשרות "Verify JWT" כבויה, ולאחר מכן לחצו
+                  על <strong>Deploy</strong> כדי לפרסם את הפונקציה.
+                </li>
+                <li>
+                  לאחר הפריסה לחצו על <strong>Run</strong> (או Test) כדי לאשר שהפונקציה מגיבה בנתיב{' '}
+                  <code className="rounded bg-slate-100 px-1">/functions/v1/secure-api-worker</code>.
                 </li>
               </ol>
+              <p className="text-xs text-slate-500 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                אין צורך בהתקנת Supabase CLI. כל השלבים מתבצעים בדפדפן ומייצרים את אותה פונקציה מאובטחת.
+              </p>
               <div className="space-y-2">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <Label htmlFor="edge-function-code">קוד פונקציית secure-api-worker</Label>
@@ -608,7 +620,9 @@ export default function SetupAssistant() {
                 />
               </div>
               <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
-                לאחר הפריסה ודאו שהפונקציה זמינה בנתיב <code className="bg-slate-100 px-1 rounded">/functions/v1/secure-api-worker</code>.
+                בסיום, הפונקציה תהיה זמינה בנתיב{' '}
+                <code className="bg-slate-100 px-1 rounded">/functions/v1/secure-api-worker</code> ומוכנה לקבל קריאות מה-API
+                Proxy שלנו.
               </p>
             </div>
           </StepSection>
