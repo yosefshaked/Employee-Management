@@ -14,6 +14,7 @@ import {
   SETUP_SQL_SCRIPT_STEP_3_POLICIES,
   SETUP_SQL_SCRIPT_STEP_4_JWT,
   SETUP_SQL_SCRIPT_FETCH_APP_DEDICATED_KEY,
+  SETUP_SQL_ADD_DEDICATED_KEY_PLAINTEXT_COLUMN,
 } from '@/lib/setup-sql.js';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { resolveControlAccessToken } from '@/lib/api-client.js';
@@ -1096,8 +1097,18 @@ export default function SetupAssistant() {
                 ) : null}
               </div>
               <div className="space-y-4">
+                <div className="space-y-2">
+                  <p className="text-sm text-slate-600">
+                    להפעלת מצב המעבדה, ודאו שלטבלת organizations קיימת העמודה dedicated_key_plaintext. הריצו את הפקודה הבאה פעם אחת במסד הבקרה.
+                  </p>
+                  <CodeBlock
+                    title="Lab Mode: הוספת עמודת dedicated_key_plaintext"
+                    code={SETUP_SQL_ADD_DEDICATED_KEY_PLAINTEXT_COLUMN}
+                    ariaLabel="העתק SQL להוספת עמודת dedicated_key_plaintext"
+                  />
+                </div>
                 <p className="text-sm text-slate-600">
-                  לאחר שה-SQL מהשלב הקודם יצר את המפתח "APP_DEDICATED_KEY", הדביקו אותו כאן כדי שנשמור אותו מוצפן.
+                  לאחר שה-SQL מהשלב הקודם יצר את המפתח "APP_DEDICATED_KEY", הדביקו אותו כאן כדי שנשמור אותו כטקסט גולמי עבור מצב המעבדה.
                 </p>
                 {jwtSecretConfirmed ? (
                   <div className="space-y-2">
@@ -1363,7 +1374,7 @@ export default function SetupAssistant() {
 
       const token = resolveControlAccessToken(sessionData?.session);
       const bearer = `Bearer ${token}`;
-      const response = await fetch('/api/save-org-credentials', {
+      const response = await fetch('/api/save-org-key-unsecure', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',

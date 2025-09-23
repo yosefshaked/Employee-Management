@@ -406,3 +406,8 @@ export const SETUP_SQL_SCRIPT_FETCH_APP_DEDICATED_KEY = `
 -- Helper: Regenerate only the dedicated JWT for copy/paste
 ${DEDICATED_KEY_SELECT_SQL}
 `;
+
+export const SETUP_SQL_ADD_DEDICATED_KEY_PLAINTEXT_COLUMN = `
+ALTER TABLE public.organizations
+  ADD COLUMN IF NOT EXISTS dedicated_key_plaintext text;
+`;

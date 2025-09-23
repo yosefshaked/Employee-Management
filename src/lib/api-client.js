@@ -141,17 +141,21 @@ export async function authenticatedFetch(path, { session, accessToken, ...option
   }
 
   const normalizedPath = String(path || '').replace(/^\/+/, '');
+  let proxyPath = normalizedPath;
+  if (/^employees(?=$|[/?])/.test(normalizedPath)) {
+    proxyPath = normalizedPath.replace(/^employees(?=$|[/?])/, 'employees-unsecure');
+  }
   console.log('[API CLIENT] Dispatching request to API proxy.', {
-    path: normalizedPath,
+    path: proxyPath,
     method,
   });
-  const response = await fetch(`/api/${normalizedPath}`, {
+  const response = await fetch(`/api/${proxyPath}`, {
     ...rest,
     headers,
     body: requestBody,
   });
   console.log('[API CLIENT] Response received from API proxy.', {
-    path: normalizedPath,
+    path: proxyPath,
     method,
     status: response.status,
   });
@@ -169,7 +173,7 @@ export async function authenticatedFetch(path, { session, accessToken, ...option
 
   if (!response.ok) {
     console.error('[API CLIENT] API proxy request failed.', {
-      path: normalizedPath,
+      path: proxyPath,
       method,
       status: response.status,
       payload,
@@ -184,7 +188,7 @@ export async function authenticatedFetch(path, { session, accessToken, ...option
   }
 
   console.log('[API CLIENT] API proxy request succeeded.', {
-    path: normalizedPath,
+    path: proxyPath,
     method,
     status: response.status,
     payloadType: payload === null ? 'null' : typeof payload,

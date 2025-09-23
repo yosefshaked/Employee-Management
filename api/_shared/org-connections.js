@@ -155,3 +155,45 @@ export async function fetchOrgConnection(supabase, orgId) {
     encryptedKey: organization.dedicated_key_encrypted,
   };
 }
+
+export async function fetchOrgPlaintextConnection(supabase, orgId) {
+  const [{ data: settings, error: settingsError }, { data: organization, error: orgError }] = await Promise.all([
+    supabase
+      .from('org_settings')
+      .select('supabase_url, anon_key')
+      .eq('org_id', orgId)
+      .maybeSingle(),
+    supabase
+      .from('organizations')
+      .select('dedicated_key_plaintext')
+      .eq('id', orgId)
+      .maybeSingle(),
+  ]);
+
+  if (settingsError) {
+    return { error: settingsError };
+  }
+
+  if (orgError) {
+    if (orgError.code === '42703') {
+      const missingColumnError = new Error('missing_plaintext_column');
+      missingColumnError.code = orgError.code;
+      return { error: missingColumnError };
+    }
+    return { error: orgError };
+  }
+
+  if (!settings || !settings.supabase_url || !settings.anon_key) {
+    return { error: new Error('missing_connection_settings') };
+  }
+
+  if (!organization || !organization.dedicated_key_plaintext) {
+    return { error: new Error('missing_plaintext_dedicated_key') };
+  }
+
+  return {
+    supabaseUrl: settings.supabase_url,
+    anonKey: settings.anon_key,
+    plaintextKey: organization.dedicated_key_plaintext,
+  };
+}
