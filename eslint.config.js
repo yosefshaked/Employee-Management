@@ -56,7 +56,7 @@ export default defineConfig([
               name: '@supabase/supabase-js',
               importNames: ['createClient'],
               message:
-                "Do not import createClient directly. Use the helpers from 'src/lib/supabase-manager.js' instead.",
+                "Do not import createClient directly. Call initializeAuthClient()/getAuthClient() from 'src/lib/supabase-manager.js'.",
             },
           ],
         },

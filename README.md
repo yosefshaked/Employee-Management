@@ -48,6 +48,16 @@ Visit `/#/diagnostics` in development to review the last configuration request (
 
 If either `/api/config` or `/api/org/:id/keys` is unreachable or returns non-JSON content the UI shows a blocking error screen in Hebrew with recovery steps.
 
+## Bootstrap flow
+
+Runtime credentials must be resolved before the React tree renders. The bootstrap script performs the following steps:
+
+1. Fetch `/api/config` and await the JSON response.
+2. Call `initializeAuthClient(config)` from `src/lib/supabase-manager.js` to hydrate the shared Supabase auth singleton.
+3. Render the application once `getAuthClient()` succeeds, passing the resolved config into the runtime providers.
+
+Do not instantiate Supabase clients manually. Components should access the control client through `getAuthClient()` or `useSupabase()` and rely on the hook’s `dataClient` for organization-specific data access.
+
 ## Supabase guardrails for contributors
 
 - Reuse the shared clients from `src/lib/supabase-manager.js`: call `getAuthClient()` for the persistent control-database singleton and rely on the organization data helpers provided by `useSupabase()` (e.g., `dataClient`) for tenant data. ESLint forbids importing `createClient` directly, so extend the manager if additional behavior is required.
