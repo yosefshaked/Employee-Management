@@ -26,7 +26,43 @@ serve(async (req) => {
   }
 
   // 4. Handle the specific action requested by the API Proxy
-  const { action, payload } = await req.json();
+  let rawBody = "";
+  try {
+    rawBody = await req.text();
+  } catch (readError) {
+    console.error("[secure-api-worker] Failed to read request body", readError);
+    return new Response(JSON.stringify({ error: "Failed to read request body" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  if (!rawBody) {
+    return new Response(JSON.stringify({ error: "Request body is required" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  let parsedBody: { action?: string; payload?: unknown };
+  try {
+    parsedBody = JSON.parse(rawBody);
+  } catch (parseError) {
+    console.error("[secure-api-worker] Invalid JSON payload", parseError);
+    return new Response(JSON.stringify({ error: "Invalid JSON payload" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  const { action, payload } = parsedBody;
+
+  if (!action) {
+    return new Response(JSON.stringify({ error: "Missing action in request body" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
 
   let data: any = null;
   let error: any = null;
