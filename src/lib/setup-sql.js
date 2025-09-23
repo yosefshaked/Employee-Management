@@ -1,8 +1,7 @@
-export const SETUP_SQL_SCRIPT = `
--- IMPORTANT: Replace 'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE' with your actual JWT secret from Supabase Project Settings -> API -> JWT Settings.
+export const SETUP_SQL_SCRIPT_STEP_2_TABLES = `
+-- Step 2: Create required extensions and core tables
 CREATE EXTENSION IF NOT EXISTS pgjwt WITH SCHEMA extensions;
 
--- שלב 1: יצירת סכימה מלאה ו-אובייקט עזר לאימות
 set search_path = public, extensions;
 
 create extension if not exists "pgcrypto";
@@ -99,8 +98,10 @@ create index if not exists "LeaveBalances_employee_date_idx" on public."LeaveBal
 create index if not exists "WorkSessions_employee_date_idx" on public."WorkSessions" ("employee_id", "date");
 create index if not exists "WorkSessions_service_idx" on public."WorkSessions" ("service_id");
 create index if not exists "WorkSessions_deleted_idx" on public."WorkSessions" ("deleted") where "deleted" = true;
+`;
 
--- שלב 2: הפעלת RLS והוספת מדיניות מאובטחת
+export const SETUP_SQL_SCRIPT_STEP_3_POLICIES = `
+-- Step 3: Enable RLS and apply secure policies
 ALTER TABLE public."Employees" ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Authenticated select Employees" ON public."Employees";
@@ -371,8 +372,10 @@ end;
 $$;
 
 grant execute on function public.setup_assistant_diagnostics() to authenticated;
+`;
 
--- שלב 3: יצירת תפקיד מאובטח ומוגבל הרשאות עבור האפליקציה
+export const SETUP_SQL_SCRIPT_STEP_4_JWT = `
+-- Step 4: Create dedicated app role and generate a JWT using your Supabase secret
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'app_user') THEN
@@ -387,19 +390,12 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO app_user;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_user;
 
--- שלב 4: יצירת מפתח גישה ייעודי (JWT) עבור התפקיד החדש
--- IMPORTANT: This script assumes you have a JWT secret configured in your Supabase project's settings.
--- You can find this under Project Settings -> API -> JWT Settings -> JWT Secret.
--- We are using a placeholder here. In a real scenario, the secret should be managed securely.
--- For the purpose of this script, we will use the function correctly,
--- but acknowledge the secret needs to be known.
-
 SELECT extensions.sign(
   json_build_object(
     'role', 'app_user',
     'exp', (EXTRACT(epoch FROM (NOW() + INTERVAL '1 year')))::integer,
     'iat', (EXTRACT(epoch FROM NOW()))::integer
   ),
-  'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE' -- This needs to be replaced by the user with their actual JWT secret.
+  '__REPLACE_WITH_JWT_SECRET__'
 ) AS "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)";
 `;

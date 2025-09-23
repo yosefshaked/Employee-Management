@@ -9,7 +9,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
-import { SETUP_SQL_SCRIPT } from '@/lib/setup-sql.js';
+import {
+  SETUP_SQL_SCRIPT_STEP_2_TABLES,
+  SETUP_SQL_SCRIPT_STEP_3_POLICIES,
+  SETUP_SQL_SCRIPT_STEP_4_JWT,
+} from '@/lib/setup-sql.js';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { resolveControlAccessToken } from '@/lib/api-client.js';
 import { verifyOrgConnection } from '@/runtime/verification.js';
@@ -61,145 +65,15 @@ const TABLE_LABELS = {
   Settings: 'הגדרות ארגון',
 };
 
+const WIZARD_STEPS = [
+  { number: 1, title: 'Step 1: Connect to Supabase' },
+  { number: 2, title: 'Step 2: Create Tables' },
+  { number: 3, title: 'Step 3: Create Rules & Policies' },
+  { number: 4, title: 'Step 4: Create Dedicated JWT' },
+  { number: 5, title: 'Step 5: Verification & Save' },
+];
 
-const RLS_SQL = `-- שלב 2: הפעלת RLS והוספת מדיניות מאובטחת
-ALTER TABLE public."Employees" ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Authenticated select Employees" ON public."Employees";
-CREATE POLICY "Authenticated select Employees" ON public."Employees"
-  FOR SELECT TO authenticated, app_user
-  USING (true);
-
-DROP POLICY IF EXISTS "Authenticated insert Employees" ON public."Employees";
-CREATE POLICY "Authenticated insert Employees" ON public."Employees"
-  FOR INSERT TO authenticated, app_user
-  WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Authenticated update Employees" ON public."Employees";
-CREATE POLICY "Authenticated update Employees" ON public."Employees"
-  FOR UPDATE TO authenticated, app_user
-  USING (true)
-  WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Authenticated delete Employees" ON public."Employees";
-CREATE POLICY "Authenticated delete Employees" ON public."Employees"
-  FOR DELETE TO authenticated, app_user
-  USING (true);
-
-ALTER TABLE public."WorkSessions" ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Authenticated select WorkSessions" ON public."WorkSessions";
-CREATE POLICY "Authenticated select WorkSessions" ON public."WorkSessions"
-  FOR SELECT TO authenticated, app_user
-  USING (true);
-
-DROP POLICY IF EXISTS "Authenticated insert WorkSessions" ON public."WorkSessions";
-CREATE POLICY "Authenticated insert WorkSessions" ON public."WorkSessions"
-  FOR INSERT TO authenticated, app_user
-  WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Authenticated update WorkSessions" ON public."WorkSessions";
-CREATE POLICY "Authenticated update WorkSessions" ON public."WorkSessions"
-  FOR UPDATE TO authenticated, app_user
-  USING (true)
-  WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Authenticated delete WorkSessions" ON public."WorkSessions";
-CREATE POLICY "Authenticated delete WorkSessions" ON public."WorkSessions"
-  FOR DELETE TO authenticated, app_user
-  USING (true);
-
-ALTER TABLE public."LeaveBalances" ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Authenticated select LeaveBalances" ON public."LeaveBalances";
-CREATE POLICY "Authenticated select LeaveBalances" ON public."LeaveBalances"
-  FOR SELECT TO authenticated, app_user
-  USING (true);
-
-DROP POLICY IF EXISTS "Authenticated insert LeaveBalances" ON public."LeaveBalances";
-CREATE POLICY "Authenticated insert LeaveBalances" ON public."LeaveBalances"
-  FOR INSERT TO authenticated, app_user
-  WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Authenticated update LeaveBalances" ON public."LeaveBalances";
-CREATE POLICY "Authenticated update LeaveBalances" ON public."LeaveBalances"
-  FOR UPDATE TO authenticated, app_user
-  USING (true)
-  WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Authenticated delete LeaveBalances" ON public."LeaveBalances";
-CREATE POLICY "Authenticated delete LeaveBalances" ON public."LeaveBalances"
-  FOR DELETE TO authenticated, app_user
-  USING (true);
-
-ALTER TABLE public."RateHistory" ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Authenticated select RateHistory" ON public."RateHistory";
-CREATE POLICY "Authenticated select RateHistory" ON public."RateHistory"
-  FOR SELECT TO authenticated, app_user
-  USING (true);
-
-DROP POLICY IF EXISTS "Authenticated insert RateHistory" ON public."RateHistory";
-CREATE POLICY "Authenticated insert RateHistory" ON public."RateHistory"
-  FOR INSERT TO authenticated, app_user
-  WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Authenticated update RateHistory" ON public."RateHistory";
-CREATE POLICY "Authenticated update RateHistory" ON public."RateHistory"
-  FOR UPDATE TO authenticated, app_user
-  USING (true)
-  WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Authenticated delete RateHistory" ON public."RateHistory";
-CREATE POLICY "Authenticated delete RateHistory" ON public."RateHistory"
-  FOR DELETE TO authenticated, app_user
-  USING (true);
-
-ALTER TABLE public."Services" ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Authenticated select Services" ON public."Services";
-CREATE POLICY "Authenticated select Services" ON public."Services"
-  FOR SELECT TO authenticated, app_user
-  USING (true);
-
-DROP POLICY IF EXISTS "Authenticated insert Services" ON public."Services";
-CREATE POLICY "Authenticated insert Services" ON public."Services"
-  FOR INSERT TO authenticated, app_user
-  WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Authenticated update Services" ON public."Services";
-CREATE POLICY "Authenticated update Services" ON public."Services"
-  FOR UPDATE TO authenticated, app_user
-  USING (true)
-  WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Authenticated delete Services" ON public."Services";
-CREATE POLICY "Authenticated delete Services" ON public."Services"
-  FOR DELETE TO authenticated, app_user
-  USING (true);
-
-ALTER TABLE public."Settings" ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "Authenticated select Settings" ON public."Settings";
-CREATE POLICY "Authenticated select Settings" ON public."Settings"
-  FOR SELECT TO authenticated, app_user
-  USING (true);
-
-DROP POLICY IF EXISTS "Authenticated insert Settings" ON public."Settings";
-CREATE POLICY "Authenticated insert Settings" ON public."Settings"
-  FOR INSERT TO authenticated, app_user
-  WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Authenticated update Settings" ON public."Settings";
-CREATE POLICY "Authenticated update Settings" ON public."Settings"
-  FOR UPDATE TO authenticated, app_user
-  USING (true)
-  WITH CHECK (true);
-
-DROP POLICY IF EXISTS "Authenticated delete Settings" ON public."Settings";
-CREATE POLICY "Authenticated delete Settings" ON public."Settings"
-  FOR DELETE TO authenticated, app_user
-  USING (true);`;
 
 function formatDateTime(isoString) {
   if (!isoString) return '';
@@ -515,6 +389,8 @@ export default function SetupAssistant() {
   const [connectionTest, setConnectionTest] = useState(INITIAL_CONNECTION_TEST);
   const [leavePolicyStatus, setLeavePolicyStatus] = useState(INITIAL_LEAVE_POLICY_STATUS);
   const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [activeStep, setActiveStep] = useState(1);
+  const [jwtSecret, setJwtSecret] = useState('');
   const [dedicatedKey, setDedicatedKey] = useState('');
   const [dedicatedKeyError, setDedicatedKeyError] = useState('');
   const [isSavingDedicatedKey, setIsSavingDedicatedKey] = useState(false);
@@ -683,7 +559,541 @@ export default function SetupAssistant() {
     );
   }, [connection, originalConnection]);
 
+  const totalWizardSteps = WIZARD_STEPS.length;
+
   const hasDedicatedKeyValue = useMemo(() => Boolean(dedicatedKey.trim()), [dedicatedKey]);
+
+  const jwtSecretToken = useMemo(() => {
+    const trimmed = jwtSecret.trim();
+    return trimmed || 'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE';
+  }, [jwtSecret]);
+
+  const step4SqlBlock = useMemo(
+    () => SETUP_SQL_SCRIPT_STEP_4_JWT.replace('__REPLACE_WITH_JWT_SECRET__', jwtSecretToken),
+    [jwtSecretToken],
+  );
+
+  const canProceedToNextStep = useMemo(() => {
+    if (activeStep === 1) {
+      return hasSavedConnection && !hasUnsavedChanges;
+    }
+    if (activeStep === 4) {
+      return Boolean(jwtSecret.trim());
+    }
+    return true;
+  }, [activeStep, hasSavedConnection, hasUnsavedChanges, jwtSecret]);
+
+  const nextButtonLabel = useMemo(() => {
+    switch (activeStep) {
+      case 1:
+        return 'המשך ליצירת טבלאות';
+      case 2:
+        return 'המשך למדיניות RLS';
+      case 3:
+        return 'המשך ליצירת JWT';
+      case 4:
+        return 'המשך לאימות ולשמירה';
+      default:
+        return 'המשך';
+    }
+  }, [activeStep]);
+
+  const nextDisabledHint = useMemo(() => {
+    if (activeStep === 1) {
+      if (!hasConnectionValues) {
+        return 'מלאו את כתובת ה-URL והמפתח הציבורי של Supabase.';
+      }
+      if (!hasSavedConnection) {
+        return 'שמור את פרטי החיבור לפני המעבר לשלב הבא.';
+      }
+      if (hasUnsavedChanges) {
+        return 'שמור את השינויים לפני המעבר לשלב הבא.';
+      }
+    }
+    if (activeStep === 4 && !jwtSecret.trim()) {
+      return 'הדביקו את ה-JWT Secret תחת Project Settings -> API -> JWT Secret כדי להמשיך.';
+    }
+    return '';
+  }, [activeStep, hasConnectionValues, hasSavedConnection, hasUnsavedChanges, jwtSecret]);
+
+  const renderStepProgress = () => (
+    <ol className="grid gap-3 sm:grid-cols-5">
+      {WIZARD_STEPS.map((step) => {
+        const status = step.number < activeStep ? 'complete' : step.number === activeStep ? 'active' : 'upcoming';
+        const borderClass =
+          status === 'complete'
+            ? 'border-emerald-200 bg-emerald-50'
+            : status === 'active'
+              ? 'border-blue-200 bg-blue-50'
+              : 'border-slate-200 bg-white';
+        const circleClass =
+          status === 'complete'
+            ? 'bg-emerald-600 text-white'
+            : status === 'active'
+              ? 'bg-blue-600 text-white'
+              : 'bg-slate-200 text-slate-600';
+        const titleClass =
+          status === 'complete'
+            ? 'text-emerald-700'
+            : status === 'active'
+              ? 'text-blue-700'
+              : 'text-slate-600';
+        const canNavigateBackward = step.number < activeStep;
+        return (
+          <li key={step.number}>
+            <button
+              type="button"
+              onClick={canNavigateBackward ? () => setActiveStep(step.number) : undefined}
+              disabled={!canNavigateBackward}
+              className={`w-full rounded-xl border ${borderClass} p-3 text-right transition focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className={`w-9 h-9 ${circleClass} rounded-full flex items-center justify-center text-sm font-semibold`}>
+                  {status === 'complete' ? (
+                    <CheckCircle2 className="w-5 h-5 text-white" aria-hidden="true" />
+                  ) : (
+                    step.number
+                  )}
+                </div>
+                <span className={`text-xs font-medium ${titleClass}`}>{step.title}</span>
+              </div>
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+
+  const renderStepNavigation = () => (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      <Button type="button" variant="outline" onClick={handlePreviousStep} disabled={activeStep === 1} className="gap-2">
+        חזרה
+      </Button>
+      {activeStep < totalWizardSteps ? (
+        <div className="flex flex-col items-end gap-1">
+          <Button
+            type="button"
+            onClick={handleNextStep}
+            disabled={!canProceedToNextStep}
+            className="gap-2"
+          >
+            {nextButtonLabel}
+          </Button>
+          {!canProceedToNextStep && nextDisabledHint ? (
+            <span className="text-xs text-amber-600 text-right">{nextDisabledHint}</span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const renderActiveStep = () => {
+    switch (activeStep) {
+      case 1:
+        return (
+          <StepSection
+            number={1}
+            title="שלב 1: חיבור ל-Supabase"
+            description="הזינו את פרטי Supabase, שמרו אותם ואז המשיכו לשלב הבא."
+            statusBadge={renderConnectionStatusBadge()}
+          >
+            <form className="space-y-6" onSubmit={handleSaveConnection}>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="supabase_url">Supabase URL</Label>
+                  <Input
+                    id="supabase_url"
+                    dir="ltr"
+                    placeholder="https://xyzcompany.supabase.co"
+                    value={connection.supabase_url}
+                    onChange={handleConnectionChange('supabase_url')}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="anon_key">Anon Key</Label>
+                  <Input
+                    id="anon_key"
+                    dir="ltr"
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                    value={connection.anon_key}
+                    onChange={handleConnectionChange('anon_key')}
+                    required
+                  />
+                  <p className="text-xs text-slate-500">{connectionHelperText}</p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="policy_links">קישורי מדיניות (שורה לכל קישור)</Label>
+                <Textarea
+                  id="policy_links"
+                  dir="ltr"
+                  rows={3}
+                  placeholder="https://supabase.example.com/policies"
+                  value={connection.policy_links_text}
+                  onChange={handleConnectionChange('policy_links_text')}
+                />
+                <p className="text-xs text-slate-500">
+                  הוסף כאן קישורים למסמכי SQL, נהלי אבטחה או הערות רלוונטיות עבור מנהלים נוספים.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="legal_contact_email">אימייל איש קשר משפטי</Label>
+                  <Input
+                    id="legal_contact_email"
+                    type="email"
+                    dir="ltr"
+                    placeholder="legal@example.com"
+                    value={connection.legal_contact_email}
+                    onChange={handleConnectionChange('legal_contact_email')}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="legal_terms_url">קישור לתנאי שימוש</Label>
+                  <Input
+                    id="legal_terms_url"
+                    type="url"
+                    dir="ltr"
+                    placeholder="https://example.com/terms"
+                    value={connection.legal_terms_url}
+                    onChange={handleConnectionChange('legal_terms_url')}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="legal_privacy_url">קישור למדיניות פרטיות</Label>
+                  <Input
+                    id="legal_privacy_url"
+                    type="url"
+                    dir="ltr"
+                    placeholder="https://example.com/privacy"
+                    value={connection.legal_privacy_url}
+                    onChange={handleConnectionChange('legal_privacy_url')}
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                {lastSavedAt ? (
+                  <span className="text-xs text-slate-500">נשמר לאחרונה: {formatDateTime(lastSavedAt)}</span>
+                ) : null}
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="submit"
+                    disabled={!hasConnectionValues || isSavingConnection || !hasUnsavedChanges}
+                    className="gap-2"
+                  >
+                    {isSavingConnection ? (
+                      <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                    ) : null}
+                    {isSavingConnection ? 'שומר...' : 'שמור חיבור'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleTestConnection}
+                    disabled={
+                      !activeOrg
+                      || isTestingConnection
+                      || hasUnsavedChanges
+                      || !hasConnectionValues
+                      || !dataClient
+                      || !supabaseReady
+                    }
+                    className="gap-2"
+                  >
+                    {isTestingConnection ? (
+                      <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <ShieldCheck className="w-4 h-4" aria-hidden="true" />
+                    )}
+                    {isTestingConnection ? 'מריץ בדיקה...' : 'בדוק חיבור שמור'}
+                  </Button>
+                </div>
+              </div>
+              {hasUnsavedChanges ? (
+                <p className="text-xs text-amber-600">שמור את השינויים לפני בדיקת החיבור.</p>
+              ) : null}
+              {renderConnectionTestFeedback()}
+              {renderConnectionDiagnostics()}
+              {renderLeavePolicyStatusNotice()}
+            </form>
+          </StepSection>
+        );
+      case 2:
+        return (
+          <StepSection
+            number={2}
+            title="שלב 2: יצירת טבלאות"
+            description="העתיקו והריצו את בלוק הסכימה בעורך ה-SQL של Supabase (מומלץ כבעלים)."
+          >
+            <div className="space-y-4">
+              <CodeBlock
+                title="בלוק יצירת טבלאות והרחבות"
+                code={SETUP_SQL_SCRIPT_STEP_2_TABLES}
+                ariaLabel="העתק את בלוק יצירת הטבלאות"
+              />
+              <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                הריצו את ה-SQL בפרויקט Supabase שלכם כדי ליצור את כל הטבלאות, ההרחבות והאינדקסים הנדרשים.
+              </p>
+            </div>
+          </StepSection>
+        );
+      case 3:
+        return (
+          <StepSection
+            number={3}
+            title="שלב 3: מדיניות RLS"
+            description="הפעלת RLS, יצירת המדיניות והתקנת פונקציית האבחון."
+          >
+            <div className="space-y-4">
+              <CodeBlock
+                title="בלוק RLS ומדיניות"
+                code={SETUP_SQL_SCRIPT_STEP_3_POLICIES}
+                ariaLabel="העתק את בלוק ה-RLS"
+              />
+              <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                הבלוק מפעיל RLS לכל הטבלאות, מגדיר מדיניות מאובטחת ומרענן את הפונקציה setup_assistant_diagnostics שתשמש בבדיקות.
+              </p>
+            </div>
+          </StepSection>
+        );
+      case 4:
+        return (
+          <StepSection
+            number={4}
+            title="שלב 4: יצירת JWT ייעודי"
+            description="הדביקו את ה-JWT Secret כדי שנפיק SQL עם המפתח הנכון."
+          >
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <Label htmlFor="jwt_secret">Supabase JWT Secret</Label>
+                <Input
+                  id="jwt_secret"
+                  type="password"
+                  dir="ltr"
+                  placeholder="YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE"
+                  value={jwtSecret}
+                  onChange={handleJwtSecretChange}
+                  onPaste={handleJwtSecretPaste}
+                  autoComplete="off"
+                />
+                <p className="text-xs text-slate-500">
+                  מצאו את הערך תחת Project Settings → API → JWT Settings → JWT Secret.
+                </p>
+                <p className="text-xs text-slate-500">
+                  ה-SQL למטה יתעדכן אוטומטית עם הסוד שהזנתם כדי ליצור את המפתח הייעודי.
+                </p>
+              </div>
+              <CodeBlock
+                title="בלוק יצירת JWT ייעודי"
+                code={step4SqlBlock}
+                ariaLabel="העתק את בלוק יצירת ה-JWT הייעודי"
+              />
+              <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                הריצו את הבלוק כבעלים. הוא יוודא שהתפקיד app_user קיים ויחזיר ערך בשם "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)".
+              </p>
+            </div>
+          </StepSection>
+        );
+      case 5:
+        return (
+          <StepSection
+            number={5}
+            title="שלב 5: אימות ושמירת המפתח"
+            description="הריצו אימות, פענחו תקלות והחזירו את המפתח הייעודי לאפליקציה."
+            statusBadge={renderStepFiveStatusBadges()}
+          >
+            <div className="space-y-8">
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm text-slate-600">
+                    הבדיקה משתמשת בפונקציית setup_assistant_diagnostics ומחזירה SQL משלים במידה שחסרות פעולות. אין צורך במפתחות שירות – הבדיקה רצה עם המפתח הציבורי (anon) בלבד.
+                  </p>
+                  <div className="flex items-center gap-3">
+                    {lastVerifiedAt ? (
+                      <span className="text-xs text-slate-500">בדיקה אחרונה: {formatDateTime(lastVerifiedAt)}</span>
+                    ) : null}
+                    <Button
+                      type="button"
+                      onClick={handleVerify}
+                      disabled={
+                        isVerifying
+                        || !hasSavedConnection
+                        || !orgSelected
+                        || hasUnsavedChanges
+                        || !dataClient
+                        || !supabaseReady
+                      }
+                      className="gap-2"
+                    >
+                      {isVerifying ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}
+                      {isVerifying ? 'מריץ בדיקות...' : 'הרץ אימות'}
+                    </Button>
+                  </div>
+                </div>
+                {hasUnsavedChanges ? (
+                  <p className="text-xs text-amber-600">שמור את פרטי החיבור לפני הרצת האימות.</p>
+                ) : null}
+                {verifyError ? (
+                  <div className="rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm p-3 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 mt-0.5" aria-hidden="true" />
+                    <div className="space-y-2">
+                      <span className="block">{verifyError}</span>
+                      {verifyErrorInfo ? (
+                        <ul className="list-disc pr-4 text-xs text-red-600 space-y-1">
+                          {verifyErrorInfo.status !== null && verifyErrorInfo.status !== undefined ? (
+                            <li>סטטוס HTTP: {verifyErrorInfo.status}</li>
+                          ) : null}
+                          {verifyErrorInfo.code ? <li>קוד Supabase: {verifyErrorInfo.code}</li> : null}
+                          {Array.isArray(verifyErrorInfo.details)
+                            ? verifyErrorInfo.details.map((detail, index) => (
+                                <li key={`${detail}-${index}`}>{detail}</li>
+                              ))
+                            : null}
+                        </ul>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+                {verifyResults.length === 0 && !verifyError && !isVerifying ? (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-500 p-3">
+                    עדיין לא הרצנו אימות בפרויקט הזה. לאחר הרצת בלוקי ה-SQL, לחץ על "הרץ אימות" כדי לוודא שהכל מוכן.
+                  </div>
+                ) : null}
+                {verifyResults.length > 0 ? (
+                  <div className="space-y-4">
+                    {verifyResults.map((result) => {
+                      const hasFullPolicies = result.missing_policies && result.missing_policies.length === 0;
+                      const isSuccess = result.has_table && result.rls_enabled && hasFullPolicies;
+                      return (
+                        <div
+                          key={result.table_name}
+                          className="rounded-2xl border border-slate-200 bg-white p-4 md:p-5 space-y-3 shadow-sm"
+                        >
+                          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                            <div className="flex items-center gap-2 text-slate-900 font-medium">
+                              {isSuccess ? (
+                                <CheckCircle2 className="w-5 h-5 text-emerald-600" aria-hidden="true" />
+                              ) : (
+                                <AlertCircle className="w-5 h-5 text-amber-600" aria-hidden="true" />
+                              )}
+                              <span>{TABLE_LABELS[result.table_name] || result.table_name}</span>
+                              <span className="text-xs text-slate-500">({result.table_name})</span>
+                            </div>
+                            <Badge
+                              className={`${
+                                isSuccess
+                                  ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                  : 'bg-amber-100 text-amber-800 border border-amber-200'
+                              } gap-1`}
+                            >
+                              <span>{isSuccess ? 'מאומת' : 'נדרשת פעולה'}</span>
+                            </Badge>
+                          </div>
+                          <ul className="space-y-1 text-xs text-slate-600">
+                            <li className="flex items-start gap-2">
+                              {result.has_table ? (
+                                <ShieldCheck className="w-4 h-4 text-emerald-600 mt-0.5" aria-hidden="true" />
+                              ) : (
+                                <ShieldAlert className="w-4 h-4 text-amber-600 mt-0.5" aria-hidden="true" />
+                              )}
+                              <span>{result.has_table ? 'הטבלה קיימת במאגר.' : 'הטבלה חסרה. הרץ שוב את בלוק הסכימה.'}</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                              {result.rls_enabled ? (
+                                <ShieldCheck className="w-4 h-4 text-emerald-600 mt-0.5" aria-hidden="true" />
+                              ) : (
+                                <ShieldAlert className="w-4 h-4 text-amber-600 mt-0.5" aria-hidden="true" />
+                              )}
+                              <span>{result.rls_enabled ? 'RLS מופעל עבור הטבלה.' : 'RLS כבוי – הפעל מחדש באמצעות בלוק ה-RLS.'}</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                              {hasFullPolicies ? (
+                                <ShieldCheck className="w-4 h-4 text-emerald-600 mt-0.5" aria-hidden="true" />
+                              ) : (
+                                <ShieldAlert className="w-4 h-4 text-amber-600 mt-0.5" aria-hidden="true" />
+                              )}
+                              <span>
+                                {hasFullPolicies ? 'כל ארבע המדיניות קיימות.' : `מדיניות חסרות: ${result.missing_policies.join(', ')}`}
+                              </span>
+                            </li>
+                          </ul>
+                          {result.delta_sql ? (
+                            <CodeBlock
+                              title="SQL משלים לטבלה זו"
+                              code={result.delta_sql}
+                              ariaLabel={`העתק SQL משלים עבור ${result.table_name}`}
+                            />
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+              <div className="space-y-4">
+                <p className="text-sm text-slate-600">
+                  לאחר שה-SQL מהשלב הקודם יצר את המפתח "APP_DEDICATED_KEY", הדביקו אותו כאן כדי שנשמור אותו מוצפן.
+                </p>
+                <div className="space-y-2">
+                  <Label htmlFor="dedicated_key">APP_DEDICATED_KEY</Label>
+                  <Textarea
+                    id="dedicated_key"
+                    dir="ltr"
+                    rows={3}
+                    value={dedicatedKey}
+                    onChange={handleDedicatedKeyChange}
+                    onPaste={handleDedicatedKeyPaste}
+                    placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  />
+                  <p className="text-xs text-slate-400">(טיפ: בחרו את הערך בעורך ה-SQL, העתיקו והדביקו כאן.)</p>
+                </div>
+                {dedicatedKeyError ? <p className="text-xs text-red-600">{dedicatedKeyError}</p> : null}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  {dedicatedKeySavedAt ? (
+                    <span className="text-xs text-slate-500">נשמר לאחרונה: {formatDateTime(dedicatedKeySavedAt)}</span>
+                  ) : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleDedicatedKeyClipboardPaste}
+                      disabled={isSavingDedicatedKey}
+                      className="gap-2"
+                    >
+                      <ClipboardCopy className="w-4 h-4" aria-hidden="true" />
+                      הדבק מהמחשב
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={handleClearDedicatedKey}
+                      disabled={isSavingDedicatedKey || (!hasDedicatedKeyValue && !dedicatedKeyError)}
+                      className="gap-2"
+                    >
+                      נקה
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={handleSaveDedicatedKey}
+                      disabled={!hasDedicatedKeyValue || isSavingDedicatedKey || !activeOrg || !supabaseReady}
+                      className="gap-2"
+                    >
+                      {isSavingDedicatedKey ? (
+                        <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                      ) : null}
+                      {isSavingDedicatedKey ? 'שומר...' : 'שמור מפתח'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </StepSection>
+        );
+      default:
+        return null;
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -762,6 +1172,33 @@ export default function SetupAssistant() {
     setConnectionTest(INITIAL_CONNECTION_TEST);
   };
 
+  const handleNextStep = () => {
+    if (activeStep >= totalWizardSteps) {
+      return;
+    }
+    setActiveStep((prev) => Math.min(prev + 1, totalWizardSteps));
+  };
+
+  const handlePreviousStep = () => {
+    if (activeStep <= 1) {
+      return;
+    }
+    setActiveStep((prev) => Math.max(prev - 1, 1));
+  };
+
+  const handleJwtSecretChange = (event) => {
+    setJwtSecret(event.target.value || '');
+  };
+
+  const handleJwtSecretPaste = (event) => {
+    if (!event?.clipboardData) {
+      return;
+    }
+    event.preventDefault();
+    const pasted = event.clipboardData.getData('text') || '';
+    setJwtSecret(pasted.trim());
+  };
+
   const handleDedicatedKeyPaste = (event) => {
     if (!event?.clipboardData) {
       return;
@@ -772,6 +1209,11 @@ export default function SetupAssistant() {
       return;
     }
     setDedicatedKey(pasted.trim());
+    setDedicatedKeyError('');
+  };
+
+  const handleDedicatedKeyChange = (event) => {
+    setDedicatedKey(event.target.value || '');
     setDedicatedKeyError('');
   };
 
@@ -1416,6 +1858,28 @@ export default function SetupAssistant() {
     );
   };
 
+  const renderStepFiveStatusBadges = () => {
+    const badges = [];
+    const verificationBadge = renderVerificationStatusBadge();
+    if (verificationBadge) {
+      badges.push({ key: 'verification', node: verificationBadge });
+    }
+    const dedicatedBadge = renderDedicatedKeyStatusBadge();
+    if (dedicatedBadge) {
+      badges.push({ key: 'dedicated', node: dedicatedBadge });
+    }
+    if (!badges.length) {
+      return null;
+    }
+    return (
+      <div className="flex flex-wrap gap-2">
+        {badges.map((badge) => (
+          <React.Fragment key={badge.key}>{badge.node}</React.Fragment>
+        ))}
+      </div>
+    );
+  };
+
   const connectionHelperText = hasSavedConnection
     ? 'ניתן לעדכן את הפרטים בכל עת – הם נשמרים בהגדרות הארגון.'
     : 'נשמור עבורך את הכתובת והמפתח בחשבון הארגון כדי שכל המנהלים יוכלו להמשיך את העבודה.';
@@ -1427,393 +1891,34 @@ export default function SetupAssistant() {
   return (
     <>
       <Card className="border-0 shadow-xl bg-white/90" dir="rtl">
-      <CardHeader className="border-b border-slate-200">
-        <CardTitle className="text-2xl font-semibold text-slate-900 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <span>אשף הגדרה ראשוני ל-Supabase</span>
-          {verificationStatus === 'success' ? (
-            <Badge className="gap-1 bg-emerald-100 text-emerald-700 border border-emerald-200">
-              <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
-              <span>הכל מוכן</span>
-            </Badge>
-          ) : null}
-        </CardTitle>
-        <p className="text-sm text-slate-600 mt-2">
-          ארבעה צעדים קצרים: חיבור המפתחות, הרצת ה-SQL המאובטח, אימות שהטבלאות ומדיניות ה-RLS קיימות, ולבסוף שמירת המפתח הייעודי שהופק עבורך. האשף פועל בכיוון ימין-לשמאל ומספק כפתורי העתקה לכל בלוק.
-        </p>
-        <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500 mt-3">
-          <span>ההגדרות נשמרות עבור: {activeOrg?.name || 'ארגון ללא שם'}</span>
-          <Button variant="outline" size="sm" onClick={handleOpenCreateDialog} className="gap-2">
-            <Building2 className="w-4 h-4" aria-hidden="true" />
-            צור ארגון חדש
-          </Button>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-10 pt-6">
-        <StepSection
-          number={1}
-          title="חיבור ל-Supabase"
-          description="הזן את ה-URL הציבורי ואת מפתח ה-ANON של הפרויקט. נשמור אותם בהגדרות הארגון המשותפות."
-          statusBadge={renderConnectionStatusBadge()}
-        >
-          <form className="space-y-4" onSubmit={handleSaveConnection}>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="supabase_url">Supabase URL (כתובת ציבורית)</Label>
-                <Input
-                  id="supabase_url"
-                  type="url"
-                  dir="ltr"
-                  placeholder="https://your-project.supabase.co"
-                  value={connection.supabase_url}
-                  onChange={handleConnectionChange('supabase_url')}
-                  required
-                />
-                <p className="text-xs text-slate-500">העתק מהמסך Project Settings → API בסביבת Supabase.</p>
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="supabase_anon_key">Supabase anon key</Label>
-                <Textarea
-                  id="supabase_anon_key"
-                  dir="ltr"
-                  rows={3}
-                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                  value={connection.anon_key}
-                  onChange={handleConnectionChange('anon_key')}
-                  required
-                />
-                <p className="text-xs text-slate-500">{connectionHelperText}</p>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="policy_links">קישורי מדיניות (שורה לכל קישור)</Label>
-              <Textarea
-                id="policy_links"
-                dir="ltr"
-                rows={3}
-                placeholder="https://supabase.example.com/policies"
-                value={connection.policy_links_text}
-                onChange={handleConnectionChange('policy_links_text')}
-              />
-              <p className="text-xs text-slate-500">הוסף כאן קישורים למסמכי SQL, נהלי אבטחה או הערות רלוונטיות עבור מנהלים נוספים.</p>
-            </div>
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="legal_contact_email">אימייל איש קשר משפטי</Label>
-                <Input
-                  id="legal_contact_email"
-                  type="email"
-                  dir="ltr"
-                  placeholder="legal@example.com"
-                  value={connection.legal_contact_email}
-                  onChange={handleConnectionChange('legal_contact_email')}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="legal_terms_url">קישור לתנאי שימוש</Label>
-                <Input
-                  id="legal_terms_url"
-                  type="url"
-                  dir="ltr"
-                  placeholder="https://example.com/terms"
-                  value={connection.legal_terms_url}
-                  onChange={handleConnectionChange('legal_terms_url')}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="legal_privacy_url">קישור למדיניות פרטיות</Label>
-                <Input
-                  id="legal_privacy_url"
-                  type="url"
-                  dir="ltr"
-                  placeholder="https://example.com/privacy"
-                  value={connection.legal_privacy_url}
-                  onChange={handleConnectionChange('legal_privacy_url')}
-                />
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              {lastSavedAt ? (
-                <span className="text-xs text-slate-500">נשמר לאחרונה: {formatDateTime(lastSavedAt)}</span>
-              ) : null}
-              <div className="flex items-center gap-2">
-                <Button
-                  type="submit"
-                  disabled={!hasConnectionValues || isSavingConnection || !hasUnsavedChanges}
-                  className="gap-2"
-                >
-                  {isSavingConnection ? (
-                    <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                  ) : null}
-                  {isSavingConnection ? 'שומר...' : 'שמור חיבור'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleTestConnection}
-                  disabled={
-                    !activeOrg
-                    || isTestingConnection
-                    || hasUnsavedChanges
-                    || !hasConnectionValues
-                    || !dataClient
-                    || !supabaseReady
-                  }
-                  className="gap-2"
-                >
-                  {isTestingConnection ? (
-                    <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                  ) : (
-                    <ShieldCheck className="w-4 h-4" aria-hidden="true" />
-                  )}
-                  {isTestingConnection ? 'מריץ בדיקה...' : 'בדוק חיבור שמור'}
-                </Button>
-              </div>
-            </div>
-            {hasUnsavedChanges ? (
-              <p className="text-xs text-amber-600">
-                שמור את השינויים לפני בדיקת החיבור.
-              </p>
+        <CardHeader className="border-b border-slate-200">
+          <CardTitle className="text-2xl font-semibold text-slate-900 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span>אשף הגדרה ראשוני ל-Supabase</span>
+            {verificationStatus === 'success' ? (
+              <Badge className="gap-1 bg-emerald-100 text-emerald-700 border border-emerald-200">
+                <CheckCircle2 className="w-4 h-4" aria-hidden="true" />
+                <span>הכל מוכן</span>
+              </Badge>
             ) : null}
-            {renderConnectionTestFeedback()}
-            {renderConnectionDiagnostics()}
-            {renderLeavePolicyStatusNotice()}
-          </form>
-        </StepSection>
-
-        <StepSection
-          number={2}
-          title="הדבק SQL והרץ ב-Supabase"
-          description="הרץ את בלוק הסכימה ולאחריו את בלוק מדיניות ה-RLS בעורך ה-SQL של Supabase. מומלץ להריץ כבעלים בלבד."
-        >
-          <div className="space-y-6">
-            <CodeBlock title="בלוק סכימה מלא" code={SETUP_SQL_SCRIPT} ariaLabel="העתק את בלוק הסכימה" />
-            <CodeBlock title="בלוק RLS ומדיניות" code={RLS_SQL} ariaLabel="העתק את בלוק ה-RLS" />
-            <p className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
-              לאחר הרצת שני הבלוקים, עבור לשלב האימות כדי לוודא שהטבלאות, המדיניות ופונקציית הבדיקה קיימות. ניתן להפעיל את ה-SQL כמה פעמים – כל המדיניות נמחקות עם DROP POLICY IF EXISTS לפני יצירתן מחדש כדי לאפס תצורות שגויות ללא שגיאות כפולות.
-            </p>
+          </CardTitle>
+          <p className="text-sm text-slate-600 mt-2">
+            התקדמו שלב-אחר-שלב: חיבור Supabase, יצירת סכימה, הפעלת מדיניות RLS, הפקת JWT ייעודי ולבסוף אימות ושמירה. בכל שלב תמצאו הוראות מדויקות וכפתורי העתקה מהירים.
+          </p>
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500 mt-3">
+            <span>ההגדרות נשמרות עבור: {activeOrg?.name || 'ארגון ללא שם'}</span>
+            <Button variant="outline" size="sm" onClick={handleOpenCreateDialog} className="gap-2">
+              <Building2 className="w-4 h-4" aria-hidden="true" />
+              צור ארגון חדש
+            </Button>
           </div>
-        </StepSection>
-
-        <StepSection
-          number={3}
-          title="אימות"
-          description="הרץ בדיקת קריאה בלבד שמוודאת שהטבלאות קיימות, RLS פעיל וכל המדיניות מאופיינת."
-          statusBadge={renderVerificationStatusBadge()}
-        >
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-sm text-slate-600">
-                הבדיקה משתמשת בפונקציית setup_assistant_diagnostics ומחזירה SQL משלים במידה שחסרות פעולות. אין צורך במפתחות שירות – הבדיקה רצה עם המפתח הציבורי (anon) בלבד.
-              </p>
-              <div className="flex items-center gap-3">
-                {lastVerifiedAt ? (
-                  <span className="text-xs text-slate-500">בדיקה אחרונה: {formatDateTime(lastVerifiedAt)}</span>
-                ) : null}
-                <Button
-                  type="button"
-                  onClick={handleVerify}
-                  disabled={
-                    isVerifying ||
-                    !hasSavedConnection ||
-                    !orgSelected ||
-                    hasUnsavedChanges ||
-                    !dataClient ||
-                    !supabaseReady
-                  }
-                  className="gap-2"
-                >
-                  {isVerifying ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" /> : null}
-                  {isVerifying ? 'מריץ בדיקות...' : 'הרץ אימות'}
-                </Button>
-              </div>
-            </div>
-
-            {hasUnsavedChanges ? (
-              <p className="text-xs text-amber-600">
-                שמור את פרטי החיבור לפני הרצת האימות.
-              </p>
-            ) : null}
-
-            {verifyError ? (
-              <div className="rounded-xl border border-red-200 bg-red-50 text-red-700 text-sm p-3 flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 mt-0.5" aria-hidden="true" />
-                <div className="space-y-2">
-                  <span className="block">{verifyError}</span>
-                  {verifyErrorInfo ? (
-                    <ul className="list-disc pr-4 text-xs text-red-600 space-y-1">
-                      {verifyErrorInfo.status !== null && verifyErrorInfo.status !== undefined ? (
-                        <li>סטטוס HTTP: {verifyErrorInfo.status}</li>
-                      ) : null}
-                      {verifyErrorInfo.code ? <li>קוד Supabase: {verifyErrorInfo.code}</li> : null}
-                      {Array.isArray(verifyErrorInfo.details)
-                        ? verifyErrorInfo.details.map((detail, index) => (
-                            <li key={`${detail}-${index}`}>{detail}</li>
-                          ))
-                        : null}
-                    </ul>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-
-            {verifyResults.length === 0 && !verifyError && !isVerifying ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-500 p-3">
-                עדיין לא הרצנו אימות בפרויקט הזה. לאחר הרצת שני בלוקי ה-SQL, לחץ על "הרץ אימות" כדי לוודא שהכל מוכן.
-              </div>
-            ) : null}
-
-            {verifyResults.length > 0 ? (
-              <div className="space-y-4">
-                {verifyResults.map((result) => {
-                  const hasFullPolicies = result.missing_policies && result.missing_policies.length === 0;
-                  const isSuccess = result.has_table && result.rls_enabled && hasFullPolicies;
-                  return (
-                    <div
-                      key={result.table_name}
-                      className="rounded-2xl border border-slate-200 bg-white p-4 md:p-5 space-y-3 shadow-sm"
-                    >
-                      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                        <div className="flex items-center gap-2 text-slate-900 font-medium">
-                          {isSuccess ? (
-                            <CheckCircle2 className="w-5 h-5 text-emerald-600" aria-hidden="true" />
-                          ) : (
-                            <AlertCircle className="w-5 h-5 text-amber-600" aria-hidden="true" />
-                          )}
-                          <span>{TABLE_LABELS[result.table_name] || result.table_name}</span>
-                          <span className="text-xs text-slate-500">({result.table_name})</span>
-                        </div>
-                        <Badge
-                          className={`${
-                            isSuccess
-                              ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
-                              : 'bg-amber-100 text-amber-800 border border-amber-200'
-                          } gap-1`}
-                        >
-                          <span>{isSuccess ? 'מאומת' : 'נדרשת פעולה'}</span>
-                        </Badge>
-                      </div>
-                      <ul className="space-y-1 text-xs text-slate-600">
-                        <li className="flex items-start gap-2">
-                          {result.has_table ? (
-                            <ShieldCheck className="w-4 h-4 text-emerald-600 mt-0.5" aria-hidden="true" />
-                          ) : (
-                            <ShieldAlert className="w-4 h-4 text-amber-600 mt-0.5" aria-hidden="true" />
-                          )}
-                          <span>{result.has_table ? 'הטבלה קיימת במאגר.' : 'הטבלה חסרה. הרץ שוב את בלוק הסכימה.'}</span>
-                        </li>
-                        <li className="flex items-start gap-2">
-                          {result.rls_enabled ? (
-                            <ShieldCheck className="w-4 h-4 text-emerald-600 mt-0.5" aria-hidden="true" />
-                          ) : (
-                            <ShieldAlert className="w-4 h-4 text-amber-600 mt-0.5" aria-hidden="true" />
-                          )}
-                          <span>{result.rls_enabled ? 'RLS מופעל עבור הטבלה.' : 'RLS כבוי – הפעל מחדש באמצעות בלוק ה-RLS.'}</span>
-                        </li>
-                        <li className="flex items-start gap-2">
-                          {hasFullPolicies ? (
-                            <ShieldCheck className="w-4 h-4 text-emerald-600 mt-0.5" aria-hidden="true" />
-                          ) : (
-                            <ShieldAlert className="w-4 h-4 text-amber-600 mt-0.5" aria-hidden="true" />
-                          )}
-                          <span>
-                            {hasFullPolicies
-                              ? 'כל ארבע המדיניות קיימות.'
-                              : `מדיניות חסרות: ${result.missing_policies.join(', ')}`}
-                          </span>
-                        </li>
-                      </ul>
-                      {result.delta_sql ? (
-                        <CodeBlock
-                          title="SQL משלים לטבלה זו"
-                          code={result.delta_sql}
-                          ariaLabel={`העתק SQL משלים עבור ${result.table_name}`}
-                        />
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : null}
+        </CardHeader>
+        <CardContent className="pt-6">
+          <div className="space-y-10">
+            {renderStepProgress()}
+            {renderActiveStep()}
+            {renderStepNavigation()}
           </div>
-        </StepSection>
-
-        <StepSection
-          number={4}
-          title="שמירת המפתח הייעודי"
-          description="הדבק את המפתח (JWT) שהופק עבור התפקיד app_user כדי שנשמור אותו מוצפן בבקרת הארגון."
-          statusBadge={renderDedicatedKeyStatusBadge()}
-        >
-          <div className="space-y-4">
-            <p className="text-sm text-slate-600">
-              לאחר הרצת שלב המפתח ב-SQL יוצג בטבלה ערך בשם "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)". העתק את הערך הזה והדבק
-              כאן – המפתח נשמר מוצפן וניתן להחליפו בכל עת על ידי הרצת ה-SQL מחדש.
-            </p>
-            <div className="space-y-2">
-              <Label htmlFor="dedicated_key">המפתח הייעודי של האפליקציה</Label>
-              <Textarea
-                id="dedicated_key"
-                dir="ltr"
-                rows={3}
-                value={dedicatedKey}
-                readOnly
-                onPaste={handleDedicatedKeyPaste}
-                placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-              />
-              <p className="text-xs text-slate-400">
-                (טיפ: לחץ על המפתח בעורך ה-SQL כדי לבחור אותו, ואז לחץ Ctrl+C כדי להעתיק)
-              </p>
-              <p className="text-xs text-slate-500">
-                השדה לקריאה בלבד כדי למנוע שינוי לא רצוי. ניתן להשתמש בקיצור Ctrl+V (או ⌘+V) או בכפתור ההדבקה להלן.
-              </p>
-            </div>
-            {dedicatedKeyError ? (
-              <p className="text-xs text-red-600">{dedicatedKeyError}</p>
-            ) : null}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              {dedicatedKeySavedAt ? (
-                <span className="text-xs text-slate-500">נשמר לאחרונה: {formatDateTime(dedicatedKeySavedAt)}</span>
-              ) : null}
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={handleDedicatedKeyClipboardPaste}
-                  disabled={isSavingDedicatedKey}
-                  className="gap-2"
-                >
-                  <ClipboardCopy className="w-4 h-4" aria-hidden="true" />
-                  הדבק מהמחשב
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={handleClearDedicatedKey}
-                  disabled={isSavingDedicatedKey || (!hasDedicatedKeyValue && !dedicatedKeyError)}
-                  className="gap-2"
-                >
-                  נקה
-                </Button>
-                <Button
-                  type="button"
-                  onClick={handleSaveDedicatedKey}
-                  disabled={
-                    !hasDedicatedKeyValue
-                    || isSavingDedicatedKey
-                    || !activeOrg
-                    || !supabaseReady
-                  }
-                  className="gap-2"
-                >
-                  {isSavingDedicatedKey ? (
-                    <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
-                  ) : null}
-                  {isSavingDedicatedKey ? 'שומר...' : 'שמור מפתח'}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </StepSection>
-      </CardContent>
+        </CardContent>
       </Card>
       {renderCreateOrgDialog()}
     </>
