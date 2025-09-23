@@ -254,35 +254,49 @@ function buildCacheKey(scope, orgId) {
 }
 
 async function ensureJsonResponse(response, orgId, scope, accessToken, endpoint) {
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.toLowerCase().includes('application/json')) {
-    let bodyText = '';
-    try {
-      bodyText = await response.text();
-    } catch {
-      bodyText = '';
-    }
-    updateDiagnostics({
-      orgId,
-      status: response.status,
-      scope,
-      ok: false,
-      error: 'response-not-json',
-      accessToken,
-      body: null,
-      bodyIsJson: false,
-      endpoint,
-      bodyText,
-    });
-    const endpointLabel = endpoint || '/api/config';
-    const error = new MissingRuntimeConfigError(
-      `הפונקציה ${endpointLabel} לא מחזירה JSON תקין. ודא שהיא מחזירה תשובה מסוג application/json.`,
-    );
-    error.status = response.status;
-    error.endpoint = endpointLabel;
-    error.bodyText = bodyText;
-    throw asError(error);
+  const rawContentType = response.headers.get('content-type') || '';
+  const normalizedContentType = typeof rawContentType === 'string' ? rawContentType.toLowerCase() : '';
+
+  if (normalizedContentType.includes('application/json')) {
+    return;
   }
+
+  let bodyText = '';
+  try {
+    bodyText = await response.text();
+  } catch {
+    bodyText = '';
+  }
+
+  const endpointLabel = endpoint || '/api/config';
+  let friendlyMessage = `הפונקציה ${endpointLabel} לא מחזירה JSON תקין. ודא שהיא מחזירה תשובה מסוג application/json.`;
+
+  if ((response.status === 401 || response.status === 403) && scope === 'org') {
+    friendlyMessage =
+      `הפונקציה ${endpointLabel} החזירה ${response.status} ללא JSON. ודא שסיפקת כותרת x-functions-key תקינה או שה- authLevel של הפונקציה הוא "anonymous".`;
+  } else if (response.status === 404) {
+    friendlyMessage = `הפונקציה ${endpointLabel} החזירה 404 ללא JSON. ודא שהנתיב קיים ומחזיר supabase_url ו-anon_key.`;
+  }
+
+  updateDiagnostics({
+    orgId,
+    status: response.status,
+    scope,
+    ok: false,
+    error: friendlyMessage,
+    accessToken,
+    body: null,
+    bodyIsJson: false,
+    endpoint,
+    bodyText,
+    errorReason: 'response-not-json',
+  });
+
+  const error = new MissingRuntimeConfigError(friendlyMessage);
+  error.status = response.status;
+  error.endpoint = endpointLabel;
+  error.bodyText = bodyText;
+  throw asError(error);
 }
 
 export async function loadRuntimeConfig(options = {}) {
