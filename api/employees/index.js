@@ -312,6 +312,12 @@ async function upsertRateHistory(client, entries, options = {}) {
 }
 
 export default async function (context, req) {
+  console.log('--- API Function Invoked ---');
+  console.log('Request Method:', req?.method);
+  console.log('All Incoming Headers:', JSON.stringify(req?.headers, null, 2));
+  const authHeader = req?.headers?.authorization ?? req?.headers?.Authorization;
+  console.log('Received Authorization Header:', authHeader);
+
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
     context.log?.warn?.('employees missing bearer token');
