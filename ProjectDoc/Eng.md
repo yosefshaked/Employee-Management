@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.5.5**
-**Last Updated: 2025-10-10**
+**Version: 1.5.6**
+**Last Updated: 2025-10-11**
 
 ## 1. Vision & Purpose
 
@@ -364,7 +364,7 @@ returns table (
   delta_sql text
 )
 language plpgsql
-security definer
+SECURITY DEFINER
 set search_path = public
 as $$
 declare

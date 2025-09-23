@@ -1,7 +1,7 @@
 # תיק פרויקט: מערכת ניהול שכר ועובדים
 
-**גרסה: 1.5.5**
-**תאריך עדכון אחרון: 2025-10-10**
+**גרסה: 1.5.6**
+**תאריך עדכון אחרון: 2025-10-11**
 
 ## 1. חזון ומטרה
 
@@ -365,7 +365,7 @@ returns table (
   delta_sql text
 )
 language plpgsql
-security definer
+SECURITY DEFINER
 set search_path = public
 as $$
 declare
