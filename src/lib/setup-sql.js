@@ -169,7 +169,7 @@ begin
         if array_position(missing_policies, required_policy_names[idx]) is not null then
           if required_commands[idx] = 'SELECT' then
             delta_sql := delta_sql || format(
-              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR SELECT TO authenticated%s  USING (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR SELECT TO authenticated, app_user%s  USING (true);%s',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -181,7 +181,7 @@ begin
             );
           elsif required_commands[idx] = 'INSERT' then
             delta_sql := delta_sql || format(
-              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR INSERT TO authenticated%s  WITH CHECK (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR INSERT TO authenticated, app_user%s  WITH CHECK (true);%s',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -193,7 +193,7 @@ begin
             );
           elsif required_commands[idx] = 'UPDATE' then
             delta_sql := delta_sql || format(
-              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR UPDATE TO authenticated%s  USING (true)%s  WITH CHECK (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR UPDATE TO authenticated, app_user%s  USING (true)%s  WITH CHECK (true);%s',
               required_policy_names[idx],
               table_name,
               E'\n',
@@ -206,7 +206,7 @@ begin
             );
           elsif required_commands[idx] = 'DELETE' then
             delta_sql := delta_sql || format(
-              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR DELETE TO authenticated%s  USING (true);%s',
+              'DROP POLICY IF EXISTS "%s" ON public."%s";%sCREATE POLICY "%s" ON public."%s"%s  FOR DELETE TO authenticated, app_user%s  USING (true);%s',
               required_policy_names[idx],
               table_name,
               E'\n',
