@@ -90,13 +90,19 @@ export function resolveControlAccessToken(credential) {
 export async function authenticatedFetch(path, { session, accessToken, ...options } = {}) {
   const tokenSource = session ?? accessToken;
   const token = resolveControlAccessToken(tokenSource);
+  const bearer = `Bearer ${token}`;
 
   const { headers: customHeaders = {}, body, ...rest } = options;
   const headers = {
     'Content-Type': 'application/json',
     ...customHeaders,
-    Authorization: `Bearer ${token}`,
   };
+
+  headers.Authorization = bearer;
+  headers.authorization = bearer;
+  headers['X-Supabase-Authorization'] = bearer;
+  headers['x-supabase-authorization'] = bearer;
+  headers['x-supabase-auth'] = bearer;
 
   let requestBody = body;
   if (requestBody && typeof requestBody === 'object' && !(requestBody instanceof FormData)) {
