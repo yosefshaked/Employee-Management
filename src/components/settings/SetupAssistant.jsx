@@ -397,6 +397,14 @@ export default function SetupAssistant() {
   const [dedicatedKeySavedAt, setDedicatedKeySavedAt] = useState(activeOrg?.dedicated_key_saved_at || null);
   const activeOrgId = activeOrg?.id || null;
 
+  const hasConnectionValues = Boolean(connection.supabase_url.trim() && connection.anon_key.trim());
+  const hasSavedConnection = Boolean(
+    activeOrgHasConnection
+    && originalConnection.supabase_url
+    && originalConnection.anon_key
+  );
+  const orgSelected = useMemo(() => Boolean(activeOrg?.id), [activeOrg?.id]);
+
   const handleOpenCreateDialog = () => {
     setCreateOrgError('');
     setNewOrgName('');
@@ -1143,14 +1151,6 @@ export default function SetupAssistant() {
       cancelled = true;
     };
   }, [activeOrgId, dataClient]);
-
-  const hasConnectionValues = Boolean(connection.supabase_url.trim() && connection.anon_key.trim());
-  const hasSavedConnection = Boolean(
-    activeOrgHasConnection
-    && originalConnection.supabase_url
-    && originalConnection.anon_key
-  );
-  const orgSelected = useMemo(() => Boolean(activeOrg?.id), [activeOrg?.id]);
 
   const handleConnectionChange = (field) => (event) => {
     const value = event.target.value;
