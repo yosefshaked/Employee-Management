@@ -12,6 +12,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, normalizeLeavePayPolicy } from "@/lib/leave.js";
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { fetchEmployeesList, updateEmployee as updateEmployeeRequest } from '@/api/employees.js';
+import { authenticatedFetch } from '@/lib/api-client.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -121,6 +122,36 @@ export default function Employees() {
     setIsLoading(false);
   }, [tenantClientReady, activeOrgHasConnection, session, activeOrgId]);
 
+  const runDiagnostics = useCallback(async () => {
+    const orgId = activeOrg?.id || activeOrgId;
+    console.log('Running server diagnostics...', {
+      orgId,
+      hasSession: Boolean(session),
+    });
+
+    if (!session) {
+      console.warn('Diagnostic test aborted: missing authenticated session.');
+      alert('לא נמצאה התחברות פעילה. התחבר מחדש ונסה שוב.');
+      return;
+    }
+
+    if (!orgId) {
+      console.warn('Diagnostic test aborted: missing organization identifier.');
+      alert('יש לבחור ארגון פעיל לפני הרצת האבחון.');
+      return;
+    }
+
+    try {
+      const result = await authenticatedFetch(`test-credentials?org_id=${encodeURIComponent(orgId)}`, { session });
+      console.log('--- DIAGNOSTIC REPORT ---');
+      console.log(JSON.stringify(result, null, 2));
+      alert('Diagnostic report has been printed to the console.');
+    } catch (error) {
+      console.error('Diagnostic test failed to run:', error);
+      alert('Failed to run diagnostic test. Check console for details.');
+    }
+  }, [activeOrg, activeOrgId, session]);
+
   const filterEmployees = useCallback(() => {
     let filtered = employees;
     if (activeTab === "active") filtered = filtered.filter(emp => emp.is_active);
@@ -214,10 +245,18 @@ export default function Employees() {
             <h1 className="text-3xl font-bold text-slate-900 mb-2">ניהול עובדים</h1>
             <p className="text-slate-600">נהל את פרטי העובדים ותעריפיהם</p>
           </div>
-          <Button onClick={() => { setEditingEmployee(null); setShowForm(true); }} className="bg-gradient-to-r from-blue-500 to-green-500 hover:from-blue-600 hover:to-green-600 text-white shadow-lg">
-            <Plus className="w-5 h-5 ml-2" />
-            הוסף עובד חדש
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button
+              onClick={() => { setEditingEmployee(null); setShowForm(true); }}
+              className="bg-gradient-to-r from-blue-500 to-green-500 hover:from-blue-600 hover:to-green-600 text-white shadow-lg"
+            >
+              <Plus className="w-5 h-5 ml-2" />
+              הוסף עובד חדש
+            </Button>
+            <Button variant="outline" onClick={runDiagnostics}>
+              Run Server Diagnostics
+            </Button>
+          </div>
         </div>
         {showForm ? (
           <EmployeeForm
