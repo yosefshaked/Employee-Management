@@ -71,7 +71,16 @@ export function onConfigCleared(listener) {
   };
 }
 
-export function activateConfig(rawConfig, options = {}) {
+async function ensureAuthClientInitialized(credentials) {
+  try {
+    const { initializeAuthClient } = await import('../lib/supabase-manager.js');
+    initializeAuthClient(credentials);
+  } catch (error) {
+    throw asError(error, 'טעינת לקוח Supabase נכשלה. ודא שמפתחות הבקרה תקינים.');
+  }
+}
+
+export async function activateConfig(rawConfig, options = {}) {
   const sanitized = sanitizeConfig(rawConfig, options.source || rawConfig?.source || 'manual');
 
   if (!sanitized) {
@@ -84,6 +93,8 @@ export function activateConfig(rawConfig, options = {}) {
     source: sanitized.source || options.source || 'manual',
     orgId: options.orgId ?? null,
   };
+
+  await ensureAuthClientInitialized(normalized);
 
   currentConfig = {
     supabaseUrl: normalized.supabaseUrl,
@@ -468,7 +479,7 @@ export async function loadRuntimeConfig(options = {}) {
 
   CACHE.set(cacheKey, normalized);
   if (scope === 'app') {
-    activateConfig(normalized, { source: normalized.source || 'api', orgId: null });
+    await activateConfig(normalized, { source: normalized.source || 'api', orgId: null });
   }
 
   return normalized;
@@ -487,11 +498,13 @@ function hasPreloadedConfig(raw) {
 }
 
 if (typeof window !== 'undefined' && hasPreloadedConfig(window.__RUNTIME_CONFIG__)) {
-  try {
-    const preloaded = window.__RUNTIME_CONFIG__;
-    const orgId = preloaded.orgId ?? preloaded.org_id ?? null;
-    activateConfig(preloaded, { source: preloaded.source || 'preload', orgId });
-  } catch (error) {
-    console.warn('failed to activate preloaded runtime config', error);
-  }
+  (async () => {
+    try {
+      const preloaded = window.__RUNTIME_CONFIG__;
+      const orgId = preloaded.orgId ?? preloaded.org_id ?? null;
+      await activateConfig(preloaded, { source: preloaded.source || 'preload', orgId });
+    } catch (error) {
+      console.warn('failed to activate preloaded runtime config', error);
+    }
+  })();
 }

@@ -935,7 +935,7 @@ export default function SetupAssistant() {
     const applyConfig = async () => {
       setConfigStatus('activating');
       try {
-        activateConfig(
+        await activateConfig(
           { supabaseUrl, supabaseAnonKey },
           { source: 'org-api', orgId: activeOrg.id },
         );
@@ -1176,7 +1176,7 @@ export default function SetupAssistant() {
       const config = await loadRuntimeConfig({ accessToken, orgId: activeOrg.id, force: true });
       resetRuntimeSupabase();
       setConfigStatus('activating');
-      activateConfig(
+      await activateConfig(
         {
           supabaseUrl: config.supabaseUrl,
           supabaseAnonKey: config.supabaseAnonKey,

@@ -240,7 +240,7 @@ function ConfigErrorScreen({ error }) {
       return;
     }
     try {
-      activateConfig(lastConfig, { source: 'manual' });
+      await activateConfig(lastConfig, { source: 'manual' });
       const { renderApp } = await import('../main.jsx');
       renderApp(lastConfig);
     } catch (launchError) {
