@@ -6,6 +6,7 @@ import TrashTab from '../components/time-entry/TrashTab.jsx';
 import { toast } from "sonner";
 import { useOrg } from '@/org/OrgContext.jsx';
 import { fetchLeavePolicySettings, fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
+import { fetchEmployeesList } from '@/api/employees.js';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
@@ -87,10 +88,10 @@ export default function TimeEntry() {
   const location = useLocation();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(() => getTabFromSearch(location.search));
-  const { tenantClientReady, activeOrgHasConnection } = useOrg();
-  const { dataClient, authClient, user, loading } = useSupabase();
+  const { tenantClientReady, activeOrgHasConnection, activeOrgId } = useOrg();
+  const { dataClient, authClient, user, loading, session } = useSupabase();
   const loadInitialData = useCallback(async ({ silent = false } = {}) => {
-    if (!tenantClientReady || !activeOrgHasConnection || !dataClient) {
+    if (!tenantClientReady || !activeOrgHasConnection || !dataClient || !session || !activeOrgId) {
       if (!silent) {
         setIsLoading(false);
       }
@@ -99,8 +100,11 @@ export default function TimeEntry() {
 
     if (!silent) setIsLoading(true);
     try {
+      const bundle = await fetchEmployeesList({ session, orgId: activeOrgId });
+      const employeeRecords = Array.isArray(bundle?.employees) ? bundle.employees : [];
+      setEmployees(employeeRecords.filter((emp) => emp?.is_active !== false));
+
       const [
-        employeesData,
         sessionsData,
         ratesData,
         servicesData,
@@ -109,7 +113,6 @@ export default function TimeEntry() {
         leaveLedgerData,
         trashData,
       ] = await Promise.all([
-        dataClient.from('Employees').select('*').eq('is_active', true).order('name'),
         dataClient.from('WorkSessions')
           .select('*, service:service_id(name)')
           .eq('deleted', false)
@@ -126,14 +129,12 @@ export default function TimeEntry() {
           .order('deleted_at', { ascending: false })
       ]);
 
-      if (employeesData.error) throw employeesData.error;
       if (sessionsData.error) throw sessionsData.error;
       if (ratesData.error) throw ratesData.error;
       if (servicesData.error) throw servicesData.error;
       if (leaveLedgerData.error) throw leaveLedgerData.error;
       if (trashData.error) throw trashData.error;
 
-      setEmployees(employeesData.data || []);
       const activeSessions = (sessionsData.data || []).filter(session => !session?.deleted);
       setWorkSessions(activeSessions);
       setTrashSessions(trashData.data || []);
@@ -160,7 +161,7 @@ export default function TimeEntry() {
     } finally {
       setIsLoading(false);
     }
-  }, [tenantClientReady, activeOrgHasConnection, dataClient]);
+  }, [tenantClientReady, activeOrgHasConnection, dataClient, session, activeOrgId]);
 
   useEffect(() => {
     loadInitialData();

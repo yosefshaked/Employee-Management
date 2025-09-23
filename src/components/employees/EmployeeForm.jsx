@@ -8,11 +8,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Save, X, User, DollarSign } from "lucide-react";
 import RateHistoryManager from './RateHistoryManager';
+import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
+import { createEmployee, updateEmployee } from '@/api/employees.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
-export default function EmployeeForm({ employee, onSubmit, onCancel }) {
+export default function EmployeeForm({ employee, onSuccess, onCancel, services: servicesProp = [], rateHistories: rateHistoriesProp = [] }) {
   const [formData, setFormData] = useState({
     name: employee?.name || '',
     employee_id: employee?.employee_id || '',
@@ -52,81 +55,173 @@ export default function EmployeeForm({ employee, onSubmit, onCancel }) {
   const [rateHistory, setRateHistory] = useState([]);
   const [serviceRates, setServiceRates] = useState({});
   const [isLoading, setIsLoading] = useState(false);
-  const { dataClient, authClient, user, loading } = useSupabase();
+  const { authClient, user, loading, session } = useSupabase();
+  const { activeOrgId } = useOrg();
 
 useEffect(() => {
-  const loadServicesAndRates = async () => {
-    if (!dataClient) {
-      setServices([]);
-      setRateHistory([]);
-      return;
-    }
-    // Load services only if the employee is an instructor
-    if (formData.employee_type === 'instructor') {
-      const { data: servicesData } = await dataClient.from('Services').select('*').order('name');
-      const filteredServices = (servicesData || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
-      setServices(filteredServices);
-    } else {
-      setServices([]);
-    }
-
-    // Load rate history FOR ANY existing employee
-    if (employee) {
-      const { data: ratesData } = await dataClient.from('RateHistory').select('*').eq('employee_id', employee.id);
-      setRateHistory(ratesData || []);
-      setFormData(prev => ({ ...prev, current_rate: '' }));
-    }
-  };
-  loadServicesAndRates();
-}, [dataClient, formData.employee_type, employee]);
+  if (formData.employee_type === 'instructor') {
+    const filtered = (servicesProp || [])
+      .filter((service) => service && service.id !== GENERIC_RATE_SERVICE_ID)
+      .sort((a, b) => (a?.name || '').localeCompare(b?.name || '', 'he'));
+    setServices(filtered);
+  } else {
+    setServices([]);
+  }
+}, [formData.employee_type, servicesProp]);
 
 useEffect(() => {
-     if (employee && rateHistory.length > 0) {
-          const latestRatesByService = {};
+  if (employee) {
+    const historyForEmployee = (rateHistoriesProp || []).filter((entry) => entry.employee_id === employee.id);
+    setRateHistory(historyForEmployee);
+    setFormData((prev) => ({ ...prev, current_rate: '' }));
+  } else {
+    setRateHistory([]);
+  }
+}, [employee, rateHistoriesProp]);
 
-          // Find the latest rate for each service_id (including the generic one)
-          rateHistory.forEach(rate => {
-            // Use the actual service_id as the key. If it's the generic one, use it.
-            const key = rate.service_id; 
-            if (!latestRatesByService[key] || new Date(rate.effective_date) > new Date(latestRatesByService[key].effective_date)) {
-              latestRatesByService[key] = rate;
-            }
-          });
+useEffect(() => {
+  if (employee && rateHistory.length > 0) {
+    const latestRatesByService = {};
 
-          const initialServiceRates = {};
-          Object.keys(latestRatesByService).forEach(key => {
-            // Only populate serviceRates for actual services, not the generic one.
-            if (key !== GENERIC_RATE_SERVICE_ID) {
-              initialServiceRates[key] = latestRatesByService[key].rate;
-            }
-          });
-          setServiceRates(initialServiceRates);
+    rateHistory.forEach((rate) => {
+      const key = rate.service_id;
+      if (!latestRatesByService[key] || new Date(rate.effective_date) > new Date(latestRatesByService[key].effective_date)) {
+        latestRatesByService[key] = rate;
+      }
+    });
 
-          // Set the hourly/global rate in the main form data by looking for the generic ID
-          if (latestRatesByService[GENERIC_RATE_SERVICE_ID]) {
-            setFormData(prev => ({
-              ...prev,
-              current_rate: latestRatesByService[GENERIC_RATE_SERVICE_ID].rate
-            }));
-          }
-        }
-      }, [employee, rateHistory]);
+    const initialServiceRates = {};
+    Object.keys(latestRatesByService).forEach((key) => {
+      if (key !== GENERIC_RATE_SERVICE_ID) {
+        initialServiceRates[key] = latestRatesByService[key].rate;
+      }
+    });
+    setServiceRates(initialServiceRates);
+
+    if (latestRatesByService[GENERIC_RATE_SERVICE_ID]) {
+      setFormData((prev) => ({
+        ...prev,
+        current_rate: latestRatesByService[GENERIC_RATE_SERVICE_ID].rate,
+      }));
+    }
+  }
+}, [employee, rateHistory]);
 
   const handleServiceRateChange = (serviceId, value) => {
     setServiceRates(prev => ({ ...prev, [serviceId]: value }));
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setIsLoading(true);
     try {
-      await onSubmit({
-        employeeData: formData,
-        serviceRates,
-        rateHistory,
+      if (!session?.access_token) {
+        throw new Error('יש להתחבר מחדש לפני שמירת השינויים.');
+      }
+      if (!activeOrgId) {
+        throw new Error('בחרו ארגון פעיל לפני שמירת העובד.');
+      }
+
+      const { current_rate: currentRate, ...employeeDetails } = formData;
+      const annualLeave = Number(employeeDetails.annual_leave_days);
+      employeeDetails.annual_leave_days = Number.isNaN(annualLeave) ? 0 : annualLeave;
+
+      const isNewEmployee = !employee;
+      const today = new Date().toISOString().split('T')[0];
+      const effectiveDate = isNewEmployee ? (employeeDetails.start_date || today) : today;
+      const notes = isNewEmployee ? 'תעריף התחלתי' : 'שינוי תעריף';
+
+      const existingHistory = isNewEmployee ? [] : rateHistory;
+      const latestRates = {};
+      existingHistory.forEach((entry) => {
+        if (!entry) {
+          return;
+        }
+        const key = entry.service_id;
+        if (!key) {
+          return;
+        }
+        if (!latestRates[key] || new Date(entry.effective_date) > new Date(latestRates[key].effective_date)) {
+          latestRates[key] = entry;
+        }
       });
+
+      const nextRateUpdates = [];
+
+      if (formData.employee_type === 'hourly' || formData.employee_type === 'global') {
+        const rateValue = parseFloat(currentRate);
+        const existingRate = latestRates[GENERIC_RATE_SERVICE_ID]
+          ? parseFloat(latestRates[GENERIC_RATE_SERVICE_ID].rate)
+          : null;
+        if (!Number.isNaN(rateValue) && (isNewEmployee || existingRate === null || rateValue !== existingRate)) {
+          if (existingHistory.some((entry) => entry.service_id === GENERIC_RATE_SERVICE_ID && entry.effective_date === today)) {
+            toast.error('כבר קיים שינוי תעריף להיום. ערוך אותו באזור היסטוריית התעריפים.');
+            setIsLoading(false);
+            return;
+          }
+          nextRateUpdates.push({
+            service_id: GENERIC_RATE_SERVICE_ID,
+            effective_date: effectiveDate,
+            rate: rateValue,
+            notes,
+          });
+        }
+      }
+
+      if (formData.employee_type === 'instructor') {
+        for (const [serviceId, rateValueRaw] of Object.entries(serviceRates)) {
+          const rateValue = parseFloat(rateValueRaw);
+          const existingRate = latestRates[serviceId]
+            ? parseFloat(latestRates[serviceId].rate)
+            : null;
+          if (!Number.isNaN(rateValue) && (isNewEmployee || existingRate === null || rateValue !== existingRate)) {
+            if (existingHistory.some((entry) => entry.service_id === serviceId && entry.effective_date === today)) {
+              toast.error('כבר קיים שינוי תעריף להיום. ערוך אותו באזור היסטוריית התעריפים.');
+              setIsLoading(false);
+              return;
+            }
+            nextRateUpdates.push({
+              service_id: serviceId,
+              effective_date: effectiveDate,
+              rate: rateValue,
+              notes,
+            });
+          }
+        }
+      }
+
+      let manualHistoryEntries = [];
+      if (!isNewEmployee && rateHistory.length > 0) {
+        const rateUpdateKeys = new Set(nextRateUpdates.map((entry) => `${entry.service_id}-${entry.effective_date}`));
+        manualHistoryEntries = rateHistory
+          .filter((entry) => !rateUpdateKeys.has(`${entry.service_id}-${entry.effective_date}`))
+          .map(({ id, ...rest }) => ({
+            ...rest,
+            ...(id ? { id } : {}),
+          }));
+      }
+
+      const payload = {
+        employee: employeeDetails,
+        rate_updates: nextRateUpdates,
+        manual_rate_history: manualHistoryEntries,
+      };
+
+      if (isNewEmployee) {
+        await createEmployee({ session, orgId: activeOrgId, body: payload });
+        toast.success('העובד נוצר בהצלחה!');
+      } else {
+        await updateEmployee({ session, orgId: activeOrgId, employeeId: employee.id, body: payload });
+        toast.success('פרטי העובד עודכנו בהצלחה!');
+      }
+
+      if (typeof onSuccess === 'function') {
+        onSuccess();
+      }
     } catch (error) {
-      console.error("Form submission error", error);
+      console.error('Form submission error', error);
+      const message = error?.message || 'שמירת העובד נכשלה.';
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
@@ -186,7 +281,7 @@ useEffect(() => {
     );
   }
 
-  if (!dataClient) {
+  if (!activeOrgId) {
     return (
       <Card className="max-w-2xl mx-auto bg-white/80 backdrop-blur-sm border-0 shadow-xl">
         <CardHeader className="p-6 border-b">
