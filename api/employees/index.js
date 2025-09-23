@@ -312,6 +312,20 @@ async function upsertRateHistory(client, entries, options = {}) {
 }
 
 export default async function (context, req) {
+  console.log('--- API Function Invoked: Verifying Environment ---');
+
+  const envSupabaseUrl = process.env.APP_SUPABASE_URL;
+  const envServiceRoleKey = process.env.APP_SUPABASE_SERVICE_ROLE;
+
+  console.log('Found APP_SUPABASE_URL:', envSupabaseUrl);
+
+  if (envServiceRoleKey) {
+    console.log('Found APP_SUPABASE_SERVICE_ROLE: [SECRET PRESENT], Length:', envServiceRoleKey.length);
+    console.log('First 8 chars of Service Role Key:', envServiceRoleKey.substring(0, 8));
+  } else {
+    console.error('CRITICAL ERROR: APP_SUPABASE_SERVICE_ROLE is MISSING or UNDEFINED!');
+  }
+
   console.log('--- API Function Invoked ---');
   console.log('Request Method:', req?.method);
   console.log('All Incoming Headers:', JSON.stringify(req?.headers, null, 2));
