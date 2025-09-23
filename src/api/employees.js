@@ -1,4 +1,4 @@
-const DEFAULT_HEADERS = { 'Content-Type': 'application/json' };
+import { authenticatedFetch } from '@/lib/api-client.js';
 
 function normalizeOrgId(orgId) {
   if (typeof orgId !== 'string') {
@@ -9,61 +9,42 @@ function normalizeOrgId(orgId) {
 
 function resolveSessionToken(session) {
   const token = session?.access_token || session?.accessToken || null;
-  return typeof token === 'string' ? token : null;
+  if (typeof token !== 'string') {
+    return null;
+  }
+  const trimmed = token.trim();
+  return trimmed.length ? trimmed : null;
 }
 
-function buildHeaders(session) {
+async function employeesRequest(method, { session, orgId, body, signal, employeeId } = {}) {
   const token = resolveSessionToken(session);
   if (!token) {
     throw new Error('נדרשת התחברות כדי לגשת לנתוני העובדים.');
   }
-  return {
-    ...DEFAULT_HEADERS,
-    Authorization: `Bearer ${token}`,
-  };
-}
 
-async function parseResponse(response) {
-  const contentType = response.headers.get('content-type') || response.headers.get('Content-Type') || '';
-  const isJson = typeof contentType === 'string' && contentType.toLowerCase().includes('application/json');
-  if (!isJson) {
-    return { ok: response.ok, data: null };
-  }
-  try {
-    const data = await response.json();
-    return { ok: response.ok, data };
-  } catch {
-    return { ok: response.ok, data: null };
-  }
-}
-
-async function employeesRequest(method, { session, orgId, body, signal, employeeId } = {}) {
-  const headers = buildHeaders(session);
   const normalizedOrgId = normalizeOrgId(orgId);
   if (!normalizedOrgId) {
     throw new Error('יש לבחור ארגון פעיל לפני ביצוע הפעולה.');
   }
 
-  const params = new URLSearchParams({ org_id: normalizedOrgId });
-  const path = employeeId ? `/api/employees/${employeeId}` : '/api/employees';
-  const url = `${path}?${params.toString()}`;
+  const path = employeeId ? `employees/${employeeId}` : 'employees';
+  const search = method === 'GET' ? `?org_id=${encodeURIComponent(normalizedOrgId)}` : '';
+  const basePayload = body && typeof body === 'object' ? body : {};
+  const payload = method === 'GET' ? undefined : { ...basePayload, org_id: normalizedOrgId };
 
-  const response = await fetch(url, {
-    method,
-    headers,
-    signal,
-    body: body ? JSON.stringify({ ...body, org_id: normalizedOrgId }) : undefined,
-  });
+  const options = { method, signal };
+  if (payload) {
+    options.body = JSON.stringify(payload);
+  }
 
-  const payload = await parseResponse(response);
-  if (!payload.ok) {
-    const message = payload.data?.message || 'הפעולה נכשלה. נסה שוב מאוחר יותר.';
-    const error = new Error(message);
-    error.status = response.status;
-    error.payload = payload.data || null;
+  try {
+    return await authenticatedFetch(`${path}${search}`, token, options);
+  } catch (error) {
+    if (!error?.message) {
+      error.message = 'הפעולה נכשלה. נסה שוב מאוחר יותר.';
+    }
     throw error;
   }
-  return payload.data || null;
 }
 
 export function fetchEmployeesList(options) {

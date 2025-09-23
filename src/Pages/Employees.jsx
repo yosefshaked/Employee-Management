@@ -11,7 +11,7 @@ import LeaveOverview from "../components/employees/LeaveOverview.jsx";
 import { useOrg } from '@/org/OrgContext.jsx';
 import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, normalizeLeavePayPolicy } from "@/lib/leave.js";
 import { useSupabase } from '@/context/SupabaseContext.jsx';
-import { fetchEmployeesList, updateEmployee } from '@/api/employees.js';
+import { authenticatedFetch } from '@/lib/api-client.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -45,14 +45,14 @@ export default function Employees() {
   const { authClient, user, loading, session } = useSupabase();
 
   const loadData = useCallback(async () => {
-    if (!tenantClientReady || !activeOrgHasConnection || !session || !activeOrgId) {
+    if (!tenantClientReady || !activeOrgHasConnection || !session?.access_token || !activeOrgId) {
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
     try {
-      const bundle = await fetchEmployeesList({ session, orgId: activeOrgId });
+      const bundle = await authenticatedFetch(`employees?org_id=${activeOrgId}`, session.access_token);
       const employeeRecords = Array.isArray(bundle?.employees) ? bundle.employees : [];
       const rateHistoryRecords = Array.isArray(bundle?.rateHistory) ? bundle.rateHistory : [];
       const serviceRecords = Array.isArray(bundle?.services) ? bundle.services : [];
@@ -113,13 +113,12 @@ export default function Employees() {
 
   const handleToggleActive = async (employee) => {
     try {
-      await updateEmployee({
-        session,
-        orgId: activeOrgId,
-        employeeId: employee.id,
-        body: {
+      await authenticatedFetch(`employees/${employee.id}`, session.access_token, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          org_id: activeOrgId,
           updates: { is_active: !employee.is_active },
-        },
+        }),
       });
       toast.success('סטטוס העובד עודכן בהצלחה.');
       loadData();

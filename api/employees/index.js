@@ -312,6 +312,12 @@ async function upsertRateHistory(client, entries, options = {}) {
 }
 
 export default async function (context, req) {
+  const authorization = resolveBearerAuthorization(req);
+  if (!authorization?.token) {
+    context.log?.warn?.('employees missing bearer token');
+    return respond(context, 401, { message: 'missing bearer' });
+  }
+
   const env = readEnv(context);
   const adminConfig = readSupabaseAdminConfig(env);
   const { supabaseUrl, serviceRoleKey } = adminConfig;
@@ -319,12 +325,6 @@ export default async function (context, req) {
   if (!supabaseUrl || !serviceRoleKey) {
     context.log?.error?.('employees missing Supabase admin credentials');
     return respond(context, 500, { message: 'server_misconfigured' });
-  }
-
-  const authorization = resolveBearerAuthorization(req);
-  if (!authorization?.token) {
-    context.log?.warn?.('employees missing bearer token');
-    return respond(context, 401, { message: 'missing bearer' });
   }
 
   const supabase = createSupabaseAdminClient(adminConfig);

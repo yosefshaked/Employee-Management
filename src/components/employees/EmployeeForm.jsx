@@ -11,7 +11,7 @@ import RateHistoryManager from './RateHistoryManager';
 import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
-import { createEmployee, updateEmployee } from '@/api/employees.js';
+import { authenticatedFetch } from '@/lib/api-client.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -202,16 +202,23 @@ useEffect(() => {
       }
 
       const payload = {
+        org_id: activeOrgId,
         employee: employeeDetails,
         rate_updates: nextRateUpdates,
         manual_rate_history: manualHistoryEntries,
       };
 
       if (isNewEmployee) {
-        await createEmployee({ session, orgId: activeOrgId, body: payload });
+        await authenticatedFetch('employees', session.access_token, {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        });
         toast.success('העובד נוצר בהצלחה!');
       } else {
-        await updateEmployee({ session, orgId: activeOrgId, employeeId: employee.id, body: payload });
+        await authenticatedFetch(`employees/${employee.id}`, session.access_token, {
+          method: 'PATCH',
+          body: JSON.stringify(payload),
+        });
         toast.success('פרטי העובד עודכנו בהצלחה!');
       }
 
