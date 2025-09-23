@@ -32,13 +32,19 @@ async function employeesRequest(method, { session, orgId, body, signal, employee
   const basePayload = body && typeof body === 'object' ? body : {};
   const payload = method === 'GET' ? undefined : { ...basePayload, org_id: normalizedOrgId };
 
-  const options = { method, signal };
-  if (payload) {
-    options.body = JSON.stringify(payload);
+  const requestOptions = {
+    session,
+    accessToken: token,
+    method,
+    signal,
+  };
+
+  if (typeof payload !== 'undefined') {
+    requestOptions.body = payload;
   }
 
   try {
-    return await authenticatedFetch(`${path}${search}`, token, options);
+    return await authenticatedFetch(`${path}${search}`, requestOptions);
   } catch (error) {
     if (!error?.message) {
       error.message = 'הפעולה נכשלה. נסה שוב מאוחר יותר.';

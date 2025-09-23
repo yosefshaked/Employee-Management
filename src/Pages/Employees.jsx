@@ -52,7 +52,7 @@ export default function Employees() {
 
     setIsLoading(true);
     try {
-      const bundle = await authenticatedFetch(`employees?org_id=${activeOrgId}`, session.access_token);
+      const bundle = await authenticatedFetch(`employees?org_id=${activeOrgId}`, { session });
       const employeeRecords = Array.isArray(bundle?.employees) ? bundle.employees : [];
       const rateHistoryRecords = Array.isArray(bundle?.rateHistory) ? bundle.rateHistory : [];
       const serviceRecords = Array.isArray(bundle?.services) ? bundle.services : [];
@@ -113,12 +113,13 @@ export default function Employees() {
 
   const handleToggleActive = async (employee) => {
     try {
-      await authenticatedFetch(`employees/${employee.id}`, session.access_token, {
+      await authenticatedFetch(`employees/${employee.id}`, {
+        session,
         method: 'PATCH',
-        body: JSON.stringify({
+        body: {
           org_id: activeOrgId,
           updates: { is_active: !employee.is_active },
-        }),
+        },
       });
       toast.success('סטטוס העובד עודכן בהצלחה.');
       loadData();

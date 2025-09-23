@@ -209,15 +209,17 @@ useEffect(() => {
       };
 
       if (isNewEmployee) {
-        await authenticatedFetch('employees', session.access_token, {
+        await authenticatedFetch('employees', {
+          session,
           method: 'POST',
-          body: JSON.stringify(payload),
+          body: payload,
         });
         toast.success('העובד נוצר בהצלחה!');
       } else {
-        await authenticatedFetch(`employees/${employee.id}`, session.access_token, {
+        await authenticatedFetch(`employees/${employee.id}`, {
+          session,
           method: 'PATCH',
-          body: JSON.stringify(payload),
+          body: payload,
         });
         toast.success('פרטי העובד עודכנו בהצלחה!');
       }

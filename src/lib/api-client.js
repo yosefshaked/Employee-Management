@@ -87,8 +87,9 @@ export function resolveControlAccessToken(credential) {
   return token;
 }
 
-export async function authenticatedFetch(path, accessToken, options = {}) {
-  const token = resolveControlAccessToken(accessToken);
+export async function authenticatedFetch(path, { session, accessToken, ...options } = {}) {
+  const tokenSource = session ?? accessToken;
+  const token = resolveControlAccessToken(tokenSource);
 
   const { headers: customHeaders = {}, body, ...rest } = options;
   const headers = {
