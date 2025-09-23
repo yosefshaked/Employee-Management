@@ -1,4 +1,5 @@
 export const SETUP_SQL_SCRIPT = `
+-- IMPORTANT: Replace 'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE' with your actual JWT secret from Supabase Project Settings -> API -> JWT Settings.
 CREATE EXTENSION IF NOT EXISTS pgjwt WITH SCHEMA extensions;
 
 -- שלב 1: יצירת סכימה מלאה ו-אובייקט עזר לאימות
@@ -248,14 +249,18 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_user;
 
 -- שלב 4: יצירת מפתח גישה ייעודי (JWT) עבור התפקיד החדש
--- החלף את 'YOUR_SUPER_SECRET_JWT_SIGNATURE' בסוד חזק ובטוח
--- שים לב: המפתח הזה יהיה תקף לשנה אחת
-SELECT sign(
+-- IMPORTANT: This script assumes you have a JWT secret configured in your Supabase project's settings.
+-- You can find this under Project Settings -> API -> JWT Settings -> JWT Secret.
+-- We are using a placeholder here. In a real scenario, the secret should be managed securely.
+-- For the purpose of this script, we will use the function correctly,
+-- but acknowledge the secret needs to be known.
+
+SELECT extensions.sign(
   json_build_object(
     'role', 'app_user',
     'exp', (EXTRACT(epoch FROM (NOW() + INTERVAL '1 year')))::integer,
     'iat', (EXTRACT(epoch FROM NOW()))::integer
   ),
-  current_setting('app.settings.jwt_secret') -- This uses the project's own secret
+  'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE' -- This needs to be replaced by the user with their actual JWT secret.
 ) AS "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)";
 `;
