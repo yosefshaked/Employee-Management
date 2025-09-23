@@ -299,11 +299,11 @@ export default function SetupAssistant() {
         throw sessionError;
       }
 
-      const response = await authenticatedFetch('save-org-credentials', {
+      const response = await authenticatedFetch('save-org-key-unsecure', {
         method: 'POST',
         body: {
           org_id: activeOrg.id,
-          dedicated_key: trimmedKey,
+          service_role_key: trimmedKey,
         },
         session: sessionData?.session,
       });
@@ -695,7 +695,8 @@ export default function SetupAssistant() {
             <div className="space-y-6">
               <p className="text-sm text-slate-600">
                 הדביקו כאן את הערך <code className="bg-slate-100 px-1 rounded">APP_DEDICATED_KEY</code> שהתקבל בשלב הקודם ולחצו על "שמור מפתח ייעודי". המערכת תקרא ל-
-                <code className="bg-slate-100 px-1 rounded">/api/save-org-credentials</code> ותאחסן את המפתח בצורה מוצפנת.
+                <code className="bg-slate-100 px-1 rounded">/api/save-org-key-unsecure</code> ותשמור זמנית את המפתח כטקסט גלוי לצורכי
+                דיאגנוסטיקה עד שהפרוקסי יאומת מול פונקציית ה-Edge.
               </p>
               <div className="space-y-2">
                 <Label htmlFor="dedicated-key">APP_DEDICATED_KEY</Label>
