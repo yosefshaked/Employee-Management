@@ -36,6 +36,11 @@ create table if not exists public."Services" (
   constraint "Services_pkey" primary key ("id")
 );
 
+-- Ensure the generic, non-deletable service for general rates exists.
+INSERT INTO "public"."Services" ("id", "name", "duration_minutes", "payment_model", "color", "metadata")
+VALUES ('00000000-0000-0000-0000-000000000000', 'תעריף כללי *לא למחוק או לשנות*', null, 'fixed_rate', '#84CC16', null)
+ON CONFLICT (id) DO NOTHING;
+
 create table if not exists public."RateHistory" (
   "id" uuid not null default gen_random_uuid(),
   "rate" numeric not null,
@@ -48,6 +53,11 @@ create table if not exists public."RateHistory" (
   constraint "RateHistory_employee_id_fkey" foreign key ("employee_id") references public."Employees"("id"),
   constraint "RateHistory_service_id_fkey" foreign key ("service_id") references public."Services"("id")
 );
+
+-- Add a unique constraint to support upsert operations on rate history.
+ALTER TABLE public."RateHistory"
+ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
+UNIQUE (employee_id, service_id, effective_date);
 
 create table if not exists public."WorkSessions" (
   "id" uuid not null default gen_random_uuid(),
@@ -258,6 +268,19 @@ declare
   table_reg regclass;
   existing_policies text[];
   idx integer;
+  required_role constant text := 'app_user';
+  required_role_members constant text[] := array['postgres', 'anon'];
+  required_default_service_id constant uuid := '00000000-0000-0000-0000-000000000000';
+  required_default_service_insert constant text := 'INSERT INTO "public"."Services" ("id", "name", "duration_minutes", "payment_model", "color", "metadata") VALUES (''00000000-0000-0000-0000-000000000000'', ''תעריף כללי *לא למחוק או לשנות*'', null, ''fixed_rate'', ''#84CC16'', null);';
+  required_rate_history_constraint constant text := 'RateHistory_employee_service_effective_date_key';
+  required_rate_history_constraint_sql constant text := 'ALTER TABLE public."RateHistory" ADD CONSTRAINT "RateHistory_employee_service_effective_date_key" UNIQUE (employee_id, service_id, effective_date);';
+  role_oid oid;
+  role_exists boolean;
+  missing_role_grants text[];
+  default_service_exists boolean;
+  services_table_exists boolean;
+  rate_history_table_exists boolean;
+  rate_history_constraint_exists boolean;
 begin
   foreach table_name in array required_tables loop
     required_policy_names := array[
@@ -366,6 +389,142 @@ begin
     return next;
   end loop;
 
+  table_name := 'rate_history_unique_constraint';
+  has_table := false;
+  rls_enabled := false;
+  missing_policies := array[]::text[];
+  delta_sql := '';
+  rate_history_constraint_exists := false;
+
+  table_reg := to_regclass('public.RateHistory');
+  rate_history_table_exists := table_reg is not null;
+
+  if not rate_history_table_exists then
+    missing_policies := array['-- הטבלה "RateHistory" חסרה. הרץ את בלוק הסכימה המלא.'];
+    delta_sql := null;
+    return next;
+  end if;
+
+  select exists(
+    select 1
+    from pg_constraint
+    where conname = required_rate_history_constraint
+      and conrelid = table_reg
+  )
+    into rate_history_constraint_exists;
+
+  has_table := rate_history_constraint_exists;
+  rls_enabled := rate_history_constraint_exists;
+
+  if not rate_history_constraint_exists then
+    missing_policies := array[required_rate_history_constraint_sql];
+    delta_sql := required_rate_history_constraint_sql;
+  else
+    missing_policies := array[]::text[];
+    delta_sql := null;
+  end if;
+
+  return next;
+
+  table_name := 'services_default_rate_seed';
+  has_table := false;
+  rls_enabled := false;
+  missing_policies := array[]::text[];
+  delta_sql := '';
+  default_service_exists := false;
+
+  table_reg := to_regclass('public.Services');
+  services_table_exists := table_reg is not null;
+
+  if not services_table_exists then
+    missing_policies := array['-- הטבלה "Services" חסרה. הרץ את בלוק הסכימה המלא.'];
+    delta_sql := null;
+    return next;
+  end if;
+
+  select exists(
+    select 1
+    from public."Services"
+    where id = required_default_service_id
+  )
+    into default_service_exists;
+
+  has_table := default_service_exists;
+  rls_enabled := default_service_exists;
+
+  if not default_service_exists then
+    missing_policies := array[required_default_service_insert];
+    delta_sql := required_default_service_insert;
+  else
+    missing_policies := array[]::text[];
+    delta_sql := null;
+  end if;
+
+  return next;
+
+  table_name := 'app_user_role_grants';
+  has_table := false;
+  rls_enabled := false;
+  missing_policies := array[]::text[];
+  delta_sql := '';
+  missing_role_grants := array[]::text[];
+
+  select oid
+    into role_oid
+  from pg_roles
+  where rolname = required_role;
+
+  role_exists := role_oid is not null;
+  has_table := role_exists;
+
+  if not role_exists then
+    missing_policies := array['CREATE ROLE app_user'];
+    delta_sql := 'CREATE ROLE app_user;';
+    missing_role_grants := required_role_members;
+  else
+    select array(
+      select member_name
+      from unnest(required_role_members) as member_name
+      where not exists (
+        select 1
+        from pg_auth_members am
+        join pg_roles member_role on member_role.oid = am.member
+        where am.roleid = role_oid
+          and member_role.rolname = member_name
+      )
+    )
+      into missing_role_grants;
+
+    if missing_role_grants is null then
+      missing_role_grants := array[]::text[];
+    end if;
+  end if;
+
+  if array_length(missing_role_grants, 1) is not null then
+    missing_policies := missing_policies || array(
+      select format('GRANT app_user TO %s', member_name)
+      from unnest(missing_role_grants) as member_name
+    );
+
+    if delta_sql <> '' then
+      delta_sql := delta_sql || E'\n';
+    end if;
+
+    delta_sql := delta_sql || format('GRANT app_user TO %s;', array_to_string(missing_role_grants, ', '));
+  end if;
+
+  if array_length(missing_policies, 1) is null then
+    missing_policies := array[]::text[];
+  end if;
+
+  if delta_sql = '' then
+    delta_sql := null;
+  end if;
+
+  rls_enabled := role_exists and array_length(missing_role_grants, 1) is null;
+
+  return next;
+
   return;
 end;
 $$;
@@ -386,6 +545,8 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO app_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO app_user;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_user;
+-- Allow the anonymous and postgres roles to impersonate the app_user role.
+GRANT app_user TO postgres, anon;
 
 -- שלב 4: יצירת מפתח גישה ייעודי (JWT) עבור התפקיד החדש
 -- IMPORTANT: This script assumes you have a JWT secret configured in your Supabase project's settings.

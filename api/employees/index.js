@@ -228,35 +228,51 @@ async function ensureMembership(supabase, orgId, userId) {
 }
 
 async function fetchEmployeesBundle(tenantClient) {
-  const [employeesResult, ratesResult, servicesResult, leaveBalancesResult, settingsResult] = await Promise.all([
-    tenantClient.from('Employees').select('*').order('name'),
-    tenantClient.from('RateHistory').select('*'),
-    tenantClient.from('Services').select('*'),
-    tenantClient.from('LeaveBalances').select('*'),
-    tenantClient
-      .from('Settings')
-      .select('key, settings_value')
-      .in('key', ['leave_policy', 'leave_pay_policy']),
-  ]);
+  console.log('[DIAGNOSTIC TEST RUNNING]');
 
-  const errors = [
-    employeesResult.error,
-    ratesResult.error,
-    servicesResult.error,
-    leaveBalancesResult.error,
-    settingsResult.error,
-  ].filter(Boolean);
-
-  if (errors.length) {
-    const [firstError] = errors;
-    return { error: firstError || new Error('unknown_error') };
+  // Test 1: Employees
+  const employeesResult = await tenantClient.from('Employees').select('*').order('name');
+  if (employeesResult.error) {
+    console.error('DIAGNOSTIC FAILED ON: Employees', employeesResult.error);
+    return { error: new Error('Failed on Employees table') };
   }
+  console.log('DIAGNOSTIC PASSED: Employees');
 
+  // Test 2: RateHistory
+  const ratesResult = await tenantClient.from('RateHistory').select('*');
+  if (ratesResult.error) {
+    console.error('DIAGNOSTIC FAILED ON: RateHistory', ratesResult.error);
+    return { error: new Error('Failed on RateHistory table') };
+  }
+  console.log('DIAGNOSTIC PASSED: RateHistory');
+
+  // Test 3: Services
+  const servicesResult = await tenantClient.from('Services').select('*');
+  if (servicesResult.error) {
+    console.error('DIAGNOSTIC FAILED ON: Services', servicesResult.error);
+    return { error: new Error('Failed on Services table') };
+  }
+  console.log('DIAGNOSTIC PASSED: Services');
+
+  // Test 4: LeaveBalances
+  const leaveBalancesResult = await tenantClient.from('LeaveBalances').select('*');
+  if (leaveBalancesResult.error) {
+    console.error('DIAGNOSTIC FAILED ON: LeaveBalances', leaveBalancesResult.error);
+    return { error: new Error('Failed on LeaveBalances table') };
+  }
+  console.log('DIAGNOSTIC PASSED: LeaveBalances');
+
+  // Test 5: Settings
+  const settingsResult = await tenantClient.from('Settings').select('key, settings_value').in('key', ['leave_policy', 'leave_pay_policy']);
+  if (settingsResult.error) {
+    console.error('DIAGNOSTIC FAILED ON: Settings', settingsResult.error);
+    return { error: new Error('Failed on Settings table') };
+  }
+  console.log('DIAGNOSTIC PASSED: Settings');
+
+  // If all tests passed, return data
   const settingsMap = new Map();
   for (const entry of settingsResult.data || []) {
-    if (!entry || typeof entry.key !== 'string') {
-      continue;
-    }
     settingsMap.set(entry.key, entry.settings_value ?? null);
   }
 
