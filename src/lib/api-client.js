@@ -87,111 +87,193 @@ export function resolveControlAccessToken(credential) {
   return token;
 }
 
-export async function authenticatedFetch(path, { session, accessToken, ...options } = {}) {
-  const method = (options?.method || 'GET').toUpperCase();
-  console.log('[API CLIENT] authenticatedFetch invoked.', {
-    path,
-    method,
-    hasSession: Boolean(session),
-    hasAccessToken: Boolean(accessToken),
-  });
-
-  const tokenSource = session ?? accessToken;
-  let token;
-  try {
-    token = resolveControlAccessToken(tokenSource);
-  } catch (error) {
-    console.error('[API CLIENT] Failed to resolve control access token.', {
-      path,
-      method,
-      hasSession: Boolean(session),
-      hasAccessToken: Boolean(accessToken),
-      message: error?.message,
-    });
-    throw error;
+function normalizeOrgId(candidate, fallback) {
+  if (typeof candidate === 'string' && candidate.trim()) {
+    return candidate.trim();
   }
-  console.log('[API CLIENT] Control access token resolved.', {
-    path,
-    method,
-    tokenLength: typeof token === 'string' ? token.length : null,
-  });
-  const bearer = `Bearer ${token}`;
+  if (typeof fallback === 'string' && fallback.trim()) {
+    return fallback.trim();
+  }
+  return '';
+}
 
-  const { headers: incomingHeaders = {}, body, ...rest } = options;
-  const {
-    Authorization: _incomingAuthorization,
-    authorization: _incomingauthorization,
-    ...restOfHeaders
-  } = incomingHeaders;
+function deriveFunctionsBaseUrl(supabaseUrl) {
+  if (typeof supabaseUrl !== 'string' || !supabaseUrl.trim()) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(supabaseUrl);
+    const [projectId, ...rest] = parsed.host.split('.');
+    if (!projectId || rest.length === 0) {
+      return '';
+    }
+    const baseDomain = rest.join('.');
+    return `https://${projectId}.functions.${baseDomain}`;
+  } catch {
+    return '';
+  }
+}
+
+function resolveOrgConnection(activeOrg, connection) {
+  const candidates = [
+    connection?.supabaseUrl,
+    activeOrg?.supabase_url,
+    activeOrg?.supabaseUrl,
+    activeOrg?.connection?.supabaseUrl,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return '';
+}
+
+function resolveOrgAnonKey(activeOrg, connection) {
+  const candidates = [
+    connection?.supabaseAnonKey,
+    activeOrg?.supabase_anon_key,
+    activeOrg?.supabaseAnonKey,
+    activeOrg?.connection?.supabaseAnonKey,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+
+  return '';
+}
+
+async function resolveAccessToken({ authClient, session, accessToken }) {
+  if (accessToken) {
+    return resolveControlAccessToken(accessToken);
+  }
+
+  if (session) {
+    return resolveControlAccessToken(session);
+  }
+
+  if (authClient?.auth?.getSession) {
+    const { data, error } = await authClient.auth.getSession();
+    if (error) {
+      throw new Error('שליפת אסימון הגישה נכשלה. התחבר מחדש ונסה שוב.');
+    }
+    if (data?.session) {
+      return resolveControlAccessToken(data.session);
+    }
+  }
+
+  throw new Error('נדרש לקוח Supabase כדי לאחזר אסימון גישה תקף.');
+}
+
+function buildRequestPayload({ payload, activeOrg, connection }) {
+  if (!payload || typeof payload !== 'object' || payload instanceof FormData) {
+    return payload ?? null;
+  }
+
+  const enriched = { ...payload };
+  if (
+    !('supabaseUrl' in enriched)
+    && !('orgSupabaseUrl' in enriched)
+    && !('customerSupabaseUrl' in enriched)
+  ) {
+    const url = resolveOrgConnection(activeOrg, connection);
+    if (url) {
+      enriched.supabaseUrl = url;
+    }
+  }
+
+  if (!('supabaseAnonKey' in enriched) && !('anonKey' in enriched)) {
+    const anonKey = resolveOrgAnonKey(activeOrg, connection);
+    if (anonKey) {
+      enriched.supabaseAnonKey = anonKey;
+    }
+  }
+
+  return enriched;
+}
+
+export async function makeApiCall({
+  action,
+  payload,
+  orgId,
+  authClient,
+  session,
+  accessToken,
+  activeOrg,
+  connection,
+  signal,
+  headers: extraHeaders,
+} = {}) {
+  const normalizedAction = typeof action === 'string' ? action.trim().toUpperCase() : '';
+  if (!normalizedAction) {
+    throw new Error('יש לציין פעולה לביצוע.');
+  }
+
+  const config = getCurrentConfig();
+  if (!config?.supabaseUrl) {
+    throw new Error('החיבור למסד הבקרה אינו זמין. נסה לרענן את ההגדרות ונסה שוב.');
+  }
+
+  const functionsBaseUrl = deriveFunctionsBaseUrl(config.supabaseUrl);
+  if (!functionsBaseUrl) {
+    throw new Error('לא ניתן לבנות את כתובת פונקציית Supabase. בדוק את הגדרות הפרויקט.');
+  }
+
+  const token = await resolveAccessToken({ authClient, session, accessToken });
+  const resolvedOrgId = normalizeOrgId(orgId, activeOrg?.id);
+  if (!resolvedOrgId) {
+    throw new Error('יש לבחור ארגון פעיל לפני ביצוע הפעולה.');
+  }
+
+  const requestBody = {
+    action: normalizedAction,
+    orgId: resolvedOrgId,
+    payload: buildRequestPayload({ payload, activeOrg, connection }),
+  };
 
   const headers = {
     'Content-Type': 'application/json',
-    ...restOfHeaders,
-    Authorization: bearer,
+    Authorization: `Bearer ${token}`,
+    ...(extraHeaders || {}),
   };
 
-  headers.authorization = bearer;
-  headers['X-Supabase-Authorization'] = bearer;
-  headers['x-supabase-authorization'] = bearer;
-  headers['x-supabase-auth'] = bearer;
+  headers['X-Supabase-Authorization'] = headers.Authorization;
+  headers['x-supabase-authorization'] = headers.Authorization;
+  headers['x-supabase-auth'] = headers.Authorization;
 
-  let requestBody = body;
-  if (requestBody && typeof requestBody === 'object' && !(requestBody instanceof FormData)) {
-    requestBody = JSON.stringify(requestBody);
-  }
-
-  const normalizedPath = String(path || '').replace(/^\/+/, '');
-  let proxyPath = normalizedPath;
-  if (/^employees(?=$|[/?])/.test(normalizedPath)) {
-    proxyPath = normalizedPath.replace(/^employees(?=$|[/?])/, 'employees-unsecure');
-  }
-  console.log('[API CLIENT] Dispatching request to API proxy.', {
-    path: proxyPath,
-    method,
-  });
-  const response = await fetch(`/api/${proxyPath}`, {
-    ...rest,
+  const endpoint = `${functionsBaseUrl.replace(/\/$/, '')}/api-proxy`;
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    signal,
     headers,
-    body: requestBody,
-  });
-  console.log('[API CLIENT] Response received from API proxy.', {
-    path: proxyPath,
-    method,
-    status: response.status,
+    body: JSON.stringify(requestBody),
   });
 
-  let payload = null;
+  let responseBody = null;
   const contentType = response.headers?.get?.('content-type') || response.headers?.get?.('Content-Type') || '';
-  const isJson = typeof contentType === 'string' && contentType.toLowerCase().includes('application/json');
-  if (isJson) {
+  if (typeof contentType === 'string' && contentType.toLowerCase().includes('application/json')) {
     try {
-      payload = await response.json();
+      responseBody = await response.json();
     } catch {
-      payload = null;
+      responseBody = null;
     }
   }
 
   if (!response.ok) {
-    console.error('[API CLIENT] API proxy request failed.', {
-      path: proxyPath,
-      method,
-      status: response.status,
-      payload,
-    });
-    const message = payload?.message || 'An API error occurred';
+    const message = responseBody?.error || responseBody?.message || 'הקריאה לשכבת הפרוקסי נכשלה.';
     const error = new Error(message);
     error.status = response.status;
-    if (payload) {
-      error.data = payload;
+    if (responseBody) {
+      error.data = responseBody;
     }
     throw error;
   }
 
-  console.log('[API CLIENT] API proxy request succeeded.', {
-    path: proxyPath,
-    method,
-    status: response.status,
-    payloadType: payload === null ? 'null' : typeof payload,
-  });
-  return payload;
+  return responseBody;
 }

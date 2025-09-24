@@ -18,7 +18,13 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
-  const { tenantClientReady, activeOrgHasConnection, activeOrgId } = useOrg();
+  const {
+    tenantClientReady,
+    activeOrgHasConnection,
+    activeOrgId,
+    activeOrg,
+    activeOrgConnection,
+  } = useOrg();
   const { dataClient, authClient, user, loading, session } = useSupabase();
 
   const loadData = useCallback(async () => {
@@ -29,7 +35,13 @@ export default function Dashboard() {
 
     setIsLoading(true);
     try {
-      const bundle = await fetchEmployeesList({ session, orgId: activeOrgId });
+      const bundle = await fetchEmployeesList({
+        authClient,
+        session,
+        orgId: activeOrgId,
+        activeOrg,
+        connection: activeOrgConnection,
+      });
       const employeeRecords = Array.isArray(bundle?.employees) ? bundle.employees : [];
       setEmployees(employeeRecords.filter((emp) => emp?.is_active !== false));
 
@@ -57,7 +69,16 @@ export default function Dashboard() {
       toast.error("שגיאה בטעינת נתוני הדשבורד");
     }
     setIsLoading(false);
-  }, [tenantClientReady, activeOrgHasConnection, dataClient, session, activeOrgId]);
+  }, [
+    tenantClientReady,
+    activeOrgHasConnection,
+    dataClient,
+    session,
+    activeOrgId,
+    authClient,
+    activeOrg,
+    activeOrgConnection,
+  ]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
