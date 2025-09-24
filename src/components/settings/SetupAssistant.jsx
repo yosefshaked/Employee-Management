@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
-import { makeApiCall } from '@/lib/api-client.js';
+import { authenticatedFetch } from '@/lib/api-client.js';
 import { mapSupabaseError } from '@/org/errors.js';
 import { SECURE_API_WORKER_SOURCE } from '@/lib/edge-function-code.js';
 import { JWT_SECRET_PLACEHOLDER, buildFullSetupSql } from '@/lib/setup-sql.js';
@@ -294,15 +294,18 @@ export default function SetupAssistant() {
     setDedicatedKeyError('');
 
     try {
-      const response = await makeApiCall({
-        action: 'SAVE_ORG_DEDICATED_KEY',
-        authClient,
-        activeOrg,
-        connection: activeOrgConnection,
-        orgId: activeOrg.id,
-        payload: {
+      const { data: sessionData, error: sessionError } = await authClient.auth.getSession();
+      if (sessionError) {
+        throw sessionError;
+      }
+
+      const response = await authenticatedFetch('save-org-key-unsecure', {
+        method: 'POST',
+        body: {
+          org_id: activeOrg.id,
           service_role_key: trimmedKey,
         },
+        session: sessionData?.session,
       });
 
       const savedAt = typeof response?.saved_at === 'string' && response.saved_at
