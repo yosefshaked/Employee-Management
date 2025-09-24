@@ -60,6 +60,7 @@ const TABLE_LABELS = {
   Services: 'שירותים והצעות',
   Settings: 'הגדרות ארגון',
   app_user_role_grants: 'הרשאות תפקיד app_user',
+  services_default_rate_seed: 'תעריף כללי (שורת שירות ברירת מחדל)',
 };
 
 

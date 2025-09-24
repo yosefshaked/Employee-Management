@@ -36,6 +36,8 @@ create table if not exists public."Services" (
   constraint "Services_pkey" primary key ("id")
 );
 
+INSERT INTO "public"."Services" ("id", "name", "duration_minutes", "payment_model", "color", "metadata") VALUES ('00000000-0000-0000-0000-000000000000', 'תעריף כללי *לא למחוק או לשנות*', null, 'fixed_rate', '#84CC16', null);
+
 create table if not exists public."RateHistory" (
   "id" uuid not null default gen_random_uuid(),
   "rate" numeric not null,
@@ -260,9 +262,13 @@ declare
   idx integer;
   required_role constant text := 'app_user';
   required_role_members constant text[] := array['postgres', 'anon'];
+  required_default_service_id constant uuid := '00000000-0000-0000-0000-000000000000';
+  required_default_service_insert constant text := 'INSERT INTO "public"."Services" ("id", "name", "duration_minutes", "payment_model", "color", "metadata") VALUES (''00000000-0000-0000-0000-000000000000'', ''תעריף כללי *לא למחוק או לשנות*'', null, ''fixed_rate'', ''#84CC16'', null);';
   role_oid oid;
   role_exists boolean;
   missing_role_grants text[];
+  default_service_exists boolean;
+  services_table_exists boolean;
 begin
   foreach table_name in array required_tables loop
     required_policy_names := array[
@@ -370,6 +376,42 @@ begin
 
     return next;
   end loop;
+
+  table_name := 'services_default_rate_seed';
+  has_table := false;
+  rls_enabled := false;
+  missing_policies := array[]::text[];
+  delta_sql := '';
+  default_service_exists := false;
+
+  table_reg := to_regclass('public.Services');
+  services_table_exists := table_reg is not null;
+
+  if not services_table_exists then
+    missing_policies := array['-- הטבלה "Services" חסרה. הרץ את בלוק הסכימה המלא.'];
+    delta_sql := null;
+    return next;
+  end if;
+
+  select exists(
+    select 1
+    from public."Services"
+    where id = required_default_service_id
+  )
+    into default_service_exists;
+
+  has_table := default_service_exists;
+  rls_enabled := default_service_exists;
+
+  if not default_service_exists then
+    missing_policies := array[required_default_service_insert];
+    delta_sql := required_default_service_insert;
+  else
+    missing_policies := array[]::text[];
+    delta_sql := null;
+  end if;
+
+  return next;
 
   table_name := 'app_user_role_grants';
   has_table := false;
