@@ -12,7 +12,7 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, normalizeLeavePayPolicy } from "@/lib/leave.js";
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { fetchEmployeesList, updateEmployee as updateEmployeeRequest } from '@/api/employees.js';
-import { authenticatedFetch } from '@/lib/api-client.js';
+import { makeApiCall } from '@/lib/api-client.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -42,7 +42,13 @@ export default function Employees() {
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
-  const { tenantClientReady, activeOrgHasConnection, activeOrg, activeOrgId } = useOrg();
+  const {
+    tenantClientReady,
+    activeOrgHasConnection,
+    activeOrg,
+    activeOrgId,
+    activeOrgConnection,
+  } = useOrg();
   const { authClient, user, loading, session } = useSupabase();
 
   console.log('[DEBUG 8] Employees: component render.', {
@@ -77,7 +83,13 @@ export default function Employees() {
       orgId: activeOrgId,
     });
     try {
-      const bundle = await fetchEmployeesList({ session, orgId: activeOrgId });
+      const bundle = await fetchEmployeesList({
+        authClient,
+        session,
+        orgId: activeOrgId,
+        activeOrg,
+        connection: activeOrgConnection,
+      });
       console.log('[DEBUG 12] Employees: bundle received.', {
         employees: Array.isArray(bundle?.employees) ? bundle.employees.length : null,
         rateHistory: Array.isArray(bundle?.rateHistory) ? bundle.rateHistory.length : null,
@@ -120,7 +132,15 @@ export default function Employees() {
     }
     console.log('[DEBUG 14] Employees: loadData completed. Updating loading state.');
     setIsLoading(false);
-  }, [tenantClientReady, activeOrgHasConnection, session, activeOrgId]);
+  }, [
+    tenantClientReady,
+    activeOrgHasConnection,
+    session,
+    activeOrgId,
+    authClient,
+    activeOrg,
+    activeOrgConnection,
+  ]);
 
   const runDiagnostics = useCallback(async () => {
     const orgId = activeOrg?.id || activeOrgId;
@@ -142,7 +162,14 @@ export default function Employees() {
     }
 
     try {
-      const result = await authenticatedFetch(`test-credentials?org_id=${encodeURIComponent(orgId)}`, { session });
+      const result = await makeApiCall({
+        action: 'TEST_TENANT_CONNECTION',
+        authClient,
+        session,
+        activeOrg,
+        connection: activeOrgConnection,
+        orgId,
+      });
       console.log('--- DIAGNOSTIC REPORT ---');
       console.log(JSON.stringify(result, null, 2));
       alert('Diagnostic report has been printed to the console.');
@@ -150,7 +177,7 @@ export default function Employees() {
       console.error('Diagnostic test failed to run:', error);
       alert('Failed to run diagnostic test. Check console for details.');
     }
-  }, [activeOrg, activeOrgId, session]);
+  }, [activeOrg, activeOrgConnection, activeOrgId, authClient, session]);
 
   const filterEmployees = useCallback(() => {
     let filtered = employees;
@@ -193,8 +220,11 @@ export default function Employees() {
         currentStatus: employee?.is_active,
       });
       await updateEmployeeRequest({
+        authClient,
         session,
         orgId: activeOrgId,
+        activeOrg,
+        connection: activeOrgConnection,
         employeeId: employee.id,
         body: { updates: { is_active: !employee.is_active } },
       });

@@ -56,7 +56,7 @@ export default function EmployeeForm({ employee, onSuccess, onCancel, services: 
   const [serviceRates, setServiceRates] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const { authClient, user, loading, session } = useSupabase();
-  const { activeOrgId } = useOrg();
+  const { activeOrgId, activeOrg, activeOrgConnection } = useOrg();
 
 useEffect(() => {
   if (formData.employee_type === 'instructor') {
@@ -209,15 +209,21 @@ useEffect(() => {
 
       if (isNewEmployee) {
         await createEmployee({
+          authClient,
           session,
           orgId: activeOrgId,
+          activeOrg,
+          connection: activeOrgConnection,
           body: payload,
         });
         toast.success('העובד נוצר בהצלחה!');
       } else {
         await updateEmployeeRequest({
+          authClient,
           session,
           orgId: activeOrgId,
+          activeOrg,
+          connection: activeOrgConnection,
           employeeId: employee.id,
           body: payload,
         });

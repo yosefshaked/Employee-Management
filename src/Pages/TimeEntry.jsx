@@ -88,7 +88,13 @@ export default function TimeEntry() {
   const location = useLocation();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState(() => getTabFromSearch(location.search));
-  const { tenantClientReady, activeOrgHasConnection, activeOrgId } = useOrg();
+  const {
+    tenantClientReady,
+    activeOrgHasConnection,
+    activeOrgId,
+    activeOrg,
+    activeOrgConnection,
+  } = useOrg();
   const { dataClient, authClient, user, loading, session } = useSupabase();
   const loadInitialData = useCallback(async ({ silent = false } = {}) => {
     if (!tenantClientReady || !activeOrgHasConnection || !dataClient || !session || !activeOrgId) {
@@ -100,7 +106,13 @@ export default function TimeEntry() {
 
     if (!silent) setIsLoading(true);
     try {
-      const bundle = await fetchEmployeesList({ session, orgId: activeOrgId });
+      const bundle = await fetchEmployeesList({
+        authClient,
+        session,
+        orgId: activeOrgId,
+        activeOrg,
+        connection: activeOrgConnection,
+      });
       const employeeRecords = Array.isArray(bundle?.employees) ? bundle.employees : [];
       setEmployees(employeeRecords.filter((emp) => emp?.is_active !== false));
 
@@ -161,7 +173,16 @@ export default function TimeEntry() {
     } finally {
       setIsLoading(false);
     }
-  }, [tenantClientReady, activeOrgHasConnection, dataClient, session, activeOrgId]);
+  }, [
+    tenantClientReady,
+    activeOrgHasConnection,
+    dataClient,
+    session,
+    activeOrgId,
+    authClient,
+    activeOrg,
+    activeOrgConnection,
+  ]);
 
   useEffect(() => {
     loadInitialData();

@@ -50,7 +50,13 @@ export default function Reports() {
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
-  const { tenantClientReady, activeOrgHasConnection, activeOrgId } = useOrg();
+  const {
+    tenantClientReady,
+    activeOrgHasConnection,
+    activeOrgId,
+    activeOrg,
+    activeOrgConnection,
+  } = useOrg();
   const { dataClient, authClient, user, loading, session } = useSupabase();
 
   const getRateForDate = (employeeId, date, serviceId = null) => {
@@ -171,7 +177,13 @@ export default function Reports() {
 
     setIsLoading(true);
     try {
-      const bundle = await fetchEmployeesList({ session, orgId: activeOrgId });
+      const bundle = await fetchEmployeesList({
+        authClient,
+        session,
+        orgId: activeOrgId,
+        activeOrg,
+        connection: activeOrgConnection,
+      });
       setEmployees(Array.isArray(bundle?.employees) ? bundle.employees : []);
 
       const [
@@ -216,7 +228,16 @@ export default function Reports() {
       console.error("Error loading data:", error);
     }
     setIsLoading(false);
-  }, [tenantClientReady, activeOrgHasConnection, dataClient, session, activeOrgId]);
+  }, [
+    tenantClientReady,
+    activeOrgHasConnection,
+    dataClient,
+    session,
+    activeOrgId,
+    authClient,
+    activeOrg,
+    activeOrgConnection,
+  ]);
 
   useEffect(() => {
     loadInitialData();

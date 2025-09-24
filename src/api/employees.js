@@ -1,4 +1,12 @@
-import { authenticatedFetch } from '@/lib/api-client.js';
+import { makeApiCall } from '@/lib/api-client.js';
+
+const METHOD_TO_ACTION = {
+  GET: 'FETCH_EMPLOYEE_BUNDLE',
+  POST: 'CREATE_EMPLOYEE',
+  PATCH: 'UPDATE_EMPLOYEE',
+  PUT: 'UPDATE_EMPLOYEE',
+  DELETE: 'DELETE_EMPLOYEE',
+};
 
 function normalizeOrgId(orgId) {
   if (typeof orgId !== 'string') {
@@ -7,37 +15,63 @@ function normalizeOrgId(orgId) {
   return orgId.trim();
 }
 
-async function employeesRequest(method, { session, orgId, body, signal, employeeId } = {}) {
-  if (!session) {
-    throw new Error('נדרשת התחברות כדי לגשת לנתוני העובדים.');
+function normalizeEmployeeId(employeeId) {
+  if (typeof employeeId === 'string' && employeeId.trim()) {
+    return employeeId.trim();
+  }
+  if (typeof employeeId === 'number' && Number.isFinite(employeeId)) {
+    return String(employeeId);
+  }
+  return '';
+}
+
+async function employeesRequest(method, {
+  authClient,
+  session,
+  accessToken,
+  orgId,
+  activeOrg,
+  connection,
+  body,
+  signal,
+  employeeId,
+} = {}) {
+  const normalizedMethod = typeof method === 'string' ? method.toUpperCase() : '';
+  const action = METHOD_TO_ACTION[normalizedMethod];
+  if (!action) {
+    throw new Error('Unsupported employee request method.');
+  }
+
+  if (!authClient && !session && !accessToken) {
+    throw new Error('נדרש לקוח Supabase או אסימון גישה לביצוע הפעולה.');
   }
 
   const normalizedOrgId = normalizeOrgId(orgId);
-  if (!normalizedOrgId) {
+  const normalizedEmployeeId = normalizeEmployeeId(employeeId);
+
+  if (!normalizedOrgId && !activeOrg?.id) {
     throw new Error('יש לבחור ארגון פעיל לפני ביצוע הפעולה.');
   }
 
-  const path = employeeId ? `employees-unsecure/${employeeId}` : 'employees-unsecure';
-  const search = method === 'GET' ? `?org_id=${encodeURIComponent(normalizedOrgId)}` : '';
-  const hasObjectBody = body && typeof body === 'object' && !(body instanceof FormData);
-  const payload = method === 'GET'
-    ? undefined
-    : hasObjectBody
-      ? { ...body, org_id: normalizedOrgId }
-      : body;
-
-  const requestOptions = {
-    session,
-    method,
-    signal,
-  };
-
-  if (typeof payload !== 'undefined') {
-    requestOptions.body = payload;
-  }
+  const payload = normalizedMethod === 'GET'
+    ? {}
+    : {
+        ...(body && typeof body === 'object' ? body : {}),
+        ...(normalizedEmployeeId ? { employee_id: normalizedEmployeeId } : {}),
+      };
 
   try {
-    return await authenticatedFetch(`${path}${search}`, requestOptions);
+    return await makeApiCall({
+      action,
+      authClient,
+      session,
+      accessToken,
+      activeOrg,
+      connection,
+      orgId: normalizedOrgId,
+      payload,
+      signal,
+    });
   } catch (error) {
     if (!error?.message) {
       error.message = 'הפעולה נכשלה. נסה שוב מאוחר יותר.';
