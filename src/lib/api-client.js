@@ -88,17 +88,48 @@ export function resolveControlAccessToken(credential) {
 }
 
 export async function authenticatedFetch(path, { session, accessToken, ...options } = {}) {
+  const method = (options?.method || 'GET').toUpperCase();
+  console.log('[API CLIENT] authenticatedFetch invoked.', {
+    path,
+    method,
+    hasSession: Boolean(session),
+    hasAccessToken: Boolean(accessToken),
+  });
+
   const tokenSource = session ?? accessToken;
-  const token = resolveControlAccessToken(tokenSource);
+  let token;
+  try {
+    token = resolveControlAccessToken(tokenSource);
+  } catch (error) {
+    console.error('[API CLIENT] Failed to resolve control access token.', {
+      path,
+      method,
+      hasSession: Boolean(session),
+      hasAccessToken: Boolean(accessToken),
+      message: error?.message,
+    });
+    throw error;
+  }
+  console.log('[API CLIENT] Control access token resolved.', {
+    path,
+    method,
+    tokenLength: typeof token === 'string' ? token.length : null,
+  });
   const bearer = `Bearer ${token}`;
 
-  const { headers: customHeaders = {}, body, ...rest } = options;
+  const { headers: incomingHeaders = {}, body, ...rest } = options;
+  const {
+    Authorization: _incomingAuthorization,
+    authorization: _incomingauthorization,
+    ...restOfHeaders
+  } = incomingHeaders;
+
   const headers = {
     'Content-Type': 'application/json',
-    ...customHeaders,
+    ...restOfHeaders,
+    Authorization: bearer,
   };
 
-  headers.Authorization = bearer;
   headers.authorization = bearer;
   headers['X-Supabase-Authorization'] = bearer;
   headers['x-supabase-authorization'] = bearer;
@@ -110,10 +141,23 @@ export async function authenticatedFetch(path, { session, accessToken, ...option
   }
 
   const normalizedPath = String(path || '').replace(/^\/+/, '');
-  const response = await fetch(`/api/${normalizedPath}`, {
+  let proxyPath = normalizedPath;
+  if (/^employees(?=$|[/?])/.test(normalizedPath)) {
+    proxyPath = normalizedPath.replace(/^employees(?=$|[/?])/, 'employees-unsecure');
+  }
+  console.log('[API CLIENT] Dispatching request to API proxy.', {
+    path: proxyPath,
+    method,
+  });
+  const response = await fetch(`/api/${proxyPath}`, {
     ...rest,
     headers,
     body: requestBody,
+  });
+  console.log('[API CLIENT] Response received from API proxy.', {
+    path: proxyPath,
+    method,
+    status: response.status,
   });
 
   let payload = null;
@@ -128,6 +172,12 @@ export async function authenticatedFetch(path, { session, accessToken, ...option
   }
 
   if (!response.ok) {
+    console.error('[API CLIENT] API proxy request failed.', {
+      path: proxyPath,
+      method,
+      status: response.status,
+      payload,
+    });
     const message = payload?.message || 'An API error occurred';
     const error = new Error(message);
     error.status = response.status;
@@ -137,5 +187,11 @@ export async function authenticatedFetch(path, { session, accessToken, ...option
     throw error;
   }
 
+  console.log('[API CLIENT] API proxy request succeeded.', {
+    path: proxyPath,
+    method,
+    status: response.status,
+    payloadType: payload === null ? 'null' : typeof payload,
+  });
   return payload;
 }
