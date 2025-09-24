@@ -8,6 +8,11 @@
   </head>
   <body>
     <div id="root"></div>
+    <script type="module">
+      window.__APP_ENV__ = import.meta.env.MODE;
+      window.__APP_SUPABASE_URL__ = import.meta.env.VITE_APP_SUPABASE_URL;
+      window.__APP_SUPABASE_ANON_KEY__ = import.meta.env.VITE_APP_SUPABASE_ANON_KEY;
+    </script>
     <script src="/runtime-config.js"></script>
     <script type="module" src="/src/bootstrap.js"></script>
   </body>
