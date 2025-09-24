@@ -1,7 +1,7 @@
 import { asError, MissingRuntimeConfigError } from '../lib/error-utils.js';
 export { MissingRuntimeConfigError } from '../lib/error-utils.js';
 
-const IS_DEV = Boolean(import.meta.env.DEV);
+const IS_DEV = Boolean(import.meta?.env?.DEV);
 
 if (IS_DEV) {
   console.debug('[runtime/config] module evaluated');
