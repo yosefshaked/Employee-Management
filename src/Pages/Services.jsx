@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import ServiceList from "../components/services/ServiceList";
 import ServiceForm from "../components/services/ServiceForm";
 import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
+import { createService, updateService as updateServiceRequest } from '@/api/services.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -13,7 +15,8 @@ export default function Services() {
   const [showForm, setShowForm] = useState(false);
   const [editingService, setEditingService] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const { dataClient, authClient, user, loading } = useSupabase();
+  const { dataClient, authClient, user, loading, session } = useSupabase();
+  const { activeOrgId } = useOrg();
 
   const loadServices = useCallback(async () => {
     if (!dataClient) {
@@ -43,21 +46,26 @@ export default function Services() {
 
   const handleSubmit = async (serviceData) => {
     try {
-      if (!dataClient) {
-        throw new Error('חיבור Supabase אינו זמין.');
+      if (!session) {
+        throw new Error('נדרש להתחבר מחדש לפני שמירת השירות.');
+      }
+      if (!activeOrgId) {
+        throw new Error('בחרו ארגון פעיל לפני שמירת השירות.');
       }
       if (editingService) {
-        const { error } = await dataClient
-          .from('Services')
-          .update(serviceData)
-          .eq('id', editingService.id);
-        if (error) throw error;
+        await updateServiceRequest({
+          session,
+          orgId: activeOrgId,
+          serviceId: editingService.id,
+          body: serviceData,
+        });
         toast.success("השירות עודכן בהצלחה!");
       } else {
-        const { error } = await dataClient
-          .from('Services')
-          .insert([serviceData]);
-        if (error) throw error;
+        await createService({
+          session,
+          orgId: activeOrgId,
+          body: serviceData,
+        });
         toast.success("השירות נוצר בהצלחה!");
       }
       setShowForm(false);
