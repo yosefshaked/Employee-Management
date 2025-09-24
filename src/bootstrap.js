@@ -2,7 +2,7 @@ import { activateConfig, loadRuntimeConfig } from './runtime/config.js';
 import { renderConfigError } from './runtime/ConfigErrorScreen.jsx';
 
 async function resolveBootstrapConfig() {
-  const mode = import.meta?.env?.MODE;
+  const mode = import.meta.env.MODE;
 
   if (mode === 'development') {
     console.log('[Bootstrap] Running in DEVELOPMENT mode. Using local .env variables.');
