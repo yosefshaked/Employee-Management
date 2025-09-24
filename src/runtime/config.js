@@ -2,10 +2,26 @@ import { asError, MissingRuntimeConfigError } from '../lib/error-utils.js';
 export { MissingRuntimeConfigError } from '../lib/error-utils.js';
 
 const IS_DEV = Boolean(import.meta?.env?.DEV);
+const LOG_PREFIX = '[runtime/config]';
 
-if (IS_DEV) {
-  console.debug('[runtime/config] module evaluated');
+function log(message, details, level = IS_DEV ? 'debug' : 'log') {
+  const logger =
+    level === 'error' && typeof console.error === 'function'
+      ? console.error
+      : level === 'warn' && typeof console.warn === 'function'
+        ? console.warn
+        : level === 'debug' && typeof console.debug === 'function'
+          ? console.debug
+          : console.log;
+
+  if (typeof details !== 'undefined') {
+    logger(`${LOG_PREFIX} ${message}`, details);
+  } else {
+    logger(`${LOG_PREFIX} ${message}`);
+  }
 }
+
+log('module evaluated');
 
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const CACHE = new Map();
@@ -104,7 +120,7 @@ export async function activateConfig(rawConfig, options = {}) {
   };
 
   if (IS_DEV) {
-    console.debug('[runtime/config] activated', {
+    log('activated runtime config', {
       source: currentConfig.source,
       hasOrg: Boolean(currentConfig.orgId),
     });
@@ -139,7 +155,7 @@ export function clearConfig() {
     window.__RUNTIME_CONFIG__ = null;
   }
   if (IS_DEV) {
-    console.debug('[runtime/config] cleared');
+    log('cleared runtime config cache');
   }
 }
 
@@ -261,6 +277,15 @@ async function ensureJsonResponse(response, orgId, scope, accessToken, endpoint)
     return;
   }
 
+  log('response missing JSON content-type', {
+    endpoint: endpoint || '/api/config',
+    scope,
+    status: response.status,
+    contentType: rawContentType,
+    orgId,
+    accessTokenPreview: buildTokenPreview(accessToken),
+  }, 'warn');
+
   let bodyText = '';
   try {
     bodyText = await response.text();
@@ -305,7 +330,16 @@ export async function loadRuntimeConfig(options = {}) {
   const targetOrgId = scope === 'org' ? explicitOrgId ?? getStoredOrgId() : null;
   const cacheKey = buildCacheKey(scope, targetOrgId);
 
+  log('loadRuntimeConfig invoked', {
+    scope,
+    targetOrgId,
+    force,
+    cacheHit: CACHE.has(cacheKey),
+    accessTokenPreview: buildTokenPreview(accessToken),
+  });
+
   if (!force && CACHE.has(cacheKey)) {
+    log('returning cached runtime config', { scope, targetOrgId });
     return CACHE.get(cacheKey);
   }
 
@@ -349,6 +383,14 @@ export async function loadRuntimeConfig(options = {}) {
     endpoint = `/api/org/${encodeURIComponent(targetOrgId)}/keys`;
   }
 
+  log('requesting runtime config', {
+    endpoint,
+    scope,
+    targetOrgId,
+    headers,
+    accessTokenPreview: buildTokenPreview(accessToken),
+  });
+
   let response;
   try {
     response = await fetch(endpoint, {
@@ -356,7 +398,20 @@ export async function loadRuntimeConfig(options = {}) {
       headers,
       cache: 'no-store',
     });
-  } catch {
+    log('runtime config request resolved', {
+      endpoint,
+      scope,
+      targetOrgId,
+      status: response.status,
+    });
+  } catch (error) {
+    log('runtime config request failed before response', {
+      endpoint,
+      scope,
+      targetOrgId,
+      accessTokenPreview: buildTokenPreview(accessToken),
+      error,
+    }, 'error');
     updateDiagnostics({
       orgId: targetOrgId,
       status: null,
@@ -388,6 +443,13 @@ export async function loadRuntimeConfig(options = {}) {
     try {
       payload = JSON.parse(trimmedBody);
     } catch {
+      log('failed to parse runtime config response JSON', {
+        endpoint,
+        scope,
+        targetOrgId,
+        status: response.status,
+        bodyPreview: rawBodyText.slice(0, 256),
+      }, 'warn');
       updateDiagnostics({
         orgId: targetOrgId,
         status: response.status,
@@ -411,6 +473,13 @@ export async function loadRuntimeConfig(options = {}) {
   }
 
   if (!response.ok) {
+    log('runtime config request returned error status', {
+      endpoint,
+      scope,
+      targetOrgId,
+      status: response.status,
+      payload,
+    }, 'warn');
     let serverMessage;
 
     if (scope === 'org') {
@@ -451,6 +520,13 @@ export async function loadRuntimeConfig(options = {}) {
 
   const sanitized = sanitizeConfig(payload, scope === 'org' ? 'org-api' : 'api');
   if (!sanitized) {
+    log('runtime config response missing required keys', {
+      endpoint,
+      scope,
+      targetOrgId,
+      status: response.status,
+      payload,
+    }, 'warn');
     updateDiagnostics({
       orgId: targetOrgId,
       status: response.status,
@@ -489,6 +565,13 @@ export async function loadRuntimeConfig(options = {}) {
     bodyIsJson: typeof payload === 'object' && payload !== null,
     endpoint,
     bodyText: rawBodyText,
+  });
+
+  log('runtime config request succeeded', {
+    endpoint,
+    scope,
+    targetOrgId,
+    source: normalized.source,
   });
 
   CACHE.set(cacheKey, normalized);

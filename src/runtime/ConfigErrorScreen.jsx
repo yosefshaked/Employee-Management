@@ -2,6 +2,16 @@ import React, { useMemo, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { activateConfig, getRuntimeConfigDiagnostics } from './config.js';
 
+const LOG_PREFIX = '[config-error-screen]';
+
+function log(message, details) {
+  if (typeof details !== 'undefined') {
+    console.log(`${LOG_PREFIX} ${message}`, details);
+  } else {
+    console.log(`${LOG_PREFIX} ${message}`);
+  }
+}
+
 const ACTION_SUGGESTIONS = {
   'network-failure': [
     'ודא ששרת הפונקציות פועל (למשל באמצעות ‎swa start --api-location api‎ או פריסת Azure פעילה).',
@@ -180,6 +190,12 @@ function ConfigErrorScreen({ error }) {
 
       const endpoint = orgId ? `/api/org/${encodeURIComponent(orgId)}/keys` : '/api/config';
 
+      log('manual test request starting', {
+        endpoint,
+        orgId: orgId || null,
+        hasToken: Boolean(trimmedToken),
+      });
+
       const response = await fetch(endpoint, {
         method: 'GET',
         headers,
@@ -193,6 +209,12 @@ function ConfigErrorScreen({ error }) {
       } catch {
         parsed = text;
       }
+
+      log('manual test request completed', {
+        endpoint,
+        status: response.status,
+        orgId: orgId || null,
+      });
 
       setTestHttpStatus(response.status);
 
@@ -228,6 +250,10 @@ function ConfigErrorScreen({ error }) {
         }
       }
     } catch (testErr) {
+      log('manual test request threw error', {
+        message: testErr?.message,
+        error: testErr,
+      });
       setTestStatus('error');
       setTestError(testErr?.message || 'הבדיקה נכשלה.');
     } finally {

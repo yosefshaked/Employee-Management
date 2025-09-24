@@ -4,6 +4,15 @@
     return;
   }
 
+  function log(message, details) {
+    const prefix = '[runtime-config preload]';
+    if (typeof details !== 'undefined') {
+      console.log(`${prefix} ${message}`, details);
+    } else {
+      console.log(`${prefix} ${message}`);
+    }
+  }
+
   function normalizeConfig(raw, source) {
     if (!raw || typeof raw !== 'object') {
       return null;
@@ -46,6 +55,7 @@
     const envMode = globalScope.__APP_ENV__;
 
     if (envMode === 'development') {
+      log('detected development environment, skipping /api/config fetch');
       const devConfig = normalizeConfig(
         {
           supabaseUrl: globalScope.__APP_SUPABASE_URL__,
@@ -65,6 +75,7 @@
     }
 
     if (globalScope.__RUNTIME_CONFIG__ && typeof globalScope.__RUNTIME_CONFIG__ === 'object') {
+      log('found existing runtime config on window, normalizing inline payload');
       const normalizedExisting = normalizeConfig(globalScope.__RUNTIME_CONFIG__, 'inline');
       assignRuntimeConfig(normalizedExisting);
       return;
@@ -75,20 +86,23 @@
     try {
       const inlineNode = document.querySelector('script[type="application/json"][data-runtime-config]');
       if (inlineNode?.textContent) {
+        log('found inline runtime config script tag, attempting to parse JSON');
         const inlinePayload = JSON.parse(inlineNode.textContent);
         normalized = normalizeConfig(inlinePayload, 'inline');
       }
     } catch (error) {
-      console.warn('[runtime-config] failed to parse inline config', error);
+      console.warn('[runtime-config preload] failed to parse inline config', error);
     }
 
     if (!normalized) {
       try {
         const request = new XMLHttpRequest();
+        log('performing synchronous /api/config preload request');
         request.open('GET', '/api/config', false);
         request.setRequestHeader('Accept', 'application/json');
         request.send(null);
 
+        log('preload request completed', { status: request.status, readyState: request.readyState });
         if (request.status >= 200 && request.status < 300) {
           const responseText = request.responseText || '';
           if (responseText.trim()) {
@@ -101,24 +115,33 @@
       }
     }
 
+    if (normalized) {
+      log('assigning normalized runtime config from preload', normalized);
+    } else {
+      log('no runtime config could be preloaded, assigning null');
+    }
     assignRuntimeConfig(normalized);
   }
 
   if (typeof globalScope.__APP_ENV__ !== 'undefined') {
+    log('APP_ENV already available, initializing runtime config immediately');
     initializeRuntimeConfig();
     return;
   }
 
   function handleEnvReady() {
+    log('received app:env-ready event, initializing runtime config');
     globalScope.removeEventListener('app:env-ready', handleEnvReady);
     initializeRuntimeConfig();
   }
 
   if (typeof globalScope.addEventListener !== 'function') {
+    log('event listeners unavailable, initializing runtime config immediately');
     initializeRuntimeConfig();
     return;
   }
 
+  log('waiting for app:env-ready event before initializing runtime config');
   globalScope.addEventListener('app:env-ready', handleEnvReady);
   globalScope.addEventListener('DOMContentLoaded', initializeRuntimeConfig, { once: true });
 })();
