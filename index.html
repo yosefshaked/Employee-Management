@@ -8,19 +8,6 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module">
-      const {
-        MODE,
-        VITE_APP_SUPABASE_URL,
-        VITE_APP_SUPABASE_ANON_KEY,
-      } = import.meta.env;
-
-      window.__APP_ENV__ = MODE;
-      window.__APP_SUPABASE_URL__ = VITE_APP_SUPABASE_URL;
-      window.__APP_SUPABASE_ANON_KEY__ = VITE_APP_SUPABASE_ANON_KEY;
-
-      window.dispatchEvent(new CustomEvent('app:env-ready'));
-    </script>
     <script src="/runtime-config.js"></script>
     <script type="module" src="/src/bootstrap.js"></script>
   </body>
