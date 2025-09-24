@@ -59,6 +59,7 @@ const TABLE_LABELS = {
   RateHistory: 'היסטוריית תעריפים',
   Services: 'שירותים והצעות',
   Settings: 'הגדרות ארגון',
+  app_user_role_grants: 'הרשאות תפקיד app_user',
 };
 
 

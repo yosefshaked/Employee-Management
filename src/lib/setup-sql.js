@@ -258,6 +258,11 @@ declare
   table_reg regclass;
   existing_policies text[];
   idx integer;
+  required_role constant text := 'app_user';
+  required_role_members constant text[] := array['postgres', 'anon'];
+  role_oid oid;
+  role_exists boolean;
+  missing_role_grants text[];
 begin
   foreach table_name in array required_tables loop
     required_policy_names := array[
@@ -366,6 +371,69 @@ begin
     return next;
   end loop;
 
+  table_name := 'app_user_role_grants';
+  has_table := false;
+  rls_enabled := false;
+  missing_policies := array[]::text[];
+  delta_sql := '';
+  missing_role_grants := array[]::text[];
+
+  select oid
+    into role_oid
+  from pg_roles
+  where rolname = required_role;
+
+  role_exists := role_oid is not null;
+  has_table := role_exists;
+
+  if not role_exists then
+    missing_policies := array['CREATE ROLE app_user'];
+    delta_sql := 'CREATE ROLE app_user;';
+    missing_role_grants := required_role_members;
+  else
+    select array(
+      select member_name
+      from unnest(required_role_members) as member_name
+      where not exists (
+        select 1
+        from pg_auth_members am
+        join pg_roles member_role on member_role.oid = am.member
+        where am.roleid = role_oid
+          and member_role.rolname = member_name
+      )
+    )
+      into missing_role_grants;
+
+    if missing_role_grants is null then
+      missing_role_grants := array[]::text[];
+    end if;
+  end if;
+
+  if array_length(missing_role_grants, 1) is not null then
+    missing_policies := missing_policies || array(
+      select format('GRANT app_user TO %s', member_name)
+      from unnest(missing_role_grants) as member_name
+    );
+
+    if delta_sql <> '' then
+      delta_sql := delta_sql || E'\n';
+    end if;
+
+    delta_sql := delta_sql || format('GRANT app_user TO %s;', array_to_string(missing_role_grants, ', '));
+  end if;
+
+  if array_length(missing_policies, 1) is null then
+    missing_policies := array[]::text[];
+  end if;
+
+  if delta_sql = '' then
+    delta_sql := null;
+  end if;
+
+  rls_enabled := role_exists and array_length(missing_role_grants, 1) is null;
+
+  return next;
+
   return;
 end;
 $$;
@@ -386,6 +454,7 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO app_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO app_user;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_user;
+GRANT app_user TO postgres, anon;
 
 -- שלב 4: יצירת מפתח גישה ייעודי (JWT) עבור התפקיד החדש
 -- IMPORTANT: This script assumes you have a JWT secret configured in your Supabase project's settings.
