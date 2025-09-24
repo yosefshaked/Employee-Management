@@ -109,8 +109,8 @@ function requireEnv(name: string): string {
 }
 
 function createAdminClient(): SupabaseClient {
-  const supabaseUrl = requireEnv("SUPABASE_URL");
-  const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+  const supabaseUrl = requireEnv("APP_CONTROL_DB_URL");
+  const serviceRoleKey = requireEnv("APP_CONTROL_DB_SERVICE_ROLE_KEY");
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
       persistSession: false,
