@@ -36,7 +36,10 @@ create table if not exists public."Services" (
   constraint "Services_pkey" primary key ("id")
 );
 
-INSERT INTO "public"."Services" ("id", "name", "duration_minutes", "payment_model", "color", "metadata") VALUES ('00000000-0000-0000-0000-000000000000', 'תעריף כללי *לא למחוק או לשנות*', null, 'fixed_rate', '#84CC16', null);
+-- Ensure the generic, non-deletable service for general rates exists.
+INSERT INTO "public"."Services" ("id", "name", "duration_minutes", "payment_model", "color", "metadata")
+VALUES ('00000000-0000-0000-0000-000000000000', 'תעריף כללי *לא למחוק או לשנות*', null, 'fixed_rate', '#84CC16', null)
+ON CONFLICT (id) DO NOTHING;
 
 create table if not exists public."RateHistory" (
   "id" uuid not null default gen_random_uuid(),
@@ -51,6 +54,7 @@ create table if not exists public."RateHistory" (
   constraint "RateHistory_service_id_fkey" foreign key ("service_id") references public."Services"("id")
 );
 
+-- Add a unique constraint to support upsert operations on rate history.
 ALTER TABLE public."RateHistory"
 ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
 UNIQUE (employee_id, service_id, effective_date);
@@ -541,6 +545,7 @@ GRANT ALL ON ALL TABLES IN SCHEMA public TO app_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO app_user;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_user;
+-- Allow the anonymous and postgres roles to impersonate the app_user role.
 GRANT app_user TO postgres, anon;
 
 -- שלב 4: יצירת מפתח גישה ייעודי (JWT) עבור התפקיד החדש
