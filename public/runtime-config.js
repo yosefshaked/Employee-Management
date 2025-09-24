@@ -37,6 +37,27 @@
     }
   }
 
+  const envMode = globalScope.__APP_ENV__;
+
+  if (envMode === 'development') {
+    const devConfig = normalizeConfig(
+      {
+        supabaseUrl: globalScope.__APP_SUPABASE_URL__,
+        supabaseAnonKey: globalScope.__APP_SUPABASE_ANON_KEY__,
+        orgId: null,
+        source: 'env',
+      },
+      'env',
+    );
+
+    if (!devConfig) {
+      console.warn('[runtime-config] missing development Supabase credentials.');
+    }
+
+    assignRuntimeConfig(devConfig);
+    return;
+  }
+
   if (globalScope.__RUNTIME_CONFIG__ && typeof globalScope.__RUNTIME_CONFIG__ === 'object') {
     const normalizedExisting = normalizeConfig(globalScope.__RUNTIME_CONFIG__, 'inline');
     assignRuntimeConfig(normalizedExisting);
