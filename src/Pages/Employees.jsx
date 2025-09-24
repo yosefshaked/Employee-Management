@@ -12,7 +12,6 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, normalizeLeavePayPolicy } from "@/lib/leave.js";
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { fetchEmployeesList, updateEmployee as updateEmployeeRequest } from '@/api/employees.js';
-import { authenticatedFetch } from '@/lib/api-client.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -45,47 +44,15 @@ export default function Employees() {
   const { tenantClientReady, activeOrgHasConnection, activeOrg, activeOrgId } = useOrg();
   const { authClient, user, loading, session } = useSupabase();
 
-  console.log('[DEBUG 8] Employees: component render.', {
-    tenantClientReady,
-    activeOrgHasConnection,
-    hasSession: Boolean(session),
-    activeOrgId,
-    userId: user?.id || null,
-  });
-
   const loadData = useCallback(async () => {
-    console.log('[DEBUG 9] Employees: loadData invoked.', {
-      tenantClientReady,
-      activeOrgHasConnection,
-      hasSession: Boolean(session),
-      activeOrgId,
-    });
-
     if (!tenantClientReady || !activeOrgHasConnection || !session || !activeOrgId) {
-      console.log('[DEBUG 10] Employees: prerequisites missing, skipping fetch.', {
-        tenantClientReady,
-        activeOrgHasConnection,
-        hasSession: Boolean(session),
-        activeOrgId,
-      });
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
-    console.log('[DEBUG 11] Employees: fetching bundle from API.', {
-      orgId: activeOrgId,
-    });
     try {
       const bundle = await fetchEmployeesList({ session, orgId: activeOrgId });
-      console.log('[DEBUG 12] Employees: bundle received.', {
-        employees: Array.isArray(bundle?.employees) ? bundle.employees.length : null,
-        rateHistory: Array.isArray(bundle?.rateHistory) ? bundle.rateHistory.length : null,
-        services: Array.isArray(bundle?.services) ? bundle.services.length : null,
-        leaveBalances: Array.isArray(bundle?.leaveBalances) ? bundle.leaveBalances.length : null,
-        hasLeavePolicy: Boolean(bundle?.leavePolicy),
-        hasLeavePayPolicy: Boolean(bundle?.leavePayPolicy),
-      });
       const employeeRecords = Array.isArray(bundle?.employees) ? bundle.employees : [];
       const rateHistoryRecords = Array.isArray(bundle?.rateHistory) ? bundle.rateHistory : [];
       const serviceRecords = Array.isArray(bundle?.services) ? bundle.services : [];
@@ -109,48 +76,11 @@ export default function Employees() {
           : DEFAULT_LEAVE_PAY_POLICY,
       );
     } catch (error) {
-      console.error('[DEBUG 13] Employees: fetchEmployeesList failed.', {
-        orgId: activeOrgId,
-        message: error?.message,
-        status: error?.status,
-        data: error?.data,
-      });
       console.error('Error fetching data:', error);
       toast.error("שגיאה בטעינת הנתונים");
     }
-    console.log('[DEBUG 14] Employees: loadData completed. Updating loading state.');
     setIsLoading(false);
   }, [tenantClientReady, activeOrgHasConnection, session, activeOrgId]);
-
-  const runDiagnostics = useCallback(async () => {
-    const orgId = activeOrg?.id || activeOrgId;
-    console.log('Running server diagnostics...', {
-      orgId,
-      hasSession: Boolean(session),
-    });
-
-    if (!session) {
-      console.warn('Diagnostic test aborted: missing authenticated session.');
-      alert('לא נמצאה התחברות פעילה. התחבר מחדש ונסה שוב.');
-      return;
-    }
-
-    if (!orgId) {
-      console.warn('Diagnostic test aborted: missing organization identifier.');
-      alert('יש לבחור ארגון פעיל לפני הרצת האבחון.');
-      return;
-    }
-
-    try {
-      const result = await authenticatedFetch(`test-credentials?org_id=${encodeURIComponent(orgId)}`, { session });
-      console.log('--- DIAGNOSTIC REPORT ---');
-      console.log(JSON.stringify(result, null, 2));
-      alert('Diagnostic report has been printed to the console.');
-    } catch (error) {
-      console.error('Diagnostic test failed to run:', error);
-      alert('Failed to run diagnostic test. Check console for details.');
-    }
-  }, [activeOrg, activeOrgId, session]);
 
   const filterEmployees = useCallback(() => {
     let filtered = employees;
@@ -164,11 +94,6 @@ export default function Employees() {
         return variants.some(v => name.includes(v) || id.includes(v));
       });
     }
-    console.log('[DEBUG 15] Employees: filterEmployees applied.', {
-      activeTab,
-      searchTerm,
-      filteredCount: filtered.length,
-    });
     setFilteredEmployees(filtered);
   }, [employees, searchTerm, activeTab]);
 
@@ -188,10 +113,6 @@ export default function Employees() {
 
   const handleToggleActive = async (employee) => {
     try {
-      console.log('[DEBUG 16] Employees: toggling employee status.', {
-        employeeId: employee?.id,
-        currentStatus: employee?.is_active,
-      });
       await updateEmployeeRequest({
         session,
         orgId: activeOrgId,
@@ -199,15 +120,8 @@ export default function Employees() {
         body: { updates: { is_active: !employee.is_active } },
       });
       toast.success('סטטוס העובד עודכן בהצלחה.');
-      console.log('[DEBUG 17] Employees: toggle success, reloading data.');
       loadData();
     } catch (error) {
-      console.error('[DEBUG 18] Employees: failed to toggle employee status.', {
-        employeeId: employee?.id,
-        message: error?.message,
-        status: error?.status,
-        data: error?.data,
-      });
       console.error('Failed to toggle employee status', error);
       toast.error('עדכון סטטוס העובד נכשל.');
     }
@@ -245,18 +159,10 @@ export default function Employees() {
             <h1 className="text-3xl font-bold text-slate-900 mb-2">ניהול עובדים</h1>
             <p className="text-slate-600">נהל את פרטי העובדים ותעריפיהם</p>
           </div>
-          <div className="flex flex-col sm:flex-row gap-2">
-            <Button
-              onClick={() => { setEditingEmployee(null); setShowForm(true); }}
-              className="bg-gradient-to-r from-blue-500 to-green-500 hover:from-blue-600 hover:to-green-600 text-white shadow-lg"
-            >
-              <Plus className="w-5 h-5 ml-2" />
-              הוסף עובד חדש
-            </Button>
-            <Button variant="outline" onClick={runDiagnostics}>
-              Run Server Diagnostics
-            </Button>
-          </div>
+          <Button onClick={() => { setEditingEmployee(null); setShowForm(true); }} className="bg-gradient-to-r from-blue-500 to-green-500 hover:from-blue-600 hover:to-green-600 text-white shadow-lg">
+            <Plus className="w-5 h-5 ml-2" />
+            הוסף עובד חדש
+          </Button>
         </div>
         {showForm ? (
           <EmployeeForm

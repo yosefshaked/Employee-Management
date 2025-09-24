@@ -17,7 +17,7 @@ async function employeesRequest(method, { session, orgId, body, signal, employee
     throw new Error('יש לבחור ארגון פעיל לפני ביצוע הפעולה.');
   }
 
-  const path = employeeId ? `employees-unsecure/${employeeId}` : 'employees-unsecure';
+  const path = employeeId ? `employees/${employeeId}` : 'employees';
   const search = method === 'GET' ? `?org_id=${encodeURIComponent(normalizedOrgId)}` : '';
   const hasObjectBody = body && typeof body === 'object' && !(body instanceof FormData);
   const payload = method === 'GET'
