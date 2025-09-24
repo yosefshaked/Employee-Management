@@ -51,6 +51,10 @@ create table if not exists public."RateHistory" (
   constraint "RateHistory_service_id_fkey" foreign key ("service_id") references public."Services"("id")
 );
 
+ALTER TABLE public."RateHistory"
+ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
+UNIQUE (employee_id, service_id, effective_date);
+
 create table if not exists public."WorkSessions" (
   "id" uuid not null default gen_random_uuid(),
   "employee_id" uuid not null default gen_random_uuid(),
@@ -264,11 +268,15 @@ declare
   required_role_members constant text[] := array['postgres', 'anon'];
   required_default_service_id constant uuid := '00000000-0000-0000-0000-000000000000';
   required_default_service_insert constant text := 'INSERT INTO "public"."Services" ("id", "name", "duration_minutes", "payment_model", "color", "metadata") VALUES (''00000000-0000-0000-0000-000000000000'', ''תעריף כללי *לא למחוק או לשנות*'', null, ''fixed_rate'', ''#84CC16'', null);';
+  required_rate_history_constraint constant text := 'RateHistory_employee_service_effective_date_key';
+  required_rate_history_constraint_sql constant text := 'ALTER TABLE public."RateHistory" ADD CONSTRAINT "RateHistory_employee_service_effective_date_key" UNIQUE (employee_id, service_id, effective_date);';
   role_oid oid;
   role_exists boolean;
   missing_role_grants text[];
   default_service_exists boolean;
   services_table_exists boolean;
+  rate_history_table_exists boolean;
+  rate_history_constraint_exists boolean;
 begin
   foreach table_name in array required_tables loop
     required_policy_names := array[
@@ -376,6 +384,43 @@ begin
 
     return next;
   end loop;
+
+  table_name := 'rate_history_unique_constraint';
+  has_table := false;
+  rls_enabled := false;
+  missing_policies := array[]::text[];
+  delta_sql := '';
+  rate_history_constraint_exists := false;
+
+  table_reg := to_regclass('public.RateHistory');
+  rate_history_table_exists := table_reg is not null;
+
+  if not rate_history_table_exists then
+    missing_policies := array['-- הטבלה "RateHistory" חסרה. הרץ את בלוק הסכימה המלא.'];
+    delta_sql := null;
+    return next;
+  end if;
+
+  select exists(
+    select 1
+    from pg_constraint
+    where conname = required_rate_history_constraint
+      and conrelid = table_reg
+  )
+    into rate_history_constraint_exists;
+
+  has_table := rate_history_constraint_exists;
+  rls_enabled := rate_history_constraint_exists;
+
+  if not rate_history_constraint_exists then
+    missing_policies := array[required_rate_history_constraint_sql];
+    delta_sql := required_rate_history_constraint_sql;
+  else
+    missing_policies := array[]::text[];
+    delta_sql := null;
+  end if;
+
+  return next;
 
   table_name := 'services_default_rate_seed';
   has_table := false;

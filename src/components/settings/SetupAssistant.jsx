@@ -59,6 +59,7 @@ const TABLE_LABELS = {
   RateHistory: 'היסטוריית תעריפים',
   Services: 'שירותים והצעות',
   Settings: 'הגדרות ארגון',
+  rate_history_unique_constraint: 'מפתח ייחודי להיסטוריית תעריפים (עובד/שירות/תאריך)',
   app_user_role_grants: 'הרשאות תפקיד app_user',
   services_default_rate_seed: 'תעריף כללי (שורת שירות ברירת מחדל)',
 };
