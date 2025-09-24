@@ -37,33 +37,24 @@
     }
   }
 
-  function buildDevRuntimeConfig() {
-    return normalizeConfig(
-      {
-        supabaseUrl: globalScope.__APP_SUPABASE_URL__,
-        supabaseAnonKey: globalScope.__APP_SUPABASE_ANON_KEY__,
-        orgId: null,
-        source: 'env',
-      },
-      'env',
-    );
-  }
-
   function initializeRuntimeConfig() {
     if (initializeRuntimeConfig.__didRun) {
       return;
     }
+    initializeRuntimeConfig.__didRun = true;
 
     const envMode = globalScope.__APP_ENV__;
 
-    if (typeof envMode === 'undefined') {
-      return;
-    }
-
-    initializeRuntimeConfig.__didRun = true;
-
     if (envMode === 'development') {
-      const devConfig = buildDevRuntimeConfig();
+      const devConfig = normalizeConfig(
+        {
+          supabaseUrl: globalScope.__APP_SUPABASE_URL__,
+          supabaseAnonKey: globalScope.__APP_SUPABASE_ANON_KEY__,
+          orgId: null,
+          source: 'env',
+        },
+        'env',
+      );
 
       if (!devConfig) {
         console.warn('[runtime-config] missing development Supabase credentials.');
@@ -113,14 +104,14 @@
     assignRuntimeConfig(normalized);
   }
 
-  function handleEnvReady() {
-    globalScope.removeEventListener('app:env-ready', handleEnvReady);
-    initializeRuntimeConfig();
-  }
-
   if (typeof globalScope.__APP_ENV__ !== 'undefined') {
     initializeRuntimeConfig();
     return;
+  }
+
+  function handleEnvReady() {
+    globalScope.removeEventListener('app:env-ready', handleEnvReady);
+    initializeRuntimeConfig();
   }
 
   if (typeof globalScope.addEventListener !== 'function') {
