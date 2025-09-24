@@ -1,4 +1,4 @@
-(function preloadRuntimeConfig() {
+(function setupRuntimeConfigPreload() {
   const globalScope = typeof window !== 'undefined' ? window : undefined;
   if (!globalScope) {
     return;
@@ -37,63 +37,88 @@
     }
   }
 
-  const envMode = globalScope.__APP_ENV__;
+  function initializeRuntimeConfig() {
+    if (initializeRuntimeConfig.__didRun) {
+      return;
+    }
+    initializeRuntimeConfig.__didRun = true;
 
-  if (envMode === 'development') {
-    const devConfig = normalizeConfig(
-      {
-        supabaseUrl: globalScope.__APP_SUPABASE_URL__,
-        supabaseAnonKey: globalScope.__APP_SUPABASE_ANON_KEY__,
-        orgId: null,
-        source: 'env',
-      },
-      'env',
-    );
+    const envMode = globalScope.__APP_ENV__;
 
-    if (!devConfig) {
-      console.warn('[runtime-config] missing development Supabase credentials.');
+    if (envMode === 'development') {
+      const devConfig = normalizeConfig(
+        {
+          supabaseUrl: globalScope.__APP_SUPABASE_URL__,
+          supabaseAnonKey: globalScope.__APP_SUPABASE_ANON_KEY__,
+          orgId: null,
+          source: 'env',
+        },
+        'env',
+      );
+
+      if (!devConfig) {
+        console.warn('[runtime-config] missing development Supabase credentials.');
+      }
+
+      assignRuntimeConfig(devConfig);
+      return;
     }
 
-    assignRuntimeConfig(devConfig);
-    return;
-  }
-
-  if (globalScope.__RUNTIME_CONFIG__ && typeof globalScope.__RUNTIME_CONFIG__ === 'object') {
-    const normalizedExisting = normalizeConfig(globalScope.__RUNTIME_CONFIG__, 'inline');
-    assignRuntimeConfig(normalizedExisting);
-    return;
-  }
-
-  let normalized = null;
-
-  try {
-    const inlineNode = document.querySelector('script[type="application/json"][data-runtime-config]');
-    if (inlineNode?.textContent) {
-      const inlinePayload = JSON.parse(inlineNode.textContent);
-      normalized = normalizeConfig(inlinePayload, 'inline');
+    if (globalScope.__RUNTIME_CONFIG__ && typeof globalScope.__RUNTIME_CONFIG__ === 'object') {
+      const normalizedExisting = normalizeConfig(globalScope.__RUNTIME_CONFIG__, 'inline');
+      assignRuntimeConfig(normalizedExisting);
+      return;
     }
-  } catch (error) {
-    console.warn('[runtime-config] failed to parse inline config', error);
-  }
 
-  if (!normalized) {
+    let normalized = null;
+
     try {
-      const request = new XMLHttpRequest();
-      request.open('GET', '/api/config', false);
-      request.setRequestHeader('Accept', 'application/json');
-      request.send(null);
-
-      if (request.status >= 200 && request.status < 300) {
-        const responseText = request.responseText || '';
-        if (responseText.trim()) {
-          const payload = JSON.parse(responseText);
-          normalized = normalizeConfig(payload, 'preload');
-        }
+      const inlineNode = document.querySelector('script[type="application/json"][data-runtime-config]');
+      if (inlineNode?.textContent) {
+        const inlinePayload = JSON.parse(inlineNode.textContent);
+        normalized = normalizeConfig(inlinePayload, 'inline');
       }
     } catch (error) {
-      console.warn('[runtime-config] failed to preload configuration', error);
+      console.warn('[runtime-config] failed to parse inline config', error);
     }
+
+    if (!normalized) {
+      try {
+        const request = new XMLHttpRequest();
+        request.open('GET', '/api/config', false);
+        request.setRequestHeader('Accept', 'application/json');
+        request.send(null);
+
+        if (request.status >= 200 && request.status < 300) {
+          const responseText = request.responseText || '';
+          if (responseText.trim()) {
+            const payload = JSON.parse(responseText);
+            normalized = normalizeConfig(payload, 'preload');
+          }
+        }
+      } catch (error) {
+        console.warn('[runtime-config] failed to preload configuration', error);
+      }
+    }
+
+    assignRuntimeConfig(normalized);
   }
 
-  assignRuntimeConfig(normalized);
+  if (typeof globalScope.__APP_ENV__ !== 'undefined') {
+    initializeRuntimeConfig();
+    return;
+  }
+
+  function handleEnvReady() {
+    globalScope.removeEventListener('app:env-ready', handleEnvReady);
+    initializeRuntimeConfig();
+  }
+
+  if (typeof globalScope.addEventListener !== 'function') {
+    initializeRuntimeConfig();
+    return;
+  }
+
+  globalScope.addEventListener('app:env-ready', handleEnvReady);
+  globalScope.addEventListener('DOMContentLoaded', initializeRuntimeConfig, { once: true });
 })();
