@@ -49,6 +49,7 @@ import {
   buildSourceMetadata,
   canUseWorkSessionMetadata,
 } from '@/lib/workSessionsMetadata.js';
+import { useTimeEntry } from '@/components/time-entry/useTimeEntry.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 const TIME_ENTRY_TABS = [
@@ -282,6 +283,17 @@ export default function TimeEntry() {
     );
   };
 
+  const { saveAdjustments } = useTimeEntry({
+    employees,
+    services,
+    getRateForDate,
+    metadataClient: dataClient,
+    workSessions,
+    leavePayPolicy,
+    session,
+    orgId: activeOrgId,
+  });
+
 
   const handleTableSubmit = async ({
     employee,
@@ -310,8 +322,10 @@ export default function TimeEntry() {
           toast.error('יש להזין לפחות התאמה אחת.', { duration: 15000 });
           return;
         }
-        const insertPayload = [];
+
+        const newAdjustments = [];
         const updatePayloads = [];
+
         for (const entry of normalizedAdjustments) {
           const amountValue = parseFloat(entry.amount);
           if (!entry.amount || Number.isNaN(amountValue) || amountValue <= 0) {
@@ -323,43 +337,46 @@ export default function TimeEntry() {
             toast.error('נא למלא סכום והערה עבור כל התאמה.', { duration: 15000 });
             return;
           }
-          const normalizedAmount = entry.type === 'debit' ? -Math.abs(amountValue) : Math.abs(amountValue);
-          const basePayload = {
-            employee_id: employee.id,
-            date: dateStr,
-            entry_type: 'adjustment',
-            notes: notesValue,
-            total_payment: normalizedAmount,
-            rate_used: normalizedAmount,
-            hours: null,
-            service_id: null,
-            sessions_count: null,
-            students_count: null,
-          };
-          if (!entry.id && canWriteMetadata) {
-            const metadata = buildSourceMetadata('table');
-            if (metadata) {
-              basePayload.metadata = metadata;
-            }
-          }
+
           if (entry.id) {
-            updatePayloads.push({ id: entry.id, values: basePayload });
+            const normalizedAmount = entry.type === 'debit' ? -Math.abs(amountValue) : Math.abs(amountValue);
+            updatePayloads.push({
+              id: entry.id,
+              values: {
+                employee_id: employee.id,
+                date: dateStr,
+                entry_type: 'adjustment',
+                notes: notesValue,
+                total_payment: normalizedAmount,
+                rate_used: normalizedAmount,
+                hours: null,
+                service_id: null,
+                sessions_count: null,
+                students_count: null,
+              },
+            });
           } else {
-            insertPayload.push(basePayload);
+            newAdjustments.push({
+              employee_id: employee.id,
+              date: dateStr,
+              amount: amountValue,
+              notes: notesValue,
+              type: entry.type || 'credit',
+            });
           }
         }
-        if (!insertPayload.length && !updatePayloads.length) {
+
+        if (!newAdjustments.length && !updatePayloads.length) {
           toast.error('אין התאמות לשמירה.', { duration: 15000 });
           return;
         }
+
         ensureSessionAndOrg();
-        if (insertPayload.length) {
-          await createWorkSessions({
-            session,
-            orgId: activeOrgId,
-            sessions: insertPayload,
-          });
+
+        if (newAdjustments.length) {
+          await saveAdjustments(newAdjustments);
         }
+
         if (updatePayloads.length) {
           await Promise.all(
             updatePayloads.map(({ id, values }) => {
@@ -373,6 +390,7 @@ export default function TimeEntry() {
             }),
           );
         }
+
         toast.success('התאמות נשמרו בהצלחה.');
         await loadInitialData({ silent: true });
         return;
