@@ -1,4 +1,4 @@
-import { createWorkSessions } from '@/api/work-sessions.js';
+import { createWorkSessions, updateWorkSession } from '@/api/work-sessions.js';
 import { calculateGlobalDailyRate } from '../../lib/payroll.js';
 import {
   getEntryTypeForLeaveKind,
@@ -359,26 +359,61 @@ export function useTimeEntry({
     return { inserted: inserts, conflicts, invalidStartDates };
   };
 
-  const saveAdjustments = async (items = []) => {
+  const saveAdjustments = async (input = {}) => {
     ensureApiPrerequisites();
+
+    const isLegacyArrayInput = Array.isArray(input);
+    const source = isLegacyArrayInput
+      ? 'multi_date'
+      : (input?.source || 'table');
+
+    const adjustments = isLegacyArrayInput
+      ? input
+      : (Array.isArray(input?.adjustments) ? input.adjustments : []);
+
+    if (!adjustments.length) {
+      throw new Error('אין התאמות לשמירה.');
+    }
+
     const canWriteMetadata = await resolveCanWriteMetadata();
-    const inserts = [];
-    const invalidNotes = [];
-    for (const item of items) {
-      const employee = employees.find(e => e.id === item.employee_id);
-      if (!employee) continue;
-      if (!item.date) continue;
-      const amountValue = parseFloat(item.amount);
-      if (!item.amount || Number.isNaN(amountValue) || amountValue <= 0) continue;
-      const notesValue = typeof item.notes === 'string' ? item.notes.trim() : '';
-      if (!notesValue) {
-        invalidNotes.push({ employee_id: employee.id, date: item.date });
-        continue;
+
+    const newEntries = [];
+    const updates = [];
+
+    for (const item of adjustments) {
+      const employeeId = item?.employee_id || input?.employee?.id;
+      if (!employeeId) {
+        throw new Error('נדרש עובד לשמירת ההתאמות.');
       }
-      const normalizedAmount = item.type === 'debit' ? -Math.abs(amountValue) : Math.abs(amountValue);
-      const payload = {
-        employee_id: employee.id,
-        date: item.date,
+      const employeeRecord = employees.find(emp => emp.id === employeeId) || input?.employee;
+      if (!employeeRecord) {
+        throw new Error('העובד המבוקש לא נמצא.');
+      }
+
+      const dateValue = item?.date || input?.date;
+      if (!dateValue) {
+        throw new Error('יש לבחור תאריך לכל התאמה.');
+      }
+
+      const amountRaw = typeof item?.amount === 'number'
+        ? item.amount
+        : parseFloat(item?.amount);
+      if (!amountRaw || Number.isNaN(amountRaw) || amountRaw <= 0) {
+        throw new Error('נא להזין סכום גדול מ-0 עבור כל התאמה.');
+      }
+
+      const notesValue = typeof item?.notes === 'string' ? item.notes.trim() : '';
+      if (!notesValue) {
+        throw new Error('נא למלא סכום והערה עבור כל התאמה.');
+      }
+
+      const normalizedAmount = item?.type === 'debit'
+        ? -Math.abs(amountRaw)
+        : Math.abs(amountRaw);
+
+      const basePayload = {
+        employee_id: employeeId,
+        date: dateValue,
         entry_type: 'adjustment',
         notes: notesValue,
         total_payment: normalizedAmount,
@@ -388,26 +423,52 @@ export function useTimeEntry({
         sessions_count: null,
         students_count: null,
       };
+
       if (canWriteMetadata) {
-        const metadata = buildSourceMetadata('multi_date');
+        const metadata = buildSourceMetadata(source);
         if (metadata) {
-          payload.metadata = metadata;
+          basePayload.metadata = metadata;
         }
       }
-      inserts.push(payload);
+
+      if (item?.id) {
+        updates.push({ id: item.id, updates: basePayload });
+      } else {
+        newEntries.push(basePayload);
+      }
     }
-    if (invalidNotes.length > 0) {
-      const error = new Error('כל התאמה חייבת לכלול הערה.');
-      error.code = 'TIME_ENTRY_ADJUSTMENT_NOTE_REQUIRED';
-      error.invalidEntries = invalidNotes;
-      throw error;
+
+    if (!newEntries.length && !updates.length) {
+      throw new Error('אין התאמות לשמירה.');
     }
-    if (!inserts.length) {
-      throw new Error('לא נמצאו התאמות לשמירה');
+
+    if (newEntries.length) {
+      await createWorkSessions({ session, orgId, sessions: newEntries });
     }
-    await createWorkSessions({ session, orgId, sessions: inserts });
-    return { inserted: inserts };
+
+    if (updates.length) {
+      await Promise.all(
+        updates.map(({ id, updates: payload }) => {
+          const updateValues = { ...payload };
+          return updateWorkSession({
+            session,
+            orgId,
+            sessionId: id,
+            body: { updates: updateValues },
+          });
+        }),
+      );
+    }
+
+    return {
+      createdCount: newEntries.length,
+      updatedCount: updates.length,
+    };
   };
 
-  return { saveRows, saveMixedLeave, saveAdjustments };
+  return {
+    saveRows,
+    saveMixedLeave,
+    saveAdjustments,
+  };
 }

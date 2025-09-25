@@ -310,91 +310,32 @@ export default function TimeEntry() {
   }) => {
     setIsLoading(true);
     try {
-      if (!dataClient) {
-        throw new Error('חיבור Supabase אינו זמין.');
-      }
       const dateStr = format(day, 'yyyy-MM-dd');
-      const canWriteMetadata = await canUseWorkSessionMetadata(dataClient);
 
       if (dayType === 'adjustment') {
-        const normalizedAdjustments = Array.isArray(adjustments) ? adjustments : [];
-        if (!normalizedAdjustments.length) {
-          toast.error('יש להזין לפחות התאמה אחת.', { duration: 15000 });
-          return;
-        }
-
-        const newAdjustments = [];
-        const updatePayloads = [];
-
-        for (const entry of normalizedAdjustments) {
-          const amountValue = parseFloat(entry.amount);
-          if (!entry.amount || Number.isNaN(amountValue) || amountValue <= 0) {
-            toast.error('נא להזין סכום גדול מ-0 עבור כל התאמה.', { duration: 15000 });
-            return;
-          }
-          const notesValue = typeof entry.notes === 'string' ? entry.notes.trim() : '';
-          if (!notesValue) {
-            toast.error('נא למלא סכום והערה עבור כל התאמה.', { duration: 15000 });
-            return;
-          }
-
-          if (entry.id) {
-            const normalizedAmount = entry.type === 'debit' ? -Math.abs(amountValue) : Math.abs(amountValue);
-            updatePayloads.push({
-              id: entry.id,
-              values: {
-                employee_id: employee.id,
-                date: dateStr,
-                entry_type: 'adjustment',
-                notes: notesValue,
-                total_payment: normalizedAmount,
-                rate_used: normalizedAmount,
-                hours: null,
-                service_id: null,
-                sessions_count: null,
-                students_count: null,
-              },
-            });
-          } else {
-            newAdjustments.push({
-              employee_id: employee.id,
-              date: dateStr,
-              amount: amountValue,
-              notes: notesValue,
-              type: entry.type || 'credit',
-            });
-          }
-        }
-
-        if (!newAdjustments.length && !updatePayloads.length) {
-          toast.error('אין התאמות לשמירה.', { duration: 15000 });
-          return;
-        }
-
-        ensureSessionAndOrg();
-
-        if (newAdjustments.length) {
-          await saveAdjustments(newAdjustments);
-        }
-
-        if (updatePayloads.length) {
-          await Promise.all(
-            updatePayloads.map(({ id, values }) => {
-              const { id: _omit, ...updates } = values || {};
-              return updateWorkSession({
-                session,
-                orgId: activeOrgId,
-                sessionId: id,
-                body: { updates },
-              });
-            }),
-          );
+        try {
+          await saveAdjustments({
+            employee,
+            date: dateStr,
+            adjustments: Array.isArray(adjustments) ? adjustments : [],
+            source: 'table',
+          });
+        } catch (error) {
+          const message = error?.message || 'שמירת ההתאמות נכשלה.';
+          toast.error(message, { duration: 15000 });
+          throw error;
         }
 
         toast.success('התאמות נשמרו בהצלחה.');
         await loadInitialData({ silent: true });
         return;
       }
+
+      if (!dataClient) {
+        throw new Error('חיבור Supabase אינו זמין.');
+      }
+
+      const canWriteMetadata = await canUseWorkSessionMetadata(dataClient);
 
       const toInsert = [];
       const toUpdate = [];
