@@ -25,8 +25,7 @@ export function useTimeEntry({
   employees,
   services,
   getRateForDate,
-  supabaseClient,
-  dataClient = null,
+  metadataClient = null,
   session = null,
   orgId = null,
   workSessions = [],
@@ -59,14 +58,14 @@ export function useTimeEntry({
     return safeBase * scale;
   };
 
-  const metadataClient = dataClient || supabaseClient || null;
+  const effectiveMetadataClient = metadataClient || null;
 
   const resolveCanWriteMetadata = async () => {
-    if (!metadataClient) {
+    if (!effectiveMetadataClient) {
       return false;
     }
     try {
-      return await canUseWorkSessionMetadata(metadataClient);
+      return await canUseWorkSessionMetadata(effectiveMetadataClient);
     } catch (error) {
       console.warn('Failed to verify WorkSessions metadata support', error);
       return false;

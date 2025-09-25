@@ -103,7 +103,7 @@ export default function MultiDateEntryModal({
     employees,
     services,
     getRateForDate,
-    supabaseClient: dataClient,
+    metadataClient: dataClient,
     workSessions,
     leavePayPolicy,
     session,
