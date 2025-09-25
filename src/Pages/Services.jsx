@@ -6,7 +6,7 @@ import ServiceList from "../components/services/ServiceList";
 import ServiceForm from "../components/services/ServiceForm";
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
-import { createService, updateService as updateServiceRequest } from '@/api/services.js';
+import { createService, getServices as fetchServices, updateService as updateServiceRequest } from '@/api/services.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -19,26 +19,29 @@ export default function Services() {
   const { activeOrgId } = useOrg();
 
   const loadServices = useCallback(async () => {
-    if (!dataClient) {
+    if (!session || !activeOrgId) {
       setServices([]);
       setIsLoading(false);
       return;
     }
-    setIsLoading(true);
-    const { data, error } = await dataClient
-      .from('Services')
-      .select('*')
-      .order('name', { ascending: true });
 
-    if (error) {
+    setIsLoading(true);
+    try {
+      const response = await fetchServices({
+        session,
+        orgId: activeOrgId,
+      });
+      const fetchedServices = Array.isArray(response?.services) ? response.services : [];
+      const filteredServices = fetchedServices.filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
+      setServices(filteredServices);
+    } catch (error) {
       toast.error("שגיאה בטעינת השירותים");
       console.error('Error fetching services:', error);
-    } else {
-      const filteredServices = (data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
-      setServices(filteredServices);
+      setServices([]);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
-  }, [dataClient]);
+  }, [activeOrgId, session]);
 
   useEffect(() => {
     loadServices();

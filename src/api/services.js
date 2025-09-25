@@ -64,6 +64,10 @@ export function createService({ body, ...options } = {}) {
   });
 }
 
+export function getServices(options = {}) {
+  return servicesRequest('GET', options);
+}
+
 export function updateService({ serviceId, body, ...options } = {}) {
   if (!serviceId) {
     throw new Error('חסר מזהה שירות לעדכון.');
