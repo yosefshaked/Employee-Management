@@ -22,6 +22,7 @@ import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, n
 import { useOrg } from '@/org/OrgContext.jsx';
 import { fetchLeavePolicySettings, fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
 import { fetchEmployeesList } from '@/api/employees.js';
+import { fetchWorkSessions } from '@/api/work-sessions.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -51,7 +52,7 @@ export default function Reports() {
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const { tenantClientReady, activeOrgHasConnection, activeOrgId } = useOrg();
-  const { dataClient, authClient, user, loading, session } = useSupabase();
+  const { authClient, user, loading, session } = useSupabase();
 
   const getRateForDate = (employeeId, date, serviceId = null) => {
     const employee = employees.find(e => e.id === employeeId);
@@ -164,59 +165,57 @@ export default function Reports() {
   }, [applyFilters]);
 
   const loadInitialData = useCallback(async () => {
-    if (!tenantClientReady || !activeOrgHasConnection || !dataClient || !session || !activeOrgId) {
+    if (!tenantClientReady || !activeOrgHasConnection || !session || !activeOrgId) {
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
     try {
-      const bundle = await fetchEmployeesList({ session, orgId: activeOrgId });
-      setEmployees(Array.isArray(bundle?.employees) ? bundle.employees : []);
-
-      const [
-        sessionsData,
-        servicesData,
-        ratesData,
-        leavePolicySettings,
-        leavePayPolicySettings,
-        leaveData,
-      ] = await Promise.all([
-        dataClient.from('WorkSessions').select('*').eq('deleted', false),
-        dataClient.from('Services').select('*'),
-        dataClient.from('RateHistory').select('*'),
+      const [bundle, sessionsResponse, leavePolicySettings, leavePayPolicySettings] = await Promise.all([
+        fetchEmployeesList({ session, orgId: activeOrgId }),
+        fetchWorkSessions({ session, orgId: activeOrgId }),
         fetchLeavePolicySettings({ session, orgId: activeOrgId }),
         fetchLeavePayPolicySettings({ session, orgId: activeOrgId }),
-        dataClient.from('LeaveBalances').select('*')
       ]);
 
-      if (sessionsData.error) throw sessionsData.error;
-      if (servicesData.error) throw servicesData.error;
-      if (ratesData.error) throw ratesData.error;
-      if (leaveData.error) throw leaveData.error;
+      const employeeList = Array.isArray(bundle?.employees) ? bundle.employees : [];
+      setEmployees(employeeList);
 
-      const safeSessions = (sessionsData.data || []).filter(session => !session?.deleted);
-      setWorkSessions(safeSessions);
-      const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
+      const rateHistoryList = Array.isArray(bundle?.rateHistory) ? bundle.rateHistory : [];
+      setRateHistories(rateHistoryList);
+
+      const serviceList = Array.isArray(bundle?.services) ? bundle.services : [];
+      const filteredServices = serviceList.filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
       setServices(filteredServices);
-      setRateHistories(ratesData.data || []);
-      setLeaveBalances(sortLeaveLedger(leaveData.data || []));
+
+      const ledgerEntries = Array.isArray(bundle?.leaveBalances) ? bundle.leaveBalances : [];
+      setLeaveBalances(sortLeaveLedger(ledgerEntries));
+
+      const safeSessions = Array.isArray(sessionsResponse?.sessions)
+        ? sessionsResponse.sessions.filter(session => !session?.deleted)
+        : [];
+      setWorkSessions(safeSessions);
+
+      const resolvedLeavePolicy = leavePolicySettings?.value ?? bundle?.leavePolicy ?? null;
       setLeavePolicy(
-        leavePolicySettings.value
-          ? normalizeLeavePolicy(leavePolicySettings.value)
+        resolvedLeavePolicy
+          ? normalizeLeavePolicy(resolvedLeavePolicy)
           : DEFAULT_LEAVE_POLICY,
       );
 
+      const resolvedLeavePayPolicy = leavePayPolicySettings?.value ?? bundle?.leavePayPolicy ?? null;
       setLeavePayPolicy(
-        leavePayPolicySettings.value
-          ? normalizeLeavePayPolicy(leavePayPolicySettings.value)
+        resolvedLeavePayPolicy
+          ? normalizeLeavePayPolicy(resolvedLeavePayPolicy)
           : DEFAULT_LEAVE_PAY_POLICY,
       );
     } catch (error) {
       console.error("Error loading data:", error);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
-  }, [tenantClientReady, activeOrgHasConnection, dataClient, session, activeOrgId]);
+  }, [tenantClientReady, activeOrgHasConnection, session, activeOrgId]);
 
   useEffect(() => {
     loadInitialData();
@@ -296,7 +295,7 @@ export default function Reports() {
     );
   }
 
-  if (!dataClient) {
+  if (!activeOrgHasConnection) {
     return (
       <div className="p-6 text-center text-slate-500">
         בחרו ארגון עם חיבור פעיל כדי להפיק דוחות.
