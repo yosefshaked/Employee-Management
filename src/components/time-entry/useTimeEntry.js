@@ -1,5 +1,6 @@
 import { format } from 'date-fns';
 import { createWorkSessions, updateWorkSession } from '@/api/work-sessions.js';
+import { createLeaveBalanceEntry, deleteLeaveBalanceEntries } from '@/api/leave-balances.js';
 import { hasDuplicateSession } from '@/lib/workSessionsUtils.js';
 import { calculateGlobalDailyRate } from '../../lib/payroll.js';
 import {
@@ -10,16 +11,23 @@ import {
   inferLeaveType,
   getLeaveValueMultiplier,
   isLeaveEntryType,
+  isPayableLeaveKind,
+  getLeaveLedgerDelta,
+  getNegativeBalanceFloor,
+  getLeaveLedgerEntryDelta,
+  getLeaveLedgerEntryDate,
+  getLeaveLedgerEntryType,
   resolveLeavePayMethodContext,
   normalizeMixedSubtype,
   DEFAULT_MIXED_SUBTYPE,
+  TIME_ENTRY_LEAVE_PREFIX,
 } from '../../lib/leave.js';
 import {
   buildLeaveMetadata,
   buildSourceMetadata,
   canUseWorkSessionMetadata,
 } from '../../lib/workSessionsMetadata.js';
-import { selectLeaveDayValue } from '../../selectors.js';
+import { selectLeaveDayValue, selectLeaveRemaining } from '../../selectors.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -32,6 +40,8 @@ export function useTimeEntry({
   orgId = null,
   workSessions = [],
   leavePayPolicy = null,
+  leavePolicy = null,
+  leaveBalances = [],
 }) {
   const baseRegularSessions = new Set();
   const baseLeaveSessions = new Set();
@@ -456,6 +466,310 @@ export function useTimeEntry({
     };
   };
 
+  const saveLeaveDay = async (input = {}) => {
+    ensureApiPrerequisites();
+
+    const {
+      employee = null,
+      day = null,
+      date = null,
+      leaveType = null,
+      paidLeaveId = null,
+      paidLeaveNotes = null,
+      mixedPaid = null,
+      mixedSubtype = null,
+      mixedHalfDay = null,
+      source = 'table',
+    } = input || {};
+
+    if (!employee || !employee.id) {
+      throw new Error('נדרש לבחור עובד לשמירת חופשה.');
+    }
+
+    const normalizedDate = typeof date === 'string' && date
+      ? date
+      : (day instanceof Date && !Number.isNaN(day.getTime())
+        ? format(day, 'yyyy-MM-dd')
+        : null);
+
+    if (!normalizedDate) {
+      throw new Error('נדרש תאריך תקין לשמירת חופשה.');
+    }
+
+    const dayReference = day instanceof Date && !Number.isNaN(day.getTime())
+      ? day
+      : new Date(`${normalizedDate}T00:00:00`);
+
+    if (Number.isNaN(dayReference.getTime())) {
+      throw new Error('נדרש תאריך תקין לשמירת חופשה.');
+    }
+
+    if (!leaveType) {
+      const error = new Error('יש לבחור סוג חופשה.');
+      error.code = 'TIME_ENTRY_LEAVE_TYPE_REQUIRED';
+      throw error;
+    }
+
+    if (employee.start_date && employee.start_date > normalizedDate) {
+      const error = new Error('לא ניתן לשמור חופשה לפני תחילת העבודה.');
+      error.code = 'TIME_ENTRY_LEAVE_BEFORE_START';
+      error.details = {
+        requestedDate: normalizedDate,
+        startDate: employee.start_date,
+      };
+      throw error;
+    }
+
+    const effectivePolicy = leavePolicy && typeof leavePolicy === 'object'
+      ? leavePolicy
+      : {};
+
+    if (leaveType === 'half_day' && !effectivePolicy.allow_half_day) {
+      const error = new Error('חצי יום אינו מאושר במדיניות הנוכחית.');
+      error.code = 'TIME_ENTRY_HALF_DAY_DISABLED';
+      throw error;
+    }
+
+    const workConflicts = Array.isArray(workSessions)
+      ? workSessions.filter(session =>
+        session &&
+        session.employee_id === employee.id &&
+        session.date === normalizedDate &&
+        !isLeaveEntryType(session.entry_type) &&
+        session.entry_type !== 'adjustment',
+      )
+      : [];
+
+    if (workConflicts.length > 0) {
+      const error = new Error('קיימים רישומי עבודה מתנגשים בתאריך זה.');
+      error.code = 'TIME_ENTRY_WORK_CONFLICT';
+      error.conflicts = workConflicts;
+      throw error;
+    }
+
+    const existingLedgerEntries = Array.isArray(leaveBalances)
+      ? leaveBalances.filter(entry => {
+        if (!entry || entry.employee_id !== employee.id) return false;
+        const entryDate = getLeaveLedgerEntryDate(entry);
+        if (entryDate !== normalizedDate) return false;
+        const ledgerType = getLeaveLedgerEntryType(entry) || '';
+        return ledgerType.startsWith(TIME_ENTRY_LEAVE_PREFIX);
+      })
+      : [];
+
+    const ledgerDeleteIds = existingLedgerEntries
+      .map(entry => entry?.id)
+      .filter(Boolean);
+
+    const existingLedgerDelta = existingLedgerEntries.reduce(
+      (sum, entry) => sum + (getLeaveLedgerEntryDelta(entry) || 0),
+      0,
+    );
+
+    const baseLeaveKind = getLeaveBaseKind(leaveType) || leaveType;
+    const isMixed = baseLeaveKind === 'mixed';
+    const resolvedMixedSubtype = isMixed
+      ? (normalizeMixedSubtype(mixedSubtype) || DEFAULT_MIXED_SUBTYPE)
+      : null;
+    const leaveSubtype = isMixed ? null : getLeaveSubtypeFromValue(leaveType);
+    const entryType = getEntryTypeForLeaveKind(baseLeaveKind) || getEntryTypeForLeaveKind('system_paid');
+    if (!entryType) {
+      const error = new Error('סוג חופשה לא נתמך.');
+      error.code = 'TIME_ENTRY_LEAVE_UNSUPPORTED';
+      throw error;
+    }
+
+    const allowHalfDay = Boolean(effectivePolicy.allow_half_day);
+    const mixedIsPaid = isMixed ? (mixedPaid !== false) : false;
+    const mixedHalfDayRequested = isMixed && mixedIsPaid && mixedHalfDay === true;
+    const mixedHalfDayEnabled = mixedHalfDayRequested && allowHalfDay;
+    if (baseLeaveKind === 'half_day' && !allowHalfDay) {
+      const error = new Error('חצי יום אינו מאושר במדיניות הנוכחית.');
+      error.code = 'TIME_ENTRY_HALF_DAY_DISABLED';
+      throw error;
+    }
+
+    const isPayable = isMixed ? mixedIsPaid : isPayableLeaveKind(baseLeaveKind);
+    const leaveFraction = baseLeaveKind === 'half_day'
+      ? 0.5
+      : (isMixed ? (mixedHalfDayEnabled ? 0.5 : 1) : 1);
+
+    const ledgerDelta = getLeaveLedgerDelta(baseLeaveKind) || 0;
+
+    const summary = selectLeaveRemaining(employee.id, normalizedDate, {
+      employees,
+      leaveBalances,
+      policy: effectivePolicy,
+    }) || {};
+
+    const remaining = typeof summary.remaining === 'number' ? summary.remaining : 0;
+    const baselineRemaining = remaining - existingLedgerDelta;
+    const projected = baselineRemaining + ledgerDelta;
+
+    if (ledgerDelta < 0) {
+      if (!effectivePolicy.allow_negative_balance) {
+        if (baselineRemaining <= 0 || projected < 0) {
+          const error = new Error('חריגה ממכסה ימי החופשה המותרים.');
+          error.code = 'TIME_ENTRY_LEAVE_BALANCE_EXCEEDED';
+          error.details = { baselineRemaining, projected };
+          throw error;
+        }
+      } else {
+        const floorLimit = getNegativeBalanceFloor(effectivePolicy);
+        if (projected < floorLimit) {
+          const error = new Error('חריגה ממכסה ימי החופשה המותרים.');
+          error.code = 'TIME_ENTRY_LEAVE_BALANCE_EXCEEDED';
+          error.details = { baselineRemaining, projected, floorLimit };
+          throw error;
+        }
+      }
+    }
+
+    const canWriteMetadata = await resolveCanWriteMetadata();
+
+    let rateUsed = null;
+    let totalPayment = 0;
+    let resolvedLeaveValue = 0;
+
+    if (isPayable) {
+      const { rate, reason } = getRateForDate(
+        employee.id,
+        dayReference,
+        GENERIC_RATE_SERVICE_ID,
+      );
+      rateUsed = rate || 0;
+      if (!rateUsed && employee.employee_type === 'global') {
+        const error = new Error(reason || 'לא הוגדר תעריף עבור תאריך זה.');
+        error.code = 'TIME_ENTRY_RATE_MISSING';
+        throw error;
+      }
+
+      const selectorValue = resolveLeaveValue(employee.id, normalizedDate);
+      if (typeof selectorValue === 'number' && Number.isFinite(selectorValue) && selectorValue > 0) {
+        resolvedLeaveValue = selectorValue;
+      }
+
+      if (employee.employee_type === 'global') {
+        if (!(typeof resolvedLeaveValue === 'number' && Number.isFinite(resolvedLeaveValue) && resolvedLeaveValue > 0)) {
+          try {
+            resolvedLeaveValue = calculateGlobalDailyRate(employee, dayReference, rateUsed);
+          } catch (error) {
+            error.code = error.code || 'TIME_ENTRY_GLOBAL_RATE_FAILED';
+            throw error;
+          }
+        }
+        const fraction = Number.isFinite(leaveFraction) && leaveFraction > 0 ? leaveFraction : 1;
+        totalPayment = resolvedLeaveValue * fraction;
+      }
+    }
+
+    const leaveRow = {
+      employee_id: employee.id,
+      date: normalizedDate,
+      notes: paidLeaveNotes ? paidLeaveNotes : null,
+      rate_used: isPayable ? (rateUsed || null) : null,
+      total_payment: isPayable && employee.employee_type === 'global' ? totalPayment : 0,
+      entry_type: entryType,
+      hours: 0,
+      service_id: null,
+      sessions_count: null,
+      students_count: null,
+      payable: Boolean(isPayable),
+    };
+
+    if (hasDuplicateSession(Array.isArray(workSessions) ? workSessions : [], leaveRow)) {
+      const error = new Error('רישום זה כבר קיים.');
+      error.code = 'TIME_ENTRY_DUPLICATE';
+      throw error;
+    }
+
+    if (canWriteMetadata) {
+      const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
+      const dailyValueSnapshot = isPayable
+        ? ((typeof resolvedLeaveValue === 'number' && Number.isFinite(resolvedLeaveValue) && resolvedLeaveValue > 0)
+          ? resolvedLeaveValue
+          : null)
+        : null;
+      const metadata = buildLeaveMetadata({
+        source,
+        leaveType: baseLeaveKind,
+        leaveKind: baseLeaveKind,
+        subtype: isMixed ? resolvedMixedSubtype : leaveSubtype,
+        payable: Boolean(isPayable),
+        fraction: isPayable ? leaveFraction : null,
+        halfDay: baseLeaveKind === 'half_day' || mixedHalfDayEnabled,
+        mixedPaid: isMixed ? mixedIsPaid : null,
+        method: payContext.method,
+        lookbackMonths: payContext.lookback_months,
+        legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
+        dailyValueSnapshot,
+        overrideApplied: payContext.override_applied,
+      });
+      if (metadata) {
+        leaveRow.metadata = metadata;
+      }
+    }
+
+    const inserts = [];
+    const updates = [];
+
+    if (paidLeaveId) {
+      updates.push({ id: paidLeaveId, updates: { ...leaveRow } });
+    } else {
+      inserts.push({ ...leaveRow });
+    }
+
+    if (inserts.length) {
+      await createWorkSessions({
+        session,
+        orgId,
+        sessions: inserts,
+      });
+    }
+
+    if (updates.length) {
+      await Promise.all(
+        updates.map(({ id, updates: payload }) => updateWorkSession({
+          session,
+          orgId,
+          sessionId: id,
+          body: { updates: payload },
+        })),
+      );
+    }
+
+    if (ledgerDeleteIds.length) {
+      await deleteLeaveBalanceEntries({
+        session,
+        orgId,
+        ids: ledgerDeleteIds,
+      });
+    }
+
+    let ledgerInsertPayload = null;
+    if (ledgerDelta !== 0) {
+      ledgerInsertPayload = {
+        employee_id: employee.id,
+        effective_date: normalizedDate,
+        balance: ledgerDelta,
+        leave_type: `${TIME_ENTRY_LEAVE_PREFIX}_${leaveType}`,
+        notes: paidLeaveNotes ? paidLeaveNotes : null,
+      };
+      await createLeaveBalanceEntry({
+        session,
+        orgId,
+        body: ledgerInsertPayload,
+      });
+    }
+
+    return {
+      inserted: inserts,
+      updated: updates,
+      ledgerDeletedIds: ledgerDeleteIds,
+      ledgerInserted: ledgerInsertPayload ? [ledgerInsertPayload] : [],
+    };
+  };
+
   const saveMixedLeave = async (entries = [], options = {}) => {
     ensureApiPrerequisites();
     const { leaveType = 'mixed' } = options;
@@ -686,6 +1000,7 @@ export function useTimeEntry({
   return {
     saveRows,
     saveWorkDay,
+    saveLeaveDay,
     saveMixedLeave,
     saveAdjustments,
   };
