@@ -62,7 +62,6 @@ export default function TimeEntryForm({
   const isHourly = employee.employee_type === 'hourly';
 
   const createSeg = () => ({
-    _localId: crypto.randomUUID(),
     hours: '',
     service_id: '',
     sessions_count: '',
@@ -70,14 +69,11 @@ export default function TimeEntryForm({
     notes: '',
     _status: 'new',
   });
-  const getSegmentKey = (segment) => segment?.id ?? segment?._localId ?? null;
   const [segments, setSegments] = useState(() => {
     if (initialDayType === 'paid_leave') return initialRows || [];
     if (initialRows && initialRows.length > 0) {
       return initialRows.map(row => ({
         ...row,
-        ...(row.id ? { id: row.id } : {}),
-        _localId: row._localId || row.id || crypto.randomUUID(),
         _status: row._status || 'existing',
       }));
     }
@@ -272,24 +268,23 @@ export default function TimeEntryForm({
   const isHalfDaySelection = leaveType === 'half_day' || isMixedHalfDay;
 
   const addSeg = () => setSegments(prev => [...prev, createSeg()]);
-  const duplicateSeg = (key) => {
+  const duplicateSeg = (index) => {
     setSegments(prev => {
-      const idx = prev.findIndex(s => getSegmentKey(s) === key);
-      if (idx === -1) return prev;
-      const { id: _omitId, _localId: _omitLocalId, _status: _omitStatus, ...rest } = prev[idx];
+      if (index < 0 || index >= prev.length) return prev;
+      const { id: _omitId, _status: _omitStatus, ...rest } = prev[index];
       const copy = {
         ...rest,
-        _localId: crypto.randomUUID(),
         _status: 'new',
       };
-      return [...prev.slice(0, idx + 1), copy, ...prev.slice(idx + 1)];
+      return [...prev.slice(0, index + 1), copy, ...prev.slice(index + 1)];
     });
   };
-  const deleteSeg = (key) => {
-    const target = segments.find(s => getSegmentKey(s) === key);
+  const deleteSeg = (index) => {
+    if (index < 0 || index >= segments.length) return;
+    const target = segments[index];
     if (!target) return;
     if (target._status === 'new') {
-      const res = removeSegment(segments, key);
+      const res = removeSegment(segments, index);
       if (res.removed) setSegments(res.rows);
       return;
     }
@@ -395,20 +390,35 @@ export default function TimeEntryForm({
       throw err;
     }
   };
-  const changeSeg = (key, patch) => setSegments(prev => prev.map(s => (getSegmentKey(s) === key ? { ...s, ...patch } : s)));
+  const changeSeg = (index, patch) => {
+    setSegments(prev => prev.map((segment, idx) => (
+      idx === index ? { ...segment, ...patch } : segment
+    )));
+  };
 
   const validate = () => {
     const err = {};
-    segments.filter(s => s._status !== 'deleted').forEach(s => {
-      const key = getSegmentKey(s);
-      if (!key) return;
+    segments.forEach((segment, index) => {
+      if (!segment || segment._status === 'deleted') {
+        return;
+      }
       if (isGlobal || isHourly) {
-        const h = parseFloat(s.hours);
-        if (!h || h <= 0) err[key] = 'שעות נדרשות וגדולות מ־0';
+        const h = parseFloat(segment.hours);
+        if (!h || h <= 0) {
+          err[index] = 'שעות נדרשות וגדולות מ־0';
+        }
       } else {
-        if (!s.service_id) err[key] = 'חסר שירות';
-        if (!(parseInt(s.sessions_count) >= 1)) err[key] = 'מספר שיעורים נדרש';
-        if (!(parseInt(s.students_count) >= 1)) err[key] = 'מספר תלמידים נדרש';
+        if (!segment.service_id) {
+          err[index] = 'חסר שירות';
+        } else {
+          const sessionsCount = parseInt(segment.sessions_count, 10);
+          const studentsCount = parseInt(segment.students_count, 10);
+          if (!(sessionsCount >= 1)) {
+            err[index] = 'מספר שיעורים נדרש';
+          } else if (!(studentsCount >= 1)) {
+            err[index] = 'מספר תלמידים נדרש';
+          }
+        }
       }
     });
     setErrors(err);
@@ -474,22 +484,29 @@ export default function TimeEntryForm({
         toast.error('יש לבחור סוג חופשה.', { duration: 15000 });
         return;
       }
-      const conflicts = segments.filter(s => {
-        if (s._status === 'deleted') return false;
-        if (s._status === 'existing') return true;
+      const conflicts = segments.reduce((list, segment, index) => {
+        if (!segment || segment._status === 'deleted') {
+          return list;
+        }
+        if (segment._status === 'existing') {
+          return [...list, { segment, index }];
+        }
         const hasData =
-          (s.hours && parseFloat(s.hours) > 0) ||
-          s.service_id ||
-          s.sessions_count ||
-          s.students_count;
-        return hasData;
-      });
+          (segment.hours && parseFloat(segment.hours) > 0) ||
+          segment.service_id ||
+          segment.sessions_count ||
+          segment.students_count;
+        if (hasData) {
+          return [...list, { segment, index }];
+        }
+        return list;
+      }, []);
       if (conflicts.length > 0) {
         const dateStr = format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy');
-        const details = conflicts.map(c => {
-          const hrs = c.hours ? `, ${c.hours} שעות` : '';
-          const identifier = c.id || getSegmentKey(c) || 'חדש';
-          return `${employee.name} ${dateStr}${hrs} (ID ${identifier})`;
+        const details = conflicts.map(({ segment, index }) => {
+          const hrs = segment.hours ? `, ${segment.hours} שעות` : '';
+          const identifier = segment.id ? `ID ${segment.id}` : `שורה ${index + 1}`;
+          return `${employee.name} ${dateStr}${hrs} (${identifier})`;
         }).join('\n');
         toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 10000 });
         return;
@@ -520,7 +537,6 @@ export default function TimeEntryForm({
     if (!validate()) return;
     const sanitizedRows = segments.map(segment => {
       const next = { ...segment };
-      delete next._localId;
       if (!segment.id) {
         delete next.id;
       }
@@ -651,18 +667,20 @@ export default function TimeEntryForm({
     : (isLeaveDay ? leaveSummary : baseSummary);
 
   const renderSegment = (seg, idx) => {
-    const segmentKeyValue = getSegmentKey(seg) || `segment-${idx}`;
+    if (!seg || seg._status === 'deleted') {
+      return null;
+    }
     if (isGlobal) {
       return (
         <GlobalSegment
-          key={segmentKeyValue}
           segment={seg}
+          index={idx}
           onChange={changeSeg}
           onDuplicate={duplicateSeg}
           onDelete={deleteSeg}
           isFirst={idx === 0}
           dailyRate={dailyRate}
-          error={errors[segmentKeyValue]}
+          error={errors[idx]}
           disabled={isLeaveDay}
         />
       );
@@ -671,31 +689,32 @@ export default function TimeEntryForm({
       const { rate } = getRateForDate(employee.id, selectedDate, null);
       return (
         <HourlySegment
-          key={segmentKeyValue}
           segment={seg}
+          index={idx}
           onChange={changeSeg}
           onDuplicate={duplicateSeg}
           onDelete={deleteSeg}
           rate={rate}
-          error={errors[segmentKeyValue]}
+          error={errors[idx]}
           disabled={isLeaveDay}
         />
       );
     }
     const { rate } = getRateForDate(employee.id, selectedDate, seg.service_id || null);
+    const errorValue = errors[idx];
     return (
       <InstructorSegment
-        key={segmentKeyValue}
         segment={seg}
+        index={idx}
         services={services}
         onChange={changeSeg}
         onDuplicate={duplicateSeg}
         onDelete={deleteSeg}
         rate={rate}
         errors={{
-          service: !seg.service_id && errors[segmentKeyValue],
-          sessions_count: errors[segmentKeyValue] && seg.service_id ? errors[segmentKeyValue] : null,
-          students_count: errors[segmentKeyValue] && seg.service_id ? errors[segmentKeyValue] : null,
+          service: !seg.service_id && errorValue,
+          sessions_count: errorValue && seg.service_id ? errorValue : null,
+          students_count: errorValue && seg.service_id ? errorValue : null,
         }}
         disabled={isLeaveDay}
       />
@@ -899,7 +918,7 @@ export default function TimeEntryForm({
     ? [{ id: 'paid_leave_notes' }]
     : dayType === 'adjustment'
       ? adjustments
-      : segments.filter(s => s._status !== 'deleted');
+      : segments;
 
   const segmentRenderer = dayType === 'paid_leave'
     ? renderPaidLeaveSegment

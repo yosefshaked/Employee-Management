@@ -27,11 +27,18 @@ export default function SingleDayEntryShell({
         />
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-28">
-        {segments.map((segment, index) => (
-          <React.Fragment key={segment?.id ?? segment?._localId ?? index}>
-            {renderSegment(segment, index)}
-          </React.Fragment>
-        ))}
+        {segments.map((segment, index) => {
+          const content = renderSegment(segment, index);
+          if (!content) {
+            return null;
+          }
+          const key = segment && segment.id ? segment.id : index;
+          return (
+            <React.Fragment key={key}>
+              {content}
+            </React.Fragment>
+          );
+        })}
         {onAddSegment && (
           <Button type="button" variant="outline" onClick={onAddSegment} className="self-start">
             {addLabel}

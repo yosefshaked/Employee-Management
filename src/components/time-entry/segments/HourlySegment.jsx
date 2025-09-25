@@ -6,8 +6,16 @@ import { Label } from '@/components/ui/label';
 import { Copy, Trash2 } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
-export default function HourlySegment({ segment, onChange, onDuplicate, onDelete, rate, error, disabled = false }) {
-  const segmentKey = segment.id ?? segment._localId;
+export default function HourlySegment({
+  segment,
+  index,
+  onChange,
+  onDuplicate,
+  onDelete,
+  rate,
+  error,
+  disabled = false,
+}) {
   const total = parseFloat(segment.hours || 0) * rate;
   return (
     <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5">
@@ -18,7 +26,7 @@ export default function HourlySegment({ segment, onChange, onDuplicate, onDelete
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => onDelete(segmentKey)}
+              onClick={() => onDelete(index)}
               aria-label="מחק רישום"
               className="h-7 w-7"
               disabled={disabled}
@@ -32,7 +40,7 @@ export default function HourlySegment({ segment, onChange, onDuplicate, onDelete
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => onDuplicate(segmentKey)}
+              onClick={() => onDuplicate(index)}
               aria-label="שכפל רישום"
               className="h-7 w-7"
               disabled={disabled}
@@ -49,7 +57,7 @@ export default function HourlySegment({ segment, onChange, onDuplicate, onDelete
             step="0.25"
             min="0"
             value={segment.hours}
-            onChange={e => onChange(segmentKey, { hours: e.target.value })}
+            onChange={e => onChange(index, { hours: e.target.value })}
             className="bg-white h-10 text-base leading-6"
             disabled={disabled}
           />
@@ -59,7 +67,7 @@ export default function HourlySegment({ segment, onChange, onDuplicate, onDelete
           <Label className="text-sm font-medium text-slate-700">הערות</Label>
           <Textarea
             value={segment.notes ?? ''}
-            onChange={e => onChange(segmentKey, { notes: e.target.value })}
+            onChange={e => onChange(index, { notes: e.target.value })}
             className="bg-white text-base leading-6"
             rows={2}
             maxLength={300}

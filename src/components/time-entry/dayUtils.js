@@ -2,46 +2,61 @@ export function applyDayType(rows, dayType) {
   return rows.map(r => ({ ...r, dayType }));
 }
 
-const segmentKey = (row) => row?.id ?? row?._localId ?? null;
+const resolveIndex = (rows, key) => {
+  if (typeof key === 'number' && Number.isInteger(key)) {
+    return key >= 0 && key < rows.length ? key : -1;
+  }
+  if (key == null) return -1;
+  return rows.findIndex(row => row?.id === key);
+};
 
 export function removeSegment(rows, key) {
   if (rows.length <= 1) {
     return { rows, removed: false };
   }
-  return { rows: rows.filter(r => segmentKey(r) !== key), removed: true };
+  const index = resolveIndex(rows, key);
+  if (index === -1) {
+    return { rows, removed: false };
+  }
+  return {
+    rows: [...rows.slice(0, index), ...rows.slice(index + 1)],
+    removed: true,
+  };
 }
 
 export function duplicateSegment(rows, key) {
-  const idx = rows.findIndex(r => segmentKey(r) === key);
-  if (idx === -1) return rows;
-  const { id: _omitId, _localId: _omitLocal, _status: _omitStatus, ...rest } = rows[idx];
+  const index = resolveIndex(rows, key);
+  if (index === -1) return rows;
+  const { id: _omitId, _status: _omitStatus, ...rest } = rows[index];
   const copy = {
     ...rest,
-    _localId: crypto.randomUUID(),
     _status: 'new',
   };
-  return [...rows.slice(0, idx + 1), copy, ...rows.slice(idx + 1)];
+  return [...rows.slice(0, index + 1), copy, ...rows.slice(index + 1)];
 }
 
 export function toggleDelete(rows, key) {
-  const active = rows.filter(r => r._status !== 'deleted');
-  const target = rows.find(r => segmentKey(r) === key);
-  if (!target) return { rows, changed: false };
+  const index = resolveIndex(rows, key);
+  if (index === -1) {
+    return { rows, changed: false };
+  }
+  const target = rows[index];
+  const activeCount = rows.reduce((count, row) => (row._status === 'deleted' ? count : count + 1), 0);
   if (target._status === 'deleted') {
     return {
-      rows: rows.map(r => (segmentKey(r) === key
-        ? { ...r, _status: r.id ? 'existing' : 'new' }
-        : r
+      rows: rows.map((row, idx) => (idx === index
+        ? { ...row, _status: row.id ? 'existing' : 'new' }
+        : row
       )),
-      changed: true
+      changed: true,
     };
   }
-  if (active.length <= 1) {
+  if (activeCount <= 1) {
     return { rows, changed: false };
   }
   return {
-    rows: rows.map(r => (segmentKey(r) === key ? { ...r, _status: 'deleted' } : r)),
-    changed: true
+    rows: rows.map((row, idx) => (idx === index ? { ...row, _status: 'deleted' } : row)),
+    changed: true,
   };
 }
 
