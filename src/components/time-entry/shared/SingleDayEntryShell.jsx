@@ -28,7 +28,7 @@ export default function SingleDayEntryShell({
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3 pb-28">
         {segments.map((segment, index) => (
-          <React.Fragment key={segment?.id ?? index}>
+          <React.Fragment key={segment?.id ?? segment?._localId ?? index}>
             {renderSegment(segment, index)}
           </React.Fragment>
         ))}

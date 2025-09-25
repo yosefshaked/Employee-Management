@@ -61,12 +61,27 @@ export default function TimeEntryForm({
   const isGlobal = employee.employee_type === 'global';
   const isHourly = employee.employee_type === 'hourly';
 
-  const createSeg = () => ({ id: crypto.randomUUID(), hours: '', service_id: '', sessions_count: '', students_count: '', notes: '', _status: 'new' });
+  const createSeg = () => ({
+    _localId: crypto.randomUUID(),
+    hours: '',
+    service_id: '',
+    sessions_count: '',
+    students_count: '',
+    notes: '',
+    _status: 'new',
+  });
+  const getSegmentKey = (segment) => segment?.id ?? segment?._localId ?? null;
   const [segments, setSegments] = useState(() => {
     if (initialDayType === 'paid_leave') return initialRows || [];
-    return initialRows && initialRows.length > 0
-      ? initialRows.map(r => ({ ...r, id: r.id || crypto.randomUUID(), _status: 'existing' }))
-      : [createSeg()];
+    if (initialRows && initialRows.length > 0) {
+      return initialRows.map(row => ({
+        ...row,
+        ...(row.id ? { id: row.id } : {}),
+        _localId: row._localId || row.id || crypto.randomUUID(),
+        _status: row._status || 'existing',
+      }));
+    }
+    return [createSeg()];
   });
   const createAdjustment = useCallback(() => ({
     id: crypto.randomUUID(),
@@ -257,18 +272,24 @@ export default function TimeEntryForm({
   const isHalfDaySelection = leaveType === 'half_day' || isMixedHalfDay;
 
   const addSeg = () => setSegments(prev => [...prev, createSeg()]);
-  const duplicateSeg = (id) => {
+  const duplicateSeg = (key) => {
     setSegments(prev => {
-      const idx = prev.findIndex(s => s.id === id);
-      const copy = { ...prev[idx], id: crypto.randomUUID(), _status: 'new' };
+      const idx = prev.findIndex(s => getSegmentKey(s) === key);
+      if (idx === -1) return prev;
+      const { id: _omitId, _localId: _omitLocalId, _status: _omitStatus, ...rest } = prev[idx];
+      const copy = {
+        ...rest,
+        _localId: crypto.randomUUID(),
+        _status: 'new',
+      };
       return [...prev.slice(0, idx + 1), copy, ...prev.slice(idx + 1)];
     });
   };
-  const deleteSeg = (id) => {
-    const target = segments.find(s => s.id === id);
+  const deleteSeg = (key) => {
+    const target = segments.find(s => getSegmentKey(s) === key);
     if (!target) return;
     if (target._status === 'new') {
-      const res = removeSegment(segments, id);
+      const res = removeSegment(segments, key);
       if (res.removed) setSegments(res.rows);
       return;
     }
@@ -279,7 +300,7 @@ export default function TimeEntryForm({
       hours: isHourly || isGlobal ? target.hours : null,
       meetings: isHourly || isGlobal ? null : target.sessions_count
     };
-    setPendingDelete({ id, summary, kind: 'segment' });
+    setPendingDelete({ id: target.id, summary, kind: 'segment' });
   };
   const addAdjustment = () => setAdjustments(prev => [...prev, createAdjustment()]);
   const updateAdjustment = (id, patch) => {
@@ -374,18 +395,20 @@ export default function TimeEntryForm({
       throw err;
     }
   };
-  const changeSeg = (id, patch) => setSegments(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
+  const changeSeg = (key, patch) => setSegments(prev => prev.map(s => (getSegmentKey(s) === key ? { ...s, ...patch } : s)));
 
   const validate = () => {
     const err = {};
     segments.filter(s => s._status !== 'deleted').forEach(s => {
+      const key = getSegmentKey(s);
+      if (!key) return;
       if (isGlobal || isHourly) {
         const h = parseFloat(s.hours);
-        if (!h || h <= 0) err[s.id] = 'שעות נדרשות וגדולות מ־0';
+        if (!h || h <= 0) err[key] = 'שעות נדרשות וגדולות מ־0';
       } else {
-        if (!s.service_id) err[s.id] = 'חסר שירות';
-        if (!(parseInt(s.sessions_count) >= 1)) err[s.id] = 'מספר שיעורים נדרש';
-        if (!(parseInt(s.students_count) >= 1)) err[s.id] = 'מספר תלמידים נדרש';
+        if (!s.service_id) err[key] = 'חסר שירות';
+        if (!(parseInt(s.sessions_count) >= 1)) err[key] = 'מספר שיעורים נדרש';
+        if (!(parseInt(s.students_count) >= 1)) err[key] = 'מספר תלמידים נדרש';
       }
     });
     setErrors(err);
@@ -465,7 +488,8 @@ export default function TimeEntryForm({
         const dateStr = format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy');
         const details = conflicts.map(c => {
           const hrs = c.hours ? `, ${c.hours} שעות` : '';
-          return `${employee.name} ${dateStr}${hrs} (ID ${c.id})`;
+          const identifier = c.id || getSegmentKey(c) || 'חדש';
+          return `${employee.name} ${dateStr}${hrs} (ID ${identifier})`;
         }).join('\n');
         toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 10000 });
         return;
@@ -494,7 +518,15 @@ export default function TimeEntryForm({
       return;
     }
     if (!validate()) return;
-    onSubmit({ rows: segments, dayType, paidLeaveId: currentPaidLeaveId, leaveType: null });
+    const sanitizedRows = segments.map(segment => {
+      const next = { ...segment };
+      delete next._localId;
+      if (!segment.id) {
+        delete next.id;
+      }
+      return next;
+    });
+    onSubmit({ rows: sanitizedRows, dayType, paidLeaveId: currentPaidLeaveId, leaveType: null });
   };
 
   const baseSummary = useMemo(() => {
@@ -619,17 +651,18 @@ export default function TimeEntryForm({
     : (isLeaveDay ? leaveSummary : baseSummary);
 
   const renderSegment = (seg, idx) => {
+    const segmentKeyValue = getSegmentKey(seg) || `segment-${idx}`;
     if (isGlobal) {
       return (
         <GlobalSegment
-          key={seg.id}
+          key={segmentKeyValue}
           segment={seg}
           onChange={changeSeg}
           onDuplicate={duplicateSeg}
           onDelete={deleteSeg}
           isFirst={idx === 0}
           dailyRate={dailyRate}
-          error={errors[seg.id]}
+          error={errors[segmentKeyValue]}
           disabled={isLeaveDay}
         />
       );
@@ -638,13 +671,13 @@ export default function TimeEntryForm({
       const { rate } = getRateForDate(employee.id, selectedDate, null);
       return (
         <HourlySegment
-          key={seg.id}
+          key={segmentKeyValue}
           segment={seg}
           onChange={changeSeg}
           onDuplicate={duplicateSeg}
           onDelete={deleteSeg}
           rate={rate}
-          error={errors[seg.id]}
+          error={errors[segmentKeyValue]}
           disabled={isLeaveDay}
         />
       );
@@ -652,14 +685,18 @@ export default function TimeEntryForm({
     const { rate } = getRateForDate(employee.id, selectedDate, seg.service_id || null);
     return (
       <InstructorSegment
-        key={seg.id}
+        key={segmentKeyValue}
         segment={seg}
         services={services}
         onChange={changeSeg}
         onDuplicate={duplicateSeg}
         onDelete={deleteSeg}
         rate={rate}
-        errors={{ service: !seg.service_id && errors[seg.id], sessions_count: errors[seg.id] && seg.service_id ? errors[seg.id] : null, students_count: errors[seg.id] && seg.service_id ? errors[seg.id] : null }}
+        errors={{
+          service: !seg.service_id && errors[segmentKeyValue],
+          sessions_count: errors[segmentKeyValue] && seg.service_id ? errors[segmentKeyValue] : null,
+          students_count: errors[segmentKeyValue] && seg.service_id ? errors[segmentKeyValue] : null,
+        }}
         disabled={isLeaveDay}
       />
     );
