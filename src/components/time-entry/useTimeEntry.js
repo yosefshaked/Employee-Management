@@ -1,4 +1,6 @@
+import { format } from 'date-fns';
 import { createWorkSessions, updateWorkSession } from '@/api/work-sessions.js';
+import { hasDuplicateSession } from '@/lib/workSessionsUtils.js';
 import { calculateGlobalDailyRate } from '../../lib/payroll.js';
 import {
   getEntryTypeForLeaveKind,
@@ -239,6 +241,221 @@ export function useTimeEntry({
     return { inserted: inserts, conflicts: leaveConflicts };
   };
 
+  const saveWorkDay = async (input = {}) => {
+    ensureApiPrerequisites();
+
+    const {
+      employee = null,
+      segments = [],
+      day = null,
+      date = null,
+      dayType = null,
+      paidLeaveId = null,
+      source = 'table',
+    } = input || {};
+
+    if (!employee || !employee.id) {
+      throw new Error('נדרש לבחור עובד לשמירת היום.');
+    }
+
+    const normalizedDate = typeof date === 'string' && date
+      ? date
+      : (day instanceof Date && !Number.isNaN(day.getTime())
+        ? format(day, 'yyyy-MM-dd')
+        : null);
+
+    if (!normalizedDate) {
+      throw new Error('נדרש תאריך תקין לשמירת היום.');
+    }
+
+    const dayReference = day instanceof Date && !Number.isNaN(day.getTime())
+      ? day
+      : new Date(`${normalizedDate}T00:00:00`);
+
+    if (Number.isNaN(dayReference.getTime())) {
+      throw new Error('נדרש תאריך תקין לשמירת היום.');
+    }
+
+    const segmentList = Array.isArray(segments) ? segments.map(item => ({ ...item })) : [];
+
+    if (!segmentList.length) {
+      throw new Error('אין רישומי עבודה לשמירה.');
+    }
+
+    if (paidLeaveId && segmentList.length > 0 && !segmentList[0].id) {
+      segmentList[0].id = paidLeaveId;
+    }
+
+    const conflictingLeaveSessions = Array.isArray(workSessions)
+      ? workSessions.filter(ws =>
+        ws &&
+        ws.employee_id === employee.id &&
+        ws.date === normalizedDate &&
+        isLeaveEntryType(ws.entry_type) &&
+        !segmentList.some(segment => segment.id && segment.id === ws.id),
+      )
+      : [];
+
+    if (conflictingLeaveSessions.length > 0) {
+      const error = new Error('לא ניתן להוסיף שעות בתאריך שכבר הוזנה בו חופשה.');
+      error.code = 'TIME_ENTRY_LEAVE_CONFLICT';
+      error.conflicts = conflictingLeaveSessions;
+      throw error;
+    }
+
+    const canWriteMetadata = await resolveCanWriteMetadata();
+
+    const toInsert = [];
+    const toUpdate = [];
+
+    for (const segment of segmentList) {
+      const hoursValue = segment.hours !== undefined && segment.hours !== null
+        ? parseFloat(segment.hours)
+        : NaN;
+      const isHourly = employee.employee_type === 'hourly';
+      const isGlobal = employee.employee_type === 'global';
+      const isHourlyOrGlobal = isHourly || isGlobal;
+
+      if (isHourly) {
+        if (!Number.isFinite(hoursValue) || hoursValue <= 0) {
+          throw new Error('יש להזין מספר שעות גדול מ-0.');
+        }
+      }
+
+      if (isGlobal) {
+        if (!dayType) {
+          throw new Error('יש לבחור סוג יום.');
+        }
+        if ((segment._status === 'new' || !segment.id) && (!Number.isFinite(hoursValue) || hoursValue <= 0)) {
+          throw new Error('יש להזין מספר שעות גדול מ-0.');
+        }
+      }
+
+      const serviceId = isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : segment.service_id;
+      const { rate: rateUsed, reason } = getRateForDate(
+        employee.id,
+        dayReference,
+        serviceId,
+      );
+      if (!rateUsed) {
+        const error = new Error(reason || 'לא הוגדר תעריף עבור תאריך זה.');
+        error.code = 'TIME_ENTRY_RATE_MISSING';
+        throw error;
+      }
+
+      const legacyPaidLeave = segment.entry_type === 'paid_leave' && !isGlobal;
+      const notes = legacyPaidLeave
+        ? (segment.notes ? `${segment.notes} (סומן בעבר כחופשה)` : 'סומן בעבר כחופשה')
+        : (segment.notes || null);
+
+      let totalPayment = 0;
+
+      if (isHourly) {
+        totalPayment = (Number.isFinite(hoursValue) ? hoursValue : 0) * rateUsed;
+      } else if (isGlobal) {
+        try {
+          totalPayment = calculateGlobalDailyRate(employee, dayReference, rateUsed);
+        } catch (error) {
+          error.code = error.code || 'TIME_ENTRY_GLOBAL_RATE_FAILED';
+          throw error;
+        }
+      } else {
+        const service = services.find(svc => svc.id === segment.service_id);
+        if (!service) {
+          const error = new Error('נדרש לבחור שירות עבור מדריך.');
+          error.code = 'TIME_ENTRY_SERVICE_REQUIRED';
+          throw error;
+        }
+        const sessionsCount = parseInt(segment.sessions_count, 10) || 1;
+        const studentsCount = parseInt(segment.students_count, 10) || 0;
+        if (service.payment_model === 'per_student') {
+          totalPayment = sessionsCount * studentsCount * rateUsed;
+        } else {
+          totalPayment = sessionsCount * rateUsed;
+        }
+      }
+
+      const payloadBase = {
+        employee_id: employee.id,
+        date: normalizedDate,
+        notes,
+        rate_used: rateUsed,
+        total_payment: totalPayment,
+      };
+
+      if (isHourly) {
+        payloadBase.entry_type = 'hours';
+        payloadBase.hours = Number.isFinite(hoursValue) ? hoursValue : 0;
+        payloadBase.service_id = GENERIC_RATE_SERVICE_ID;
+        payloadBase.sessions_count = null;
+        payloadBase.students_count = null;
+      } else if (isGlobal) {
+        payloadBase.entry_type = 'hours';
+        payloadBase.hours = Number.isFinite(hoursValue) ? hoursValue : null;
+        payloadBase.service_id = null;
+        payloadBase.sessions_count = null;
+        payloadBase.students_count = null;
+      } else {
+        payloadBase.entry_type = 'session';
+        payloadBase.service_id = segment.service_id;
+        payloadBase.sessions_count = parseInt(segment.sessions_count, 10) || 1;
+        payloadBase.students_count = parseInt(segment.students_count, 10) || null;
+      }
+
+      if (hasDuplicateSession(Array.isArray(workSessions) ? workSessions : [], {
+        ...payloadBase,
+        id: segment.id || null,
+      })) {
+        const error = new Error('רישום זה כבר קיים.');
+        error.code = 'TIME_ENTRY_DUPLICATE';
+        throw error;
+      }
+
+      if (canWriteMetadata) {
+        const metadata = buildSourceMetadata(source);
+        if (metadata) {
+          payloadBase.metadata = metadata;
+        }
+      }
+
+      if (segment.id) {
+        toUpdate.push({ id: segment.id, updates: payloadBase });
+      } else {
+        toInsert.push(payloadBase);
+      }
+    }
+
+    if (!toInsert.length && !toUpdate.length) {
+      throw new Error('אין שינויים לשמירה.');
+    }
+
+    if (toInsert.length) {
+      await createWorkSessions({
+        session,
+        orgId,
+        sessions: toInsert,
+      });
+    }
+
+    if (toUpdate.length) {
+      await Promise.all(
+        toUpdate.map(({ id, updates }) => updateWorkSession({
+          session,
+          orgId,
+          sessionId: id,
+          body: { updates },
+        })),
+      );
+    }
+
+    return {
+      insertedCount: toInsert.length,
+      updatedCount: toUpdate.length,
+      inserted: toInsert,
+      updated: toUpdate,
+    };
+  };
+
   const saveMixedLeave = async (entries = [], options = {}) => {
     ensureApiPrerequisites();
     const { leaveType = 'mixed' } = options;
@@ -468,6 +685,7 @@ export function useTimeEntry({
 
   return {
     saveRows,
+    saveWorkDay,
     saveMixedLeave,
     saveAdjustments,
   };
