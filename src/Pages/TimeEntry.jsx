@@ -871,6 +871,7 @@ export default function TimeEntry() {
                 workSessions={tabbedSessions[tab.value] || []}
                 allWorkSessions={workSessions}
                 services={services}
+                rateHistories={rateHistories}
                 getRateForDate={getRateForDate}
                 onTableSubmit={handleTableSubmit}
                 onImported={() => loadInitialData()}
