@@ -360,11 +360,11 @@ export default async function (context, req) {
       .order('name', { ascending: true });
 
     if (error) {
-      context.log?.error?.('services fetch failed', { message: error.message });
+      context.log?.error?.('services fetch failed', { message: error?.message });
       return respond(context, 500, { message: 'failed_to_fetch_services' });
     }
 
-    return respond(context, 200, { services: data || [] });
+    return respond(context, 200, { services: data ?? [] });
   }
 
   if (method === 'POST') {
