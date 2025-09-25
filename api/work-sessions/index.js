@@ -449,20 +449,46 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid session id' });
     }
 
+    const isRestore = body && typeof body === 'object' && body.restore === true;
+
+    if (isRestore) {
+      const { error, data } = await tenantClient
+        .from('WorkSessions')
+        .update({ deleted: false, deleted_at: null })
+        .eq('id', sessionId)
+        .select('id');
+
+      if (error) {
+        context.log?.error?.('work-sessions restore failed', { message: error.message, sessionId });
+        return respond(context, 500, { message: 'failed_to_restore_session' });
+      }
+
+      if (!data || data.length === 0) {
+        return respond(context, 404, { message: 'session_not_found' });
+      }
+
+      return respond(context, 200, { restored: true });
+    }
+
     const updates = normalizeSessionUpdates(body.updates || body.session || body.workSession || body.data);
 
     if (!updates) {
       return respond(context, 400, { message: 'invalid session payload' });
     }
 
-    const { error } = await tenantClient
+    const { error, data } = await tenantClient
       .from('WorkSessions')
       .update(updates)
-      .eq('id', sessionId);
+      .eq('id', sessionId)
+      .select('id');
 
     if (error) {
       context.log?.error?.('work-sessions update failed', { message: error.message, sessionId });
       return respond(context, 500, { message: 'failed_to_update_session' });
+    }
+
+    if (!data || data.length === 0) {
+      return respond(context, 404, { message: 'session_not_found' });
     }
 
     return respond(context, 200, { updated: true });
@@ -474,17 +500,19 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid session id' });
     }
 
-    const { error, count } = await tenantClient
+    const timestamp = new Date().toISOString();
+    const { error, data } = await tenantClient
       .from('WorkSessions')
-      .delete({ count: 'exact' })
-      .eq('id', sessionId);
+      .update({ deleted: true, deleted_at: timestamp })
+      .eq('id', sessionId)
+      .select('id');
 
     if (error) {
-      context.log?.error?.('work-sessions delete failed', { message: error.message, sessionId });
+      context.log?.error?.('work-sessions soft delete failed', { message: error.message, sessionId });
       return respond(context, 500, { message: 'failed_to_delete_session' });
     }
 
-    if (!count) {
+    if (!data || data.length === 0) {
       return respond(context, 404, { message: 'session_not_found' });
     }
 

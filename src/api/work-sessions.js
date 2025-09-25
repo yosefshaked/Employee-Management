@@ -98,3 +98,14 @@ export function deleteWorkSession(options = {}) {
   }
   return workSessionsRequest('DELETE', options);
 }
+
+export function restoreWorkSession(options = {}) {
+  if (!options.sessionId && !options?.body?.session_id && !options?.body?.id) {
+    throw new Error('נדרש מזהה רישום לשחזור.');
+  }
+  const normalizedOptions = {
+    ...options,
+    body: { restore: true },
+  };
+  return workSessionsRequest('PATCH', normalizedOptions);
+}

@@ -11,8 +11,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
 import {
   fetchWorkSessions,
-  updateWorkSession,
-  deleteWorkSession,
 } from '@/api/work-sessions.js';
 import {
   createLeaveBalanceEntry,
@@ -365,37 +363,32 @@ export default function TimeEntry() {
     [],
   );
 
-  const handleTrashRestore = async (ids) => {
+  const handleTrashRestore = async (ids, { restoredSessions = [] } = {}) => {
     const idsArray = Array.isArray(ids) ? ids : [ids];
     const normalized = Array.from(new Set(idsArray.map(String)));
     if (!normalized.length) return;
+
     try {
       ensureSessionAndOrg();
-      const sessionsToRestore = trashSessions.filter(item => normalized.includes(String(item.id)));
-      await Promise.all(
-        normalized.map(sessionId => updateWorkSession({
-          session,
-          orgId: activeOrgId,
-          sessionId,
-          body: { updates: { deleted: false, deleted_at: null } },
-        })),
-      );
-      const ledgerEntries = sessionsToRestore
-        .map(buildLedgerEntryFromSession)
-        .filter(Boolean);
-      if (ledgerEntries.length) {
-        await createLeaveBalanceEntry({
-          session,
-          orgId: activeOrgId,
-          entries: ledgerEntries,
-        });
+
+      if (restoredSessions.length) {
+        const ledgerEntries = restoredSessions
+          .map(buildLedgerEntryFromSession)
+          .filter(Boolean);
+        if (ledgerEntries.length) {
+          await createLeaveBalanceEntry({
+            session,
+            orgId: activeOrgId,
+            entries: ledgerEntries,
+          });
+        }
       }
-      toast.success(normalized.length === 1 ? 'הרישום שוחזר.' : 'הרישומים שוחזרו.');
+
       setTrashSessions(prev => prev.filter(item => !normalized.includes(String(item.id))));
       await loadInitialData({ silent: true });
     } catch (error) {
-      console.error('Error restoring sessions:', error);
-      toast.error('שחזור נכשל, נסו שוב.');
+      console.error('Error finalizing restore:', error);
+      toast.error('שחזור נכשל בעת עיבוד נתונים נוספים.');
       throw error;
     }
   };
@@ -404,22 +397,12 @@ export default function TimeEntry() {
     const idsArray = Array.isArray(ids) ? ids : [ids];
     const normalized = Array.from(new Set(idsArray.map(String)));
     if (!normalized.length) return;
+
     try {
-      ensureSessionAndOrg();
-      await Promise.all(
-        normalized.map(sessionId => deleteWorkSession({
-          session,
-          orgId: activeOrgId,
-          sessionId,
-        })),
-      );
-      toast.success(normalized.length === 1 ? 'הרישום נמחק לצמיתות.' : 'הרישומים נמחקו לצמיתות.');
       setTrashSessions(prev => prev.filter(item => !normalized.includes(String(item.id))));
       await loadInitialData({ silent: true });
     } catch (error) {
-      console.error('Error permanently deleting sessions:', error);
-      toast.error('מחיקה לצמיתות נכשלה, נסו שוב.');
-      throw error;
+      console.error('Error refreshing after permanent delete:', error);
     }
   };
 
