@@ -186,8 +186,10 @@ export default function Reports() {
     const adjustmentsTotal = adjustmentsAccumulator.total;
     const adjustmentsByEmployee = adjustmentsAccumulator.byEmployee;
 
-    const previousAdjustmentsTotal = toNumber(res?.diagnostics?.adjustmentsSum ?? 0);
-    const correctedTotalPay = (toNumber(res.totalPay) - previousAdjustmentsTotal) + adjustmentsTotal;
+    const correctedTotalPay = adjustedSessions.reduce((sum, session) => {
+      if (!session) return sum;
+      return sum + toNumber(session.total_payment);
+    }, 0);
 
     const updatedTotalsByEmployee = Array.isArray(res.totalsByEmployee)
       ? res.totalsByEmployee.map(entry => {
@@ -403,7 +405,7 @@ export default function Reports() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
             <CardContent className="p-6 flex items-center gap-4 relative">
-              <div className="absolute left-4 top-4"><InfoTooltip text={"סה\"כ תשלום הוא הסכום הכולל ששולם לכל העובדים בתקופת הדוח.\nהסכום מחושב לפי תעריף העובד וסוג העבודה (שעות או מפגשים)."} /></div>
+              <div className="absolute left-4 top-4"><InfoTooltip text={"סה\"כ תשלום הוא הסכום הכולל שישולם לכל העובדים בתקופת הדוח.\nהסכום כולל תשלומים עבור שעות עבודה, מפגשים, וגם התאמות (זיכויים או ניכויים)."} /></div>
               <div className="p-3 bg-green-100 rounded-lg"><BarChart3 className="w-6 h-6 text-green-600" /></div>
               <div><p className="text-sm text-slate-600">סה״כ תשלום</p><p className="text-2xl font-bold text-slate-900">₪{totals.totalPay.toLocaleString()}</p></div>
             </CardContent>
