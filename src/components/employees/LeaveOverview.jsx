@@ -24,6 +24,7 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { updateEmployee } from '@/api/employees.js';
 import { createLeaveBalanceEntry } from '@/api/leave-balances.js';
+import { createWorkSessions, deleteWorkSession } from '@/api/work-sessions.js';
 import { selectLeaveRemaining, selectHolidayForDate } from '@/selectors.js';
 import {
   DEFAULT_LEAVE_POLICY,
@@ -35,8 +36,11 @@ import {
   LEAVE_PAY_METHOD_LABELS,
   getLeaveBaseKind,
   getNegativeBalanceFloor,
+  getEntryTypeForLeaveKind,
+  isPayableLeaveKind,
   resolveLeavePayMethodContext,
 } from '@/lib/leave.js';
+import { buildLeaveMetadata } from '@/lib/workSessionsMetadata.js';
 
 const EMPLOYEE_PLACEHOLDER_VALUE = '__employee_placeholder__';
 const OVERRIDE_METHOD_PLACEHOLDER_VALUE = '__no_override__';
@@ -208,6 +212,7 @@ export default function LeaveOverview({
       }
     }
     setIsSubmitting(true);
+    let createdWorkSessionId = null;
     try {
       if (!session) {
         throw new Error('יש להתחבר מחדש לפני שמירת רישום החופשה.');
@@ -215,18 +220,85 @@ export default function LeaveOverview({
       if (!activeOrgId) {
         throw new Error('בחרו ארגון פעיל לפני שמירת רישום החופשה.');
       }
+
+      const normalizedNotes = typeof formState.notes === 'string' ? formState.notes.trim() : '';
+      const notesValue = normalizedNotes ? normalizedNotes : null;
+
       const payload = {
         employee_id: employee.id,
         effective_date: date,
         balance: delta,
         leave_type: ledgerType,
-        notes: formState.notes ? formState.notes.trim() : null,
+        notes: notesValue,
       };
+
+      const shouldCreateWorkSession = entryKind === 'usage';
+
+      const buildWorkSessionPayload = () => {
+        if (!shouldCreateWorkSession) {
+          return null;
+        }
+        const leaveType = formState.holidayType || 'employee_paid';
+        const baseLeaveKind = getLeaveBaseKind(leaveType) || leaveType;
+        const entryType = getEntryTypeForLeaveKind(baseLeaveKind)
+          || getEntryTypeForLeaveKind('system_paid')
+          || 'leave';
+        const payable = isPayableLeaveKind(baseLeaveKind);
+        let fraction = Math.abs(delta);
+        if (!Number.isFinite(fraction) || fraction <= 0) {
+          fraction = baseLeaveKind === 'half_day' ? 0.5 : 1;
+        }
+        const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
+        const metadata = buildLeaveMetadata({
+          source: 'employees_leave_overview',
+          leaveType: baseLeaveKind,
+          leaveKind: baseLeaveKind,
+          payable,
+          fraction: payable ? fraction : null,
+          halfDay: baseLeaveKind === 'half_day',
+          method: payContext.method,
+          lookbackMonths: payContext.lookback_months,
+          legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
+          overrideApplied: payContext.override_applied,
+        });
+        const workSession = {
+          employee_id: employee.id,
+          date,
+          entry_type: entryType,
+          hours: 0,
+          service_id: null,
+          sessions_count: null,
+          students_count: null,
+          payable,
+          rate_used: null,
+          total_payment: null,
+          notes: notesValue,
+        };
+        if (metadata) {
+          workSession.metadata = metadata;
+        }
+        return workSession;
+      };
+
+      const workSessionPayload = buildWorkSessionPayload();
+
+      if (workSessionPayload) {
+        const creationResult = await createWorkSessions({
+          session,
+          orgId: activeOrgId,
+          sessions: [workSessionPayload],
+        });
+        createdWorkSessionId = Array.isArray(creationResult?.created)
+          ? creationResult.created[0] || null
+          : null;
+      }
+
       await createLeaveBalanceEntry({
         session,
         orgId: activeOrgId,
         body: payload,
       });
+
       toast.success('הרישום נשמר בהצלחה');
       if (onRefresh) await onRefresh();
       setFormState(prev => ({
@@ -237,6 +309,17 @@ export default function LeaveOverview({
         usageAmount: prev.entryKind === 'usage' ? prev.usageAmount : 1,
       }));
     } catch (error) {
+      if (createdWorkSessionId) {
+        try {
+          await deleteWorkSession({
+            session,
+            orgId: activeOrgId,
+            sessionId: createdWorkSessionId,
+          });
+        } catch (rollbackError) {
+          console.error('Failed to roll back work session creation', rollbackError);
+        }
+      }
       console.error('Error saving leave entry', error);
       toast.error(error?.message || 'שמירת הרישום נכשלה');
     } finally {
