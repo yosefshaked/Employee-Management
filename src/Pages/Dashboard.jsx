@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
 import { fetchEmployeesList } from '@/api/employees.js';
+import { fetchWorkSessions } from '@/api/work-sessions.js';
+import { getServices } from '@/api/services.js';
 import QuickStats from '../components/dashboard/QuickStats';
 import MonthlyCalendar from '../components/dashboard/MonthlyCalendar';
 import RecentActivity from '../components/dashboard/RecentActivity';
@@ -33,18 +35,25 @@ export default function Dashboard() {
       const employeeRecords = Array.isArray(bundle?.employees) ? bundle.employees : [];
       setEmployees(employeeRecords.filter((emp) => emp?.is_active !== false));
 
-      const [sessionsData, servicesData, leavePayPolicySettings] = await Promise.all([
-        // === התיקון הסופי והנכון באמת: מיון לפי created_at ===
-        dataClient.from('WorkSessions').select('*').eq('deleted', false).order('created_at', { ascending: false }),
-        dataClient.from('Services').select('*'),
+      const [sessionsResponse, servicesResponse, leavePayPolicySettings] = await Promise.all([
+        fetchWorkSessions({ session, orgId: activeOrgId }),
+        getServices({ session, orgId: activeOrgId }),
         fetchLeavePayPolicySettings({ session, orgId: activeOrgId }),
       ]);
 
-      if (sessionsData.error) throw sessionsData.error;
-      if (servicesData.error) throw servicesData.error;
-      const safeSessions = (sessionsData.data || []).filter(session => !session?.deleted);
+      const safeSessions = Array.isArray(sessionsResponse?.sessions)
+        ? sessionsResponse.sessions.filter((item) => !item?.deleted)
+        : [];
+      safeSessions.sort((a, b) => {
+        const createdA = a?.created_at ? new Date(a.created_at).getTime() : 0;
+        const createdB = b?.created_at ? new Date(b.created_at).getTime() : 0;
+        return createdB - createdA;
+      });
       setWorkSessions(safeSessions);
-      const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
+
+      const filteredServices = Array.isArray(servicesResponse?.services)
+        ? servicesResponse.services.filter((service) => service.id !== GENERIC_RATE_SERVICE_ID)
+        : [];
       setServices(filteredServices);
       setLeavePayPolicy(
         leavePayPolicySettings.value
@@ -61,7 +70,7 @@ export default function Dashboard() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // אנחנו כבר לא צריכים למיין בצד הלקוח, ה-DB עושה את זה
+  // הרשומות מסודרות כברירת מחדל לפי created_at כשהן נטענות
   const recentSessions = (workSessions || []).slice(0, 5);
 
   if (loading || !authClient) {
