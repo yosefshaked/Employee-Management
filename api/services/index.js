@@ -373,8 +373,6 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid service payload' });
     }
 
-    payload.org_id = orgId;
-
     const { data, error } = await tenantClient
       .from('Services')
       .insert(payload)
@@ -410,8 +408,7 @@ export default async function (context, req) {
     const { error } = await tenantClient
       .from('Services')
       .update(updates)
-      .eq('id', serviceId)
-      .eq('org_id', orgId);
+      .eq('id', serviceId);
 
     if (error) {
       context.log?.error?.('services update failed', { message: error.message, serviceId });
@@ -430,8 +427,7 @@ export default async function (context, req) {
     const { error, count } = await tenantClient
       .from('Services')
       .delete({ count: 'exact' })
-      .eq('id', serviceId)
-      .eq('org_id', orgId);
+      .eq('id', serviceId);
 
     if (error) {
       context.log?.error?.('services delete failed', { message: error.message, serviceId });
