@@ -7,6 +7,15 @@ function normalizeOrgId(orgId) {
   return orgId.trim();
 }
 
+function normalizeEntries(entries) {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+  return entries
+    .filter(entry => entry && typeof entry === 'object')
+    .map(entry => ({ ...entry }));
+}
+
 async function leaveBalancesRequest(method, { session, orgId, body, signal, leaveBalanceId } = {}) {
   if (!session) {
     throw new Error('נדרש להתחבר מחדש כדי לעדכן יתרות חופשה.');
@@ -46,7 +55,16 @@ async function leaveBalancesRequest(method, { session, orgId, body, signal, leav
   }
 }
 
-export function createLeaveBalanceEntry({ body, ...options } = {}) {
+export function createLeaveBalanceEntry({ body, entries, ...options } = {}) {
+  const normalizedEntries = normalizeEntries(entries);
+
+  if (normalizedEntries.length > 0) {
+    return leaveBalancesRequest('POST', {
+      ...options,
+      body: { entries: normalizedEntries },
+    });
+  }
+
   if (!body || typeof body !== 'object') {
     throw new Error('חסר מידע רישום לשמירת החופשה.');
   }
@@ -54,5 +72,20 @@ export function createLeaveBalanceEntry({ body, ...options } = {}) {
   return leaveBalancesRequest('POST', {
     ...options,
     body: { entry: body },
+  });
+}
+
+export function deleteLeaveBalanceEntries({ ids, ...options } = {}) {
+  const normalized = Array.isArray(ids)
+    ? ids.map(id => (typeof id === 'string' || typeof id === 'number') ? String(id) : null).filter(Boolean)
+    : [];
+
+  if (!normalized.length) {
+    throw new Error('אין רשומות חופשה למחיקה.');
+  }
+
+  return leaveBalancesRequest('DELETE', {
+    ...options,
+    body: { ids: normalized },
   });
 }

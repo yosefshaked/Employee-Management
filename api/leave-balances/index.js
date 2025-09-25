@@ -381,5 +381,29 @@ export default async function (context, req) {
     return respond(context, 201, { entries: insertResult.data || [] });
   }
 
-  return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'POST' });
+  if (method === 'DELETE') {
+    const ids = Array.isArray(body.ids)
+      ? body.ids
+        .map((id) => (typeof id === 'string' || typeof id === 'number') ? String(id) : null)
+        .filter(Boolean)
+      : [];
+
+    if (!ids.length) {
+      return respond(context, 400, { message: 'invalid leave balance payload' });
+    }
+
+    const deleteResult = await tenantClient
+      .from('LeaveBalances')
+      .delete({ count: 'exact' })
+      .in('id', ids);
+
+    if (deleteResult.error) {
+      context.log?.error?.('leave-balances delete failed', { message: deleteResult.error.message });
+      return respond(context, 500, { message: 'failed_to_delete_leave_balance' });
+    }
+
+    return respond(context, 200, { deleted: deleteResult.count || 0 });
+  }
+
+  return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'POST,DELETE' });
 }

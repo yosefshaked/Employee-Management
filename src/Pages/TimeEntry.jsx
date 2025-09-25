@@ -11,7 +11,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { hasDuplicateSession } from '@/lib/workSessionsUtils.js';
-import { restoreWorkSessions, permanentlyDeleteWorkSessions } from '@/api/workSessions.js';
+import {
+  createWorkSessions,
+  updateWorkSession,
+  deleteWorkSession,
+} from '@/api/work-sessions.js';
+import {
+  createLeaveBalanceEntry,
+  deleteLeaveBalanceEntries,
+} from '@/api/leave-balances.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import {
   DEFAULT_LEAVE_POLICY,
@@ -28,6 +36,7 @@ import {
   getLeaveLedgerEntryType,
   getLeaveBaseKind,
   getLeaveSubtypeFromValue,
+  inferLeaveType,
   resolveLeavePayMethodContext,
   normalizeMixedSubtype,
   DEFAULT_MIXED_SUBTYPE,
@@ -75,6 +84,31 @@ const sortLeaveLedger = (entries = []) => {
   return [...entries].sort((a, b) => getLedgerTimestamp(a) - getLedgerTimestamp(b));
 };
 
+const buildLedgerEntryFromSession = (session) => {
+  if (!session || !isLeaveEntryType(session.entry_type)) {
+    return null;
+  }
+  if (!session.employee_id || !session.date) {
+    return null;
+  }
+  const inferredType = inferLeaveType(session);
+  const baseKind = getLeaveBaseKind(inferredType);
+  if (!baseKind) {
+    return null;
+  }
+  const delta = getLeaveLedgerDelta(baseKind);
+  if (!delta) {
+    return null;
+  }
+  return {
+    employee_id: session.employee_id,
+    effective_date: session.date,
+    balance: delta,
+    leave_type: `${TIME_ENTRY_LEAVE_PREFIX}_${baseKind}`,
+    notes: session.notes || null,
+  };
+};
+
 export default function TimeEntry() {
   const [employees, setEmployees] = useState([]);
   const [services, setServices] = useState([]);
@@ -90,6 +124,15 @@ export default function TimeEntry() {
   const [activeTab, setActiveTab] = useState(() => getTabFromSearch(location.search));
   const { tenantClientReady, activeOrgHasConnection, activeOrgId } = useOrg();
   const { dataClient, authClient, user, loading, session } = useSupabase();
+
+  const ensureSessionAndOrg = useCallback(() => {
+    if (!session) {
+      throw new Error('נדרש להתחבר כדי לבצע את הפעולה.');
+    }
+    if (!activeOrgId) {
+      throw new Error('יש לבחור ארגון פעיל לפני ביצוע הפעולה.');
+    }
+  }, [session, activeOrgId]);
   const loadInitialData = useCallback(async ({ silent = false } = {}) => {
     if (!tenantClientReady || !activeOrgHasConnection || !dataClient || !session || !activeOrgId) {
       if (!silent) {
@@ -304,17 +347,26 @@ export default function TimeEntry() {
           toast.error('אין התאמות לשמירה.', { duration: 15000 });
           return;
         }
+        ensureSessionAndOrg();
         if (insertPayload.length) {
-          const { error } = await dataClient.from('WorkSessions').insert(insertPayload);
-          if (error) throw new Error(error.message);
+          await createWorkSessions({
+            session,
+            orgId: activeOrgId,
+            sessions: insertPayload,
+          });
         }
         if (updatePayloads.length) {
-          const results = await Promise.all(
-            updatePayloads.map(({ id, values }) => dataClient.from('WorkSessions').update(values).eq('id', id)),
+          await Promise.all(
+            updatePayloads.map(({ id, values }) => {
+              const { id: _omit, ...updates } = values || {};
+              return updateWorkSession({
+                session,
+                orgId: activeOrgId,
+                sessionId: id,
+                body: { updates },
+              });
+            }),
           );
-          for (const { error } of results) {
-            if (error) throw new Error(error.message);
-          }
         }
         toast.success('התאמות נשמרו בהצלחה.');
         await loadInitialData({ silent: true });
@@ -615,22 +667,45 @@ export default function TimeEntry() {
         }
       }
 
+      ensureSessionAndOrg();
+
       if (toInsert.length > 0) {
-        const { error: insErr } = await dataClient.from('WorkSessions').insert(toInsert);
-        if (insErr) throw insErr;
+        await createWorkSessions({
+          session,
+          orgId: activeOrgId,
+          sessions: toInsert,
+        });
       }
       if (toUpdate.length > 0) {
-        const { error: upErr } = await dataClient.from('WorkSessions').upsert(toUpdate, { onConflict: 'id' });
-        if (upErr) throw upErr;
+        await Promise.all(
+          toUpdate.map((payload) => {
+            const { id: sessionId, ...updates } = payload || {};
+            if (!sessionId) {
+              return Promise.resolve();
+            }
+            return updateWorkSession({
+              session,
+              orgId: activeOrgId,
+              sessionId,
+              body: { updates },
+            });
+          }),
+        );
       }
 
       if (ledgerDeleteIds.length > 0) {
-        const { error: ledgerDeleteErr } = await dataClient.from('LeaveBalances').delete().in('id', ledgerDeleteIds);
-        if (ledgerDeleteErr) throw ledgerDeleteErr;
+        await deleteLeaveBalanceEntries({
+          session,
+          orgId: activeOrgId,
+          ids: ledgerDeleteIds,
+        });
       }
       if (ledgerInsertPayload) {
-        const { error: ledgerInsertErr } = await dataClient.from('LeaveBalances').insert([ledgerInsertPayload]);
-        if (ledgerInsertErr) throw ledgerInsertErr;
+        await createLeaveBalanceEntry({
+          session,
+          orgId: activeOrgId,
+          body: ledgerInsertPayload,
+        });
       }
 
       toast.success('הרישומים עודכנו בהצלחה!');
@@ -687,7 +762,26 @@ export default function TimeEntry() {
     const normalized = Array.from(new Set(idsArray.map(String)));
     if (!normalized.length) return;
     try {
-      await restoreWorkSessions(normalized, dataClient);
+      ensureSessionAndOrg();
+      const sessionsToRestore = trashSessions.filter(item => normalized.includes(String(item.id)));
+      await Promise.all(
+        normalized.map(sessionId => updateWorkSession({
+          session,
+          orgId: activeOrgId,
+          sessionId,
+          body: { updates: { deleted: false, deleted_at: null } },
+        })),
+      );
+      const ledgerEntries = sessionsToRestore
+        .map(buildLedgerEntryFromSession)
+        .filter(Boolean);
+      if (ledgerEntries.length) {
+        await createLeaveBalanceEntry({
+          session,
+          orgId: activeOrgId,
+          entries: ledgerEntries,
+        });
+      }
       toast.success(normalized.length === 1 ? 'הרישום שוחזר.' : 'הרישומים שוחזרו.');
       setTrashSessions(prev => prev.filter(item => !normalized.includes(String(item.id))));
       await loadInitialData({ silent: true });
@@ -703,7 +797,14 @@ export default function TimeEntry() {
     const normalized = Array.from(new Set(idsArray.map(String)));
     if (!normalized.length) return;
     try {
-      await permanentlyDeleteWorkSessions(normalized, dataClient);
+      ensureSessionAndOrg();
+      await Promise.all(
+        normalized.map(sessionId => deleteWorkSession({
+          session,
+          orgId: activeOrgId,
+          sessionId,
+        })),
+      );
       toast.success(normalized.length === 1 ? 'הרישום נמחק לצמיתות.' : 'הרישומים נמחקו לצמיתות.');
       setTrashSessions(prev => prev.filter(item => !normalized.includes(String(item.id))));
       await loadInitialData({ silent: true });
