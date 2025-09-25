@@ -12,6 +12,7 @@ import { format } from "date-fns";
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { hasDuplicateSession } from '@/lib/workSessionsUtils.js';
 import {
+  fetchWorkSessions,
   createWorkSessions,
   updateWorkSession,
   deleteWorkSession,
@@ -147,57 +148,61 @@ export default function TimeEntry() {
       const employeeRecords = Array.isArray(bundle?.employees) ? bundle.employees : [];
       setEmployees(employeeRecords.filter((emp) => emp?.is_active !== false));
 
-      const [
-        sessionsData,
-        ratesData,
-        servicesData,
-        leavePolicySettings,
-        leavePayPolicySettings,
-        leaveLedgerData,
-        trashData,
-      ] = await Promise.all([
-        dataClient.from('WorkSessions')
-          .select('*, service:service_id(name)')
-          .eq('deleted', false)
-          .order('date', { ascending: false })
-          .order('created_at', { ascending: false }),
-        dataClient.from('RateHistory').select('*'),
-        dataClient.from('Services').select('*'),
+      const [sessionsResponse, leavePolicySettings, leavePayPolicySettings] = await Promise.all([
+        fetchWorkSessions({ session, orgId: activeOrgId }),
         fetchLeavePolicySettings({ session, orgId: activeOrgId }),
         fetchLeavePayPolicySettings({ session, orgId: activeOrgId }),
-        dataClient.from('LeaveBalances').select('*'),
-        dataClient.from('WorkSessions')
-          .select('*, service:service_id(name)')
-          .eq('deleted', true)
-          .order('deleted_at', { ascending: false })
       ]);
 
-      if (sessionsData.error) throw sessionsData.error;
-      if (ratesData.error) throw ratesData.error;
-      if (servicesData.error) throw servicesData.error;
-      if (leaveLedgerData.error) throw leaveLedgerData.error;
-      if (trashData.error) throw trashData.error;
+      const allSessions = Array.isArray(sessionsResponse?.sessions) ? sessionsResponse.sessions : [];
+      const activeSessions = allSessions
+        .filter((session) => !session?.deleted)
+        .sort((a, b) => {
+          const dateA = new Date(a.date || 0).getTime();
+          const dateB = new Date(b.date || 0).getTime();
+          if (dateA !== dateB) {
+            return dateB - dateA;
+          }
+          const createdA = new Date(a.created_at || 0).getTime();
+          const createdB = new Date(b.created_at || 0).getTime();
+          return createdB - createdA;
+        });
+      const trashedSessions = allSessions
+        .filter((session) => session?.deleted)
+        .sort((a, b) => {
+          const deletedA = new Date(a.deleted_at || 0).getTime();
+          const deletedB = new Date(b.deleted_at || 0).getTime();
+          return deletedB - deletedA;
+        });
 
-      const activeSessions = (sessionsData.data || []).filter(session => !session?.deleted);
       setWorkSessions(activeSessions);
-      setTrashSessions(trashData.data || []);
-      setRateHistories(ratesData.data || []);
-      const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
+      setTrashSessions(trashedSessions);
+
+      const rateHistoryRecords = Array.isArray(bundle?.rateHistory) ? bundle.rateHistory : [];
+      setRateHistories(rateHistoryRecords);
+
+      const serviceRecords = Array.isArray(bundle?.services) ? bundle.services : [];
+      const filteredServices = serviceRecords.filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
       setServices(filteredServices);
-      setLeaveBalances(sortLeaveLedger(leaveLedgerData.data || []));
+
+      const leaveLedgerRecords = Array.isArray(bundle?.leaveBalances) ? bundle.leaveBalances : [];
+      setLeaveBalances(sortLeaveLedger(leaveLedgerRecords));
 
       setLeavePolicy(
-        leavePolicySettings.value
-          ? normalizeLeavePolicy(leavePolicySettings.value)
-          : DEFAULT_LEAVE_POLICY,
+        bundle?.leavePolicy
+          ? normalizeLeavePolicy(bundle.leavePolicy)
+          : (leavePolicySettings.value
+            ? normalizeLeavePolicy(leavePolicySettings.value)
+            : DEFAULT_LEAVE_POLICY),
       );
 
       setLeavePayPolicy(
-        leavePayPolicySettings.value
-          ? normalizeLeavePayPolicy(leavePayPolicySettings.value)
-          : DEFAULT_LEAVE_PAY_POLICY,
+        bundle?.leavePayPolicy
+          ? normalizeLeavePayPolicy(bundle.leavePayPolicy)
+          : (leavePayPolicySettings.value
+            ? normalizeLeavePayPolicy(leavePayPolicySettings.value)
+            : DEFAULT_LEAVE_PAY_POLICY),
       );
-
     } catch (error) {
       console.error('Error loading time entry data:', error);
       toast.error('שגיאה בטעינת נתוני רישום הזמנים');
