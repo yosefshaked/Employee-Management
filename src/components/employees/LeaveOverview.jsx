@@ -23,6 +23,7 @@ import { Loader2, ShieldCheck, Info } from 'lucide-react';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { updateEmployee } from '@/api/employees.js';
+import { createLeaveBalanceEntry } from '@/api/leave-balances.js';
 import { selectLeaveRemaining, selectHolidayForDate } from '@/selectors.js';
 import {
   DEFAULT_LEAVE_POLICY,
@@ -78,7 +79,7 @@ export default function LeaveOverview({
   const [overrideRate, setOverrideRate] = useState('');
   const [isSavingOverride, setIsSavingOverride] = useState(false);
   const [isOverrideDialogOpen, setIsOverrideDialogOpen] = useState(false);
-  const { dataClient, authClient, user, loading, session } = useSupabase();
+  const { authClient, user, loading, session } = useSupabase();
   const { activeOrgId } = useOrg();
 
   const usageOptions = useMemo(() => {
@@ -208,8 +209,11 @@ export default function LeaveOverview({
     }
     setIsSubmitting(true);
     try {
-      if (!dataClient) {
-        throw new Error('חיבור Supabase אינו זמין.');
+      if (!session) {
+        throw new Error('יש להתחבר מחדש לפני שמירת רישום החופשה.');
+      }
+      if (!activeOrgId) {
+        throw new Error('בחרו ארגון פעיל לפני שמירת רישום החופשה.');
       }
       const payload = {
         employee_id: employee.id,
@@ -218,8 +222,11 @@ export default function LeaveOverview({
         leave_type: ledgerType,
         notes: formState.notes ? formState.notes.trim() : null,
       };
-      const { error } = await dataClient.from('LeaveBalances').insert([payload]);
-      if (error) throw error;
+      await createLeaveBalanceEntry({
+        session,
+        orgId: activeOrgId,
+        body: payload,
+      });
       toast.success('הרישום נשמר בהצלחה');
       if (onRefresh) await onRefresh();
       setFormState(prev => ({
@@ -231,9 +238,10 @@ export default function LeaveOverview({
       }));
     } catch (error) {
       console.error('Error saving leave entry', error);
-      toast.error('שמירת הרישום נכשלה');
+      toast.error(error?.message || 'שמירת הרישום נכשלה');
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   };
 
   const lockedUsageTypes = new Set(['half_day', 'system_paid', 'unpaid']);
@@ -362,11 +370,11 @@ export default function LeaveOverview({
     );
   }
 
-  if (!dataClient) {
+  if (!activeOrgId) {
     return (
       <Card className="border-0 shadow-lg bg-white/80">
         <CardHeader className="border-b">
-          <CardTitle className="text-xl font-semibold text-slate-900">נדרש חיבור Supabase פעיל לארגון.</CardTitle>
+          <CardTitle className="text-xl font-semibold text-slate-900">בחרו ארגון פעיל כדי לנהל חופשות.</CardTitle>
         </CardHeader>
       </Card>
     );
