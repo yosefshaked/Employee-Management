@@ -185,8 +185,8 @@ export default function Reports() {
         dataClient.from('WorkSessions').select('*').eq('deleted', false),
         dataClient.from('Services').select('*'),
         dataClient.from('RateHistory').select('*'),
-        fetchLeavePolicySettings(dataClient),
-        fetchLeavePayPolicySettings(dataClient),
+        fetchLeavePolicySettings({ session, orgId: activeOrgId }),
+        fetchLeavePayPolicySettings({ session, orgId: activeOrgId }),
         dataClient.from('LeaveBalances').select('*')
       ]);
 

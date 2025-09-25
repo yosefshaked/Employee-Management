@@ -120,8 +120,8 @@ export default function TimeEntry() {
           .order('created_at', { ascending: false }),
         dataClient.from('RateHistory').select('*'),
         dataClient.from('Services').select('*'),
-        fetchLeavePolicySettings(dataClient),
-        fetchLeavePayPolicySettings(dataClient),
+        fetchLeavePolicySettings({ session, orgId: activeOrgId }),
+        fetchLeavePayPolicySettings({ session, orgId: activeOrgId }),
         dataClient.from('LeaveBalances').select('*'),
         dataClient.from('WorkSessions')
           .select('*, service:service_id(name)')

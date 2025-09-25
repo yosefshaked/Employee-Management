@@ -37,7 +37,7 @@ export default function Dashboard() {
         // === התיקון הסופי והנכון באמת: מיון לפי created_at ===
         dataClient.from('WorkSessions').select('*').eq('deleted', false).order('created_at', { ascending: false }),
         dataClient.from('Services').select('*'),
-        fetchLeavePayPolicySettings(dataClient),
+        fetchLeavePayPolicySettings({ session, orgId: activeOrgId }),
       ]);
 
       if (sessionsData.error) throw sessionsData.error;

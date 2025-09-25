@@ -28,6 +28,7 @@ import {
   DEFAULT_LEGAL_INFO_URL,
 } from '@/lib/leave.js';
 import { fetchLeavePolicySettings, fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
+import { upsertSetting } from '@/api/settings.js';
 
 function createNewRule() {
   const today = new Date().toISOString().slice(0, 10);
@@ -111,7 +112,7 @@ function HolidayRuleRow({ rule, onChange, onRemove, onSave, allowHalfDay, isSavi
 }
 
 export default function Settings() {
-  const { activeOrg, activeOrgHasConnection, tenantClientReady } = useOrg();
+  const { activeOrg, activeOrgHasConnection, tenantClientReady, activeOrgId } = useOrg();
   const [policy, setPolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const [isLoading, setIsLoading] = useState(true);
@@ -119,7 +120,7 @@ export default function Settings() {
   const [isSavingLeavePayPolicy, setIsSavingLeavePayPolicy] = useState(false);
   const setupDialogAutoOpenRef = useRef(!activeOrgHasConnection);
   const [isSetupDialogOpen, setIsSetupDialogOpen] = useState(!activeOrgHasConnection);
-  const { dataClient, authClient, user, loading } = useSupabase();
+  const { authClient, user, loading, session } = useSupabase();
 
   useEffect(() => {
     if (activeOrgHasConnection) {
@@ -140,7 +141,7 @@ export default function Settings() {
     }
   };
   useEffect(() => {
-    if (!activeOrgHasConnection || !tenantClientReady) {
+    if (!activeOrgHasConnection || !tenantClientReady || !session || !activeOrgId) {
       setPolicy(DEFAULT_LEAVE_POLICY);
       setLeavePayPolicy(DEFAULT_LEAVE_PAY_POLICY);
       setIsLoading(false);
@@ -152,13 +153,16 @@ export default function Settings() {
     const loadPolicy = async () => {
       setIsLoading(true);
       try {
-        if (!dataClient) {
-          throw new Error('חיבור Supabase אינו זמין.');
+        if (!session) {
+          throw new Error('נדרש להתחבר מחדש כדי לקרוא הגדרות.');
+        }
+        if (!activeOrgId) {
+          throw new Error('בחרו ארגון פעיל לפני טעינת ההגדרות.');
         }
 
         const [leavePolicyResult, leavePayPolicyResult] = await Promise.all([
-          fetchLeavePolicySettings(dataClient),
-          fetchLeavePayPolicySettings(dataClient),
+          fetchLeavePolicySettings({ session, orgId: activeOrgId }),
+          fetchLeavePayPolicySettings({ session, orgId: activeOrgId }),
         ]);
 
         if (cancelled) {
@@ -192,7 +196,7 @@ export default function Settings() {
     return () => {
       cancelled = true;
     };
-  }, [activeOrgHasConnection, tenantClientReady, dataClient]);
+  }, [activeOrgHasConnection, tenantClientReady, session, activeOrgId]);
 
   const handleToggle = (key) => (checked) => {
     setPolicy(prev => ({ ...prev, [key]: checked }));
@@ -242,20 +246,19 @@ export default function Settings() {
     setIsSaving(true);
     try {
       const normalized = normalizeLeavePolicy(policy);
-      if (!dataClient) {
-        throw new Error('חיבור Supabase אינו זמין.');
+      if (!session) {
+        throw new Error('נדרש להתחבר מחדש לפני שמירת ההגדרות.');
       }
-      const { error } = await dataClient
-        .from('Settings')
-        .upsert({
-          key: 'leave_policy',
-          settings_value: normalized,
-          updated_at: new Date().toISOString(),
-        }, {
-          onConflict: 'key',
-          returning: 'minimal',
-        });
-      if (error) throw error;
+      if (!activeOrgId) {
+        throw new Error('בחרו ארגון פעיל לפני שמירת ההגדרות.');
+      }
+
+      await upsertSetting({
+        session,
+        orgId: activeOrgId,
+        key: 'leave_policy',
+        value: normalized,
+      });
       setPolicy(normalized);
       toast.success('הגדרות החופשה נשמרו בהצלחה');
     } catch (error) {
@@ -309,20 +312,19 @@ export default function Settings() {
     setIsSavingLeavePayPolicy(true);
     try {
       const normalized = normalizeLeavePayPolicy(leavePayPolicy);
-      if (!dataClient) {
-        throw new Error('חיבור Supabase אינו זמין.');
+      if (!session) {
+        throw new Error('נדרש להתחבר מחדש לפני שמירת ההגדרות.');
       }
-      const { error } = await dataClient
-        .from('Settings')
-        .upsert({
-          key: 'leave_pay_policy',
-          settings_value: normalized,
-          updated_at: new Date().toISOString(),
-        }, {
-          onConflict: 'key',
-          returning: 'minimal',
-        });
-      if (error) throw error;
+      if (!activeOrgId) {
+        throw new Error('בחרו ארגון פעיל לפני שמירת ההגדרות.');
+      }
+
+      await upsertSetting({
+        session,
+        orgId: activeOrgId,
+        key: 'leave_pay_policy',
+        value: normalized,
+      });
       setLeavePayPolicy(normalized);
       toast.success('שיטת חישוב שווי יום חופשה נשמרה בהצלחה');
     } catch (error) {
@@ -353,14 +355,6 @@ export default function Settings() {
     return (
       <div className="p-6 text-center text-slate-500">
         יש להתחבר כדי להגדיר את הארגון.
-      </div>
-    );
-  }
-
-  if (!dataClient && activeOrgHasConnection) {
-    return (
-      <div className="p-6 text-center text-slate-500">
-        ממתין לטעינת חיבור Supabase של הארגון.
       </div>
     );
   }

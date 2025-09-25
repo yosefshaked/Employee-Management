@@ -60,41 +60,26 @@ describe('shared Supabase client module', () => {
 });
 
 describe('verifyOrgConnection', () => {
-  it('requires a Supabase client argument', async () => {
-    await assert.rejects(() => verifyOrgConnection(), /Supabase client is required/);
+  it('requires a session/orgId options object', async () => {
+    await assert.rejects(() => verifyOrgConnection(), /session/);
   });
 
   it('returns ok when leave policy settings can be fetched', async () => {
     const calls = [];
-    const stubClient = {
-      from(table) {
-        calls.push(table);
-        return {
-          select(columns) {
-            calls.push(columns);
-            return {
-              eq(column, value) {
-                calls.push([column, value]);
-                return {
-                  maybeSingle: async () => ({
-                    data: { settings_value: { enabled: true } },
-                    status: 200,
-                  }),
-                };
-              },
-            };
-          },
-        };
-      },
+    const stubFetch = async (options) => {
+      calls.push(options);
+      return { exists: true, value: { enabled: true } };
     };
 
-    const result = await verifyOrgConnection(stubClient);
+    const options = {
+      session: { access_token: 'control-token' },
+      orgId: 'org-1234',
+    };
 
-    assert.deepEqual(calls, [
-      'Settings',
-      'settings_value',
-      ['key', 'leave_policy'],
-    ]);
+    const result = await verifyOrgConnection(options, { fetchSettings: stubFetch });
+
+    assert.strictEqual(calls.length, 1);
+    assert.deepEqual(calls[0], options);
     assert.deepEqual(result, { ok: true, settingsValue: { enabled: true } });
   });
 });
