@@ -43,7 +43,13 @@ export default function Reports() {
   const [workSessions, setWorkSessions] = useState([]);
   const [services, setServices] = useState([]);
   const [filteredSessions, setFilteredSessions] = useState([]);
-  const [totals, setTotals] = useState({ totalPay: 0, totalHours: 0, totalSessions: 0, totalsByEmployee: [] });
+  const [totals, setTotals] = useState({
+    totalPay: 0,
+    totalHours: 0,
+    totalSessions: 0,
+    totalsByEmployee: [],
+    diagnostics: { uniquePaidDays: 0, paidLeaveDays: 0, adjustmentsSum: 0 }
+  });
   const [isLoading, setIsLoading] = useState(true);
   const location = useLocation(); // מאפשר לנו לגשת למידע על הכתובת הנוכחית
   const [activeTab, setActiveTab] = useState(location.state?.openTab || "overview");
@@ -110,13 +116,25 @@ export default function Reports() {
     const toRes = parseDateStrict(filters.dateTo);
     if (!fromRes.ok || !toRes.ok) {
       setFilteredSessions([]);
-      setTotals({ totalPay: 0, totalHours: 0, totalSessions: 0, totalsByEmployee: [] });
+      setTotals({
+        totalPay: 0,
+        totalHours: 0,
+        totalSessions: 0,
+        totalsByEmployee: [],
+        diagnostics: { uniquePaidDays: 0, paidLeaveDays: 0, adjustmentsSum: 0 }
+      });
       return;
     }
     if (!isValidRange(fromRes.date, toRes.date)) {
       toast("טווח תאריכים לא תקין (תאריך 'עד' לפני 'מ')");
       setFilteredSessions([]);
-      setTotals({ totalPay: 0, totalHours: 0, totalSessions: 0, totalsByEmployee: [] });
+      setTotals({
+        totalPay: 0,
+        totalHours: 0,
+        totalSessions: 0,
+        totalsByEmployee: [],
+        diagnostics: { uniquePaidDays: 0, paidLeaveDays: 0, adjustmentsSum: 0 }
+      });
       return;
     }
     const res = computePeriodTotals({
@@ -151,12 +169,62 @@ export default function Reports() {
       if (typeof amount !== 'number' || !Number.isFinite(amount)) return session;
       return { ...session, total_payment: amount };
     });
+    const toNumber = (value) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : 0;
+    };
+
+    const adjustmentsAccumulator = adjustedSessions.reduce((acc, session) => {
+      if (!session || session.entry_type !== 'adjustment') return acc;
+      const value = toNumber(session.total_payment);
+      acc.total += value;
+      const previous = acc.byEmployee.get(session.employee_id) || 0;
+      acc.byEmployee.set(session.employee_id, previous + value);
+      return acc;
+    }, { total: 0, byEmployee: new Map() });
+
+    const adjustmentsTotal = adjustmentsAccumulator.total;
+    const adjustmentsByEmployee = adjustmentsAccumulator.byEmployee;
+
+    const previousAdjustmentsTotal = toNumber(res?.diagnostics?.adjustmentsSum ?? 0);
+    const correctedTotalPay = (toNumber(res.totalPay) - previousAdjustmentsTotal) + adjustmentsTotal;
+
+    const updatedTotalsByEmployee = Array.isArray(res.totalsByEmployee)
+      ? res.totalsByEmployee.map(entry => {
+        if (!entry) return entry;
+        const safePay = toNumber(entry.pay);
+        const previousAdjustment = toNumber(entry.adjustments);
+        if (!adjustmentsByEmployee.has(entry.employee_id)) {
+          if (safePay === entry.pay && previousAdjustment === entry.adjustments) {
+            return entry;
+          }
+          return {
+            ...entry,
+            pay: safePay,
+            adjustments: previousAdjustment
+          };
+        }
+        const nextAdjustment = adjustmentsByEmployee.get(entry.employee_id);
+        return {
+          ...entry,
+          pay: safePay - previousAdjustment + nextAdjustment,
+          adjustments: nextAdjustment
+        };
+      })
+      : [];
+
+    const updatedDiagnostics = {
+      ...(res.diagnostics || {}),
+      adjustmentsSum: adjustmentsTotal
+    };
+
     setFilteredSessions(adjustedSessions);
     setTotals({
-      totalPay: res.totalPay,
-      totalHours: res.totalHours,
-      totalSessions: res.totalSessions,
-      totalsByEmployee: res.totalsByEmployee
+      totalPay: correctedTotalPay,
+      totalHours: toNumber(res.totalHours),
+      totalSessions: toNumber(res.totalSessions),
+      totalsByEmployee: updatedTotalsByEmployee,
+      diagnostics: updatedDiagnostics
     });
   }, [workSessions, employees, services, filters, leavePayPolicy]);
 
