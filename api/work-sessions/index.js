@@ -235,13 +235,19 @@ function normalizeDateFilter(value) {
   return normalized;
 }
 
-function normalizeSessionPayload(raw) {
+function normalizeSessionPayload(raw, orgId) {
   if (!raw || typeof raw !== 'object') {
     return null;
   }
   const payload = { ...raw };
   if ('id' in payload) {
     delete payload.id;
+  }
+  if ('org_id' in payload) {
+    delete payload.org_id;
+  }
+  if (orgId) {
+    payload.org_id = orgId;
   }
   return payload;
 }
@@ -250,7 +256,14 @@ function normalizeSessionUpdates(raw) {
   if (!raw || typeof raw !== 'object') {
     return null;
   }
-  return { ...raw };
+  const updates = { ...raw };
+  if ('id' in updates) {
+    delete updates.id;
+  }
+  if ('org_id' in updates) {
+    delete updates.org_id;
+  }
+  return Object.keys(updates).length > 0 ? updates : null;
 }
 
 function resolveSessionId(context, body) {
@@ -270,6 +283,10 @@ async function fetchWorkSessions(tenantClient, filters = {}) {
   let queryBuilder = tenantClient
     .from('WorkSessions')
     .select('*');
+
+  if (filters.orgId) {
+    queryBuilder = queryBuilder.eq('org_id', filters.orgId);
+  }
 
   if (filters.startDate) {
     queryBuilder = queryBuilder.gte('date', filters.startDate);
@@ -387,6 +404,7 @@ export default async function (context, req) {
     const endDate = normalizeDateFilter(query.end_date || query.endDate);
 
     const sessionsResult = await fetchWorkSessions(tenantClient, {
+      orgId,
       startDate,
       endDate,
     });
@@ -413,7 +431,7 @@ export default async function (context, req) {
     }
 
     const payload = sessions
-      .map((entry) => normalizeSessionPayload(entry))
+      .map((entry) => normalizeSessionPayload(entry, orgId))
       .filter(Boolean);
 
     if (!payload.length) {
@@ -448,7 +466,8 @@ export default async function (context, req) {
     const { error } = await tenantClient
       .from('WorkSessions')
       .update(updates)
-      .eq('id', sessionId);
+      .eq('id', sessionId)
+      .eq('org_id', orgId);
 
     if (error) {
       context.log?.error?.('work-sessions update failed', { message: error.message, sessionId });
@@ -467,7 +486,8 @@ export default async function (context, req) {
     const { error, count } = await tenantClient
       .from('WorkSessions')
       .delete({ count: 'exact' })
-      .eq('id', sessionId);
+      .eq('id', sessionId)
+      .eq('org_id', orgId);
 
     if (error) {
       context.log?.error?.('work-sessions delete failed', { message: error.message, sessionId });
