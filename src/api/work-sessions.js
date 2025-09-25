@@ -39,15 +39,13 @@ async function workSessionsRequest(method, {
   }
 
   const path = sessionId ? `work-sessions/${sessionId}` : 'work-sessions';
-  const search = method === 'GET'
-    ? buildSearchParams(normalizedOrgId, query)
-    : '';
+  const search = buildSearchParams(normalizedOrgId, query);
 
   const hasObjectBody = body && typeof body === 'object' && !(body instanceof FormData);
   const payload = method === 'GET'
     ? undefined
     : hasObjectBody
-      ? { ...body, org_id: normalizedOrgId }
+      ? { ...body }
       : body;
 
   const requestOptions = {
