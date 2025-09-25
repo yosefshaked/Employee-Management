@@ -341,6 +341,13 @@ export function useTimeEntry({
         }
       }
 
+      if (isHourlyOrGlobal && Number.isFinite(hoursValue) && hoursValue > 0) {
+        const scaledHundredths = Math.round(hoursValue * 100);
+        if (scaledHundredths % 25 !== 0) {
+          throw new Error('כמות השעות חייבת להיות בכפולות של רבע שעה.');
+        }
+      }
+
       const serviceId = isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : segment.service_id;
       const { rate: rateUsed, reason } = getRateForDate(
         employee.id,
