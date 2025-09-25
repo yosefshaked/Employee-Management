@@ -24,6 +24,8 @@ import {
 } from '@/lib/leave.js';
 import { Switch } from '@/components/ui/switch';
 import { selectLeaveDayValue } from '@/selectors.js';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
 
 function validateRow(row, employee, services, getRateForDate) {
   const errors = {};
@@ -94,12 +96,18 @@ export default function MultiDateEntryModal({
 
   const [rows, setRows] = useState(initialRows);
   useEffect(() => { setRows(initialRows); }, [initialRows]);
+  const { session, dataClient } = useSupabase();
+  const { activeOrgId } = useOrg();
+
   const { saveRows, saveMixedLeave, saveAdjustments } = useTimeEntry({
     employees,
     services,
     getRateForDate,
+    supabaseClient: dataClient,
     workSessions,
     leavePayPolicy,
+    session,
+    orgId: activeOrgId,
   });
 
   const leaveValueResolver = useMemo(() => {

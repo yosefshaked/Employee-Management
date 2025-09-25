@@ -1,3 +1,4 @@
+import { createWorkSessions } from '@/api/work-sessions.js';
 import { calculateGlobalDailyRate } from '../../lib/payroll.js';
 import {
   getEntryTypeForLeaveKind,
@@ -25,6 +26,9 @@ export function useTimeEntry({
   services,
   getRateForDate,
   supabaseClient,
+  dataClient = null,
+  session = null,
+  orgId = null,
   workSessions = [],
   leavePayPolicy = null,
 }) {
@@ -55,12 +59,36 @@ export function useTimeEntry({
     return safeBase * scale;
   };
 
-  const saveRows = async (rows, dayTypeMap = {}) => {
-    if (!supabaseClient) {
-      throw new Error('Supabase client is required for saving rows.');
+  const metadataClient = dataClient || supabaseClient || null;
+
+  const resolveCanWriteMetadata = async () => {
+    if (!metadataClient) {
+      return false;
     }
-    const client = supabaseClient;
-    const canWriteMetadata = await canUseWorkSessionMetadata(client);
+    try {
+      return await canUseWorkSessionMetadata(metadataClient);
+    } catch (error) {
+      console.warn('Failed to verify WorkSessions metadata support', error);
+      return false;
+    }
+  };
+
+  const ensureApiPrerequisites = () => {
+    if (!session) {
+      const error = new Error('נדרשת התחברות כדי לשמור רישומי שעות.');
+      error.code = 'AUTH_REQUIRED';
+      throw error;
+    }
+    if (!orgId) {
+      const error = new Error('יש לבחור ארגון פעיל לפני ביצוע הפעולה.');
+      error.code = 'ORG_REQUIRED';
+      throw error;
+    }
+  };
+
+  const saveRows = async (rows, dayTypeMap = {}) => {
+    ensureApiPrerequisites();
+    const canWriteMetadata = await resolveCanWriteMetadata();
     const inserts = [];
     const leaveConflicts = [];
     const leaveOccupied = new Set(baseLeaveSessions);
@@ -208,20 +236,16 @@ export function useTimeEntry({
       }
       throw new Error('no valid rows');
     }
-    const { error } = await client.from('WorkSessions').insert(inserts);
-    if (error) throw error;
+    await createWorkSessions({ session, orgId, sessions: inserts });
     return { inserted: inserts, conflicts: leaveConflicts };
   };
 
   const saveMixedLeave = async (entries = [], options = {}) => {
-    if (!supabaseClient) {
-      throw new Error('Supabase client is required for saving leave.');
-    }
-    const client = supabaseClient;
+    ensureApiPrerequisites();
     const { leaveType = 'mixed' } = options;
     const entryType = getEntryTypeForLeaveKind(leaveType);
     if (!entryType) throw new Error('סוג חופשה לא נתמך');
-    const canWriteMetadata = await canUseWorkSessionMetadata(client);
+    const canWriteMetadata = await resolveCanWriteMetadata();
     const inserts = [];
     const conflicts = [];
     const invalidStartDates = [];
@@ -332,17 +356,13 @@ export function useTimeEntry({
       }
       throw new Error('no valid rows');
     }
-    const { error } = await client.from('WorkSessions').insert(inserts);
-    if (error) throw error;
+    await createWorkSessions({ session, orgId, sessions: inserts });
     return { inserted: inserts, conflicts, invalidStartDates };
   };
 
   const saveAdjustments = async (items = []) => {
-    if (!supabaseClient) {
-      throw new Error('Supabase client is required for deleting rows.');
-    }
-    const client = supabaseClient;
-    const canWriteMetadata = await canUseWorkSessionMetadata(client);
+    ensureApiPrerequisites();
+    const canWriteMetadata = await resolveCanWriteMetadata();
     const inserts = [];
     const invalidNotes = [];
     for (const item of items) {
@@ -386,8 +406,7 @@ export function useTimeEntry({
     if (!inserts.length) {
       throw new Error('לא נמצאו התאמות לשמירה');
     }
-    const { error } = await client.from('WorkSessions').insert(inserts);
-    if (error) throw error;
+    await createWorkSessions({ session, orgId, sessions: inserts });
     return { inserted: inserts };
   };
 
