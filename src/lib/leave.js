@@ -98,7 +98,7 @@ export const HOLIDAY_TYPE_LABELS = LEAVE_TYPE_OPTIONS.reduce((acc, option) => {
 }, {});
 
 export const MIXED_SUBTYPE_OPTIONS = [
-  { value: 'holiday', label: 'חג' },
+  { value: 'holiday', label: 'חג (מערכת)' },
   { value: 'vacation', label: 'חופשה' },
 ];
 
@@ -137,7 +137,6 @@ export const LEAVE_ENTRY_TYPES = {
   employee_paid: 'leave_employee_paid',
   unpaid: 'leave_unpaid',
   half_day: 'leave_half_day',
-  mixed: 'leave_mixed',
 };
 
 const ENTRY_TYPE_TO_KIND = {
@@ -147,7 +146,7 @@ const ENTRY_TYPE_TO_KIND = {
   leave_unpaid: 'unpaid',
   leave: 'unpaid',
   leave_half_day: 'half_day',
-  leave_mixed: 'mixed',
+  leave_mixed: 'system_paid',
 };
 
 export function getLeaveKindFromEntryType(entryType) {

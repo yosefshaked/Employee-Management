@@ -104,7 +104,7 @@ describe('global day aggregation', () => {
     const monthlyRate = 3000;
     const daily = calculateGlobalDailyRate(emp, '2024-02-05', monthlyRate);
     const rows = [
-      { employee_id: 'e1', date: '2024-02-05', entry_type: 'leave_mixed', total_payment: daily, payable: false },
+      { employee_id: 'e1', date: '2024-02-05', entry_type: 'leave_unpaid', total_payment: daily, payable: false },
       { employee_id: 'e1', date: '2024-02-05', entry_type: 'hours', total_payment: daily },
     ];
     const agg = aggregateGlobalDays(rows, { e1: emp });

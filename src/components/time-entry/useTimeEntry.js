@@ -815,8 +815,10 @@ export function useTimeEntry({
   const saveMixedLeave = async (entries = [], options = {}) => {
     ensureApiPrerequisites();
     const { leaveType = 'mixed' } = options;
-    const entryType = getEntryTypeForLeaveKind(leaveType);
-    if (!entryType) throw new Error('סוג חופשה לא נתמך');
+    const bulkMode = leaveType === 'mixed';
+    if (!bulkMode && !getEntryTypeForLeaveKind(leaveType)) {
+      throw new Error('סוג חופשה לא נתמך');
+    }
     const canWriteMetadata = await resolveCanWriteMetadata();
     const inserts = [];
     const conflicts = [];
@@ -845,18 +847,44 @@ export function useTimeEntry({
         });
         continue;
       }
-      const isPaid = item.paid !== false;
-      const mixedSubtype = leaveType === 'mixed'
+      const mixedSubtype = bulkMode
         ? (normalizeMixedSubtype(item.subtype) || DEFAULT_MIXED_SUBTYPE)
         : null;
-      const rawLeaveFraction = leaveType === 'half_day'
-        ? 0.5
-        : (leaveType === 'mixed'
-          ? (isPaid && item.half_day === true ? 0.5 : 1)
-          : 1);
-      const normalizedLeaveFraction = Number.isFinite(rawLeaveFraction) && rawLeaveFraction > 0
-        ? rawLeaveFraction
-        : 1;
+      const requestedKind = bulkMode
+        ? mixedSubtype
+        : getLeaveBaseKind(leaveType) || leaveType;
+
+      const isPaid = bulkMode
+        ? item.paid !== false
+        : isPayableLeaveKind(requestedKind);
+
+      const halfDay = bulkMode
+        ? Boolean(isPaid && item.half_day === true)
+        : requestedKind === 'half_day';
+
+      let resolvedKind;
+      if (halfDay) {
+        resolvedKind = 'half_day';
+      } else if (!isPaid) {
+        if (bulkMode) {
+          resolvedKind = mixedSubtype === 'holiday' ? 'holiday_unpaid' : 'vacation_unpaid';
+        } else {
+          resolvedKind = getLeaveBaseKind(leaveType) || 'unpaid';
+        }
+      } else {
+        if (bulkMode) {
+          resolvedKind = mixedSubtype === 'holiday' ? 'system_paid' : 'employee_paid';
+        } else {
+          resolvedKind = getLeaveBaseKind(leaveType) || 'employee_paid';
+        }
+      }
+
+      const entryType = getEntryTypeForLeaveKind(resolvedKind);
+      if (!entryType) {
+        throw new Error('סוג חופשה לא נתמך');
+      }
+
+      const normalizedLeaveFraction = halfDay ? 0.5 : 1;
       let fullDayValue = 0;
       if (isPaid) {
         const { rate, reason } = getRateForDate(employee.id, dateStr, GENERIC_RATE_SERVICE_ID);
@@ -909,13 +937,14 @@ export function useTimeEntry({
         const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
         const metadata = buildLeaveMetadata({
           source: 'multi_date_leave',
-          subtype: leaveType === 'mixed' ? mixedSubtype : getLeaveSubtypeFromValue(leaveType),
-          halfDay: leaveType === 'half_day' || (leaveType === 'mixed' && isPaid && item.half_day === true),
-          mixedPaid: leaveType === 'mixed' ? Boolean(isPaid) : null,
+          subtype: bulkMode ? mixedSubtype : getLeaveSubtypeFromValue(resolvedKind),
+          halfDay,
+          mixedPaid: bulkMode ? Boolean(isPaid) : null,
           method: payContext.method,
           lookbackMonths: payContext.lookback_months,
           legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
           overrideApplied: payContext.override_applied,
+          extra: bulkMode ? { source_context: 'multi_date_mixed' } : {},
         });
         if (metadata) {
           payload.metadata = metadata;
