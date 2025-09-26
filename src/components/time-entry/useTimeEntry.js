@@ -474,6 +474,7 @@ export function useTimeEntry({
       mixedSubtype = null,
       mixedHalfDay = null,
       source = 'table',
+      overrideDailyValue = null,
     } = input || {};
 
     if (!employee || !employee.id) {
@@ -626,9 +627,22 @@ export function useTimeEntry({
 
     const canWriteMetadata = await resolveCanWriteMetadata();
 
+    const rawOverrideDailyValue = overrideDailyValue;
+    const hasOverrideDailyValue = rawOverrideDailyValue !== null && rawOverrideDailyValue !== undefined
+      && rawOverrideDailyValue !== '';
+    let overrideDailyValueNumber = null;
+    if (hasOverrideDailyValue) {
+      overrideDailyValueNumber = Number(rawOverrideDailyValue);
+      if (!Number.isFinite(overrideDailyValueNumber) || overrideDailyValueNumber <= 0) {
+        const error = new Error('שווי יום החופשה חייב להיות גדול מ-0.');
+        error.code = 'TIME_ENTRY_LEAVE_INVALID_OVERRIDE';
+        throw error;
+      }
+    }
+
     let resolvedRateForDate = 0;
     let resolvedLeaveValue = 0;
-    let usedFallbackRate = false;
+    let fallbackWasRequired = false;
 
     if (isPayable) {
       const { rate, reason } = getRateForDate(
@@ -658,23 +672,42 @@ export function useTimeEntry({
         && Number.isFinite(resolvedLeaveValue)
         && resolvedLeaveValue > 0;
 
-      if (employee.employee_type === 'global') {
-        if (!hasComputedValue) {
+      if (!hasComputedValue) {
+        if (employee.employee_type === 'global') {
           try {
             resolvedLeaveValue = calculateGlobalDailyRate(employee, dayReference, resolvedRateForDate);
-            usedFallbackRate = true;
+            fallbackWasRequired = true;
           } catch (error) {
             error.code = error.code || 'TIME_ENTRY_GLOBAL_RATE_FAILED';
             throw error;
           }
+        } else if (resolvedRateForDate > 0) {
+          resolvedLeaveValue = resolvedRateForDate;
+          fallbackWasRequired = true;
         }
-      } else if (!hasComputedValue && resolvedRateForDate > 0) {
-        resolvedLeaveValue = resolvedRateForDate;
-        usedFallbackRate = true;
+      }
+
+      if (hasOverrideDailyValue) {
+        resolvedLeaveValue = overrideDailyValueNumber;
       }
     }
 
     const fullDayValue = resolvedLeaveValue > 0 ? resolvedLeaveValue : 0;
+
+    if (isPayable && fallbackWasRequired && !hasOverrideDailyValue) {
+      if (!(fullDayValue > 0)) {
+        const error = new Error('לא ניתן לחשב שווי יום חופשה תקין.');
+        error.code = 'TIME_ENTRY_LEAVE_FALLBACK_INVALID';
+        throw error;
+      }
+      return {
+        needsConfirmation: true,
+        fallbackValue: fullDayValue,
+        fraction: normalizedLeaveFraction,
+        payable: true,
+      };
+    }
+
     const totalPaymentValue = isPayable ? fullDayValue * normalizedLeaveFraction : 0;
 
     const leaveRow = {
@@ -766,12 +799,16 @@ export function useTimeEntry({
       });
     }
 
+    const usedFallbackRate = isPayable && fallbackWasRequired && !hasOverrideDailyValue;
+
     return {
       inserted: inserts,
       updated: updates,
       ledgerDeletedIds: ledgerDeleteIds,
       ledgerInserted: ledgerInsertPayload ? [ledgerInsertPayload] : [],
       usedFallbackRate,
+      overrideApplied: Boolean(hasOverrideDailyValue),
+      fallbackWasRequired: Boolean(fallbackWasRequired),
     };
   };
 

@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Button } from '@/components/ui/button';
 import { InfoTooltip } from '@/components/InfoTooltip.jsx';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { selectLeaveDayValue } from '@/selectors.js';
 import {
   DEFAULT_LEAVE_PAY_POLICY,
@@ -145,6 +146,10 @@ export default function TimeEntryForm({
   const [errors, setErrors] = useState({});
   const [pendingDelete, setPendingDelete] = useState(null);
   const [currentPaidLeaveId, setCurrentPaidLeaveId] = useState(paidLeaveId);
+  const [fallbackPrompt, setFallbackPrompt] = useState(null);
+  const [fallbackAmount, setFallbackAmount] = useState('');
+  const [fallbackError, setFallbackError] = useState('');
+  const [isConfirmingFallback, setIsConfirmingFallback] = useState(false);
 
   useEffect(() => {
     setCurrentPaidLeaveId(paidLeaveId);
@@ -442,8 +447,8 @@ export default function TimeEntryForm({
     }
   };
 
-  const handleSave = (e) => {
-    e.preventDefault();
+  const handleSave = async (event) => {
+    event.preventDefault();
     if (dayType === 'adjustment') {
       const normalized = [];
       const errs = {};
@@ -472,7 +477,7 @@ export default function TimeEntryForm({
         return;
       }
       setAdjustmentErrors({});
-      onSubmit({
+      await onSubmit({
         rows: [],
         dayType,
         adjustments: normalized,
@@ -518,7 +523,7 @@ export default function TimeEntryForm({
           return;
         }
       }
-      onSubmit({
+      const submissionPayload = {
         rows: [],
         dayType,
         paidLeaveId: currentPaidLeaveId,
@@ -531,7 +536,22 @@ export default function TimeEntryForm({
         mixedHalfDay: leaveType === 'mixed'
           ? (mixedPaid && allowHalfDay ? Boolean(mixedHalfDay) : false)
           : null,
-      });
+      };
+
+      const response = await onSubmit(submissionPayload);
+      if (response?.needsConfirmation) {
+        const fallbackValueNumber = Number(response.fallbackValue) || 0;
+        const fractionValue = Number.isFinite(response.fraction) && response.fraction > 0
+          ? response.fraction
+          : 1;
+        setFallbackPrompt({
+          payload: submissionPayload,
+          fraction: fractionValue,
+          payable: response.payable !== false,
+        });
+        setFallbackAmount(fallbackValueNumber > 0 ? fallbackValueNumber.toFixed(2) : '');
+        setFallbackError('');
+      }
       return;
     }
     if (!validate()) return;
@@ -542,7 +562,55 @@ export default function TimeEntryForm({
       }
       return next;
     });
-    onSubmit({ rows: sanitizedRows, dayType, paidLeaveId: currentPaidLeaveId, leaveType: null });
+    await onSubmit({ rows: sanitizedRows, dayType, paidLeaveId: currentPaidLeaveId, leaveType: null });
+  };
+
+  const handleFallbackDialogClose = (isOpen) => {
+    if (isOpen) return;
+    if (isConfirmingFallback) return;
+    setFallbackPrompt(null);
+    setFallbackAmount('');
+    setFallbackError('');
+  };
+
+  const handleFallbackConfirm = async () => {
+    if (!fallbackPrompt) return;
+    const numericValue = Number(fallbackAmount);
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      setFallbackError('נא להזין שווי יומי גדול מ-0.');
+      return;
+    }
+    setFallbackError('');
+    setIsConfirmingFallback(true);
+    try {
+      const payload = {
+        ...fallbackPrompt.payload,
+        overrideDailyValue: numericValue,
+      };
+      const response = await onSubmit(payload);
+      if (response?.needsConfirmation) {
+        const fallbackValueNumber = Number(response.fallbackValue) || 0;
+        const fractionValue = Number.isFinite(response.fraction) && response.fraction > 0
+          ? response.fraction
+          : fallbackPrompt.fraction;
+        setFallbackPrompt({
+          payload,
+          fraction: fractionValue,
+          payable: response.payable !== false,
+        });
+        setFallbackAmount(fallbackValueNumber > 0 ? fallbackValueNumber.toFixed(2) : '');
+        setFallbackError('');
+        setIsConfirmingFallback(false);
+        return;
+      }
+      setFallbackPrompt(null);
+      setFallbackAmount('');
+      setFallbackError('');
+    } catch {
+      // Toasts are handled by the caller; keep dialog open for user correction
+    } finally {
+      setIsConfirmingFallback(false);
+    }
   };
 
   const baseSummary = useMemo(() => {
@@ -939,6 +1007,12 @@ export default function TimeEntryForm({
     ? 'הוסף התאמה'
     : addLabel;
 
+  const parsedFallbackAmount = Number(fallbackAmount);
+  const fallbackFraction = fallbackPrompt?.fraction ?? 1;
+  const fallbackTotal = fallbackPrompt && fallbackPrompt.payable !== false && Number.isFinite(parsedFallbackAmount)
+    ? parsedFallbackAmount * fallbackFraction
+    : null;
+
   return (
     <form onSubmit={handleSave} className="flex flex-col w-[min(98vw,1100px)] max-w-[98vw] h-[min(92vh,calc(100dvh-2rem))]">
       <SingleDayEntryShell
@@ -961,6 +1035,66 @@ export default function TimeEntryForm({
         summary={pendingDelete ? pendingDelete.summary : null}
         summaryText={pendingDelete?.summaryText || ''}
       />
+      <Dialog open={Boolean(fallbackPrompt)} onOpenChange={handleFallbackDialogClose}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>אישור שווי יום החופשה</DialogTitle>
+            <DialogDescription>
+              שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר. ניתן לעדכן או לאשר את הסכום לפני שמירה סופית.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              {`שווי מוצע ליום מלא: ₪${Number.isFinite(parsedFallbackAmount)
+                ? parsedFallbackAmount.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                : '0.00'}`}
+            </p>
+            {fallbackTotal !== null ? (
+              <p className="text-xs text-slate-500">
+                {`תשלום מתוכנן לפי בחירה (${fallbackFraction === 0.5 ? 'חצי יום' : `מכפיל ${fallbackFraction}`}): ₪${fallbackTotal.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              </p>
+            ) : null}
+            <div className="space-y-1">
+              <Label htmlFor="fallback-amount" className="text-sm font-medium text-slate-700">
+                שווי יום חופשה לאישור (₪)
+              </Label>
+              <Input
+                id="fallback-amount"
+                type="number"
+                min="0"
+                step="0.01"
+                value={fallbackAmount}
+                onChange={(event) => {
+                  setFallbackAmount(event.target.value);
+                  if (fallbackError) setFallbackError('');
+                }}
+                autoFocus
+                disabled={isConfirmingFallback}
+              />
+              {fallbackError ? (
+                <p className="text-xs text-red-600 text-right">{fallbackError}</p>
+              ) : null}
+            </div>
+          </div>
+          <div className="flex justify-between gap-3 pt-4">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleFallbackDialogClose(false)}
+              disabled={isConfirmingFallback}
+            >
+              בטל
+            </Button>
+            <Button
+              type="button"
+              onClick={handleFallbackConfirm}
+              disabled={isConfirmingFallback}
+            >
+              {isConfirmingFallback ? 'שומר...' : 'אשר סכום'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </form>
   );
 }

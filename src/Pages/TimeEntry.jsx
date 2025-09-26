@@ -270,6 +270,7 @@ export default function TimeEntry() {
     mixedSubtype,
     mixedHalfDay,
     adjustments = [],
+    overrideDailyValue = null,
   }) => {
     setIsLoading(true);
     try {
@@ -284,7 +285,7 @@ export default function TimeEntry() {
         });
         toast.success('התאמות נשמרו בהצלחה.');
         await loadInitialData({ silent: true });
-        return;
+        return { success: true };
       }
 
       if (dayType === 'paid_leave') {
@@ -299,11 +300,19 @@ export default function TimeEntry() {
           mixedSubtype,
           mixedHalfDay,
           source: 'table',
+          overrideDailyValue,
         });
+        if (result?.needsConfirmation) {
+          return result;
+        }
         toast.success('חופשה נשמרה בהצלחה.');
         if (result?.usedFallbackRate) {
           toast.info('הערה: שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר.');
+        } else if (result?.overrideApplied) {
+          toast.info('הערה: שווי יום החופשה אושר ידנית על ידי המשתמש.');
         }
+        await loadInitialData({ silent: true });
+        return result || { success: true };
       } else {
         await saveWorkDay({
           employee,
@@ -315,9 +324,9 @@ export default function TimeEntry() {
           source: 'table',
         });
         toast.success('הרישומים נשמרו בהצלחה.');
+        await loadInitialData({ silent: true });
+        return { success: true };
       }
-
-      await loadInitialData({ silent: true });
     } catch (error) {
       console.error('Error submitting from table:', error);
       const message = error?.message || 'שגיאה בעדכון הרישומים';

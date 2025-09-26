@@ -804,10 +804,10 @@ function TimeEntryTableInner({
               onSubmit={async (result) => {
                 if (!result) {
                   setEditingCell(null);
-                  return;
+                  return { cancelled: true };
                 }
                 try {
-                  await onTableSubmit({
+                  const submissionResponse = await onTableSubmit({
                     employee: editingCell.employee,
                     day: editingCell.day,
                     dayType: result.dayType,
@@ -819,10 +819,15 @@ function TimeEntryTableInner({
                     mixedSubtype: result.mixedSubtype,
                     mixedHalfDay: result.mixedHalfDay,
                     adjustments: result.adjustments,
+                    overrideDailyValue: result.overrideDailyValue,
                   });
-                  setEditingCell(null);
+                  if (!submissionResponse?.needsConfirmation) {
+                    setEditingCell(null);
+                  }
+                  return submissionResponse;
                 } catch {
                   // keep modal open on error
+                  return null;
                 }
               }}
               onDeleted={(ids, rows = []) => {

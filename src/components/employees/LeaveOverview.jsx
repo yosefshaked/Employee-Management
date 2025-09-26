@@ -88,6 +88,10 @@ export default function LeaveOverview({
   const [isOverrideDialogOpen, setIsOverrideDialogOpen] = useState(false);
   const [servicesList, setServicesList] = useState([]);
   const [workSessionsHistory, setWorkSessionsHistory] = useState([]);
+  const [fallbackDialogState, setFallbackDialogState] = useState(null);
+  const [fallbackAmount, setFallbackAmount] = useState('');
+  const [fallbackError, setFallbackError] = useState('');
+  const [isFallbackSubmitting, setIsFallbackSubmitting] = useState(false);
   const { authClient, user, loading, session } = useSupabase();
   const { activeOrgId } = useOrg();
 
@@ -286,7 +290,7 @@ export default function LeaveOverview({
 
       const buildWorkSessionPayload = () => {
         if (!shouldCreateWorkSession) {
-          return { workSession: null, fallbackUsed: false };
+          return { workSession: null, fallbackUsed: false, fraction: 1, payable: false };
         }
         const leaveType = formState.holidayType || 'employee_paid';
         const baseLeaveKind = getLeaveBaseKind(leaveType) || leaveType;
@@ -364,10 +368,25 @@ export default function LeaveOverview({
           workSession.metadata = metadata;
         }
 
-        return { workSession, fallbackUsed: usedFallback };
+        return { workSession, fallbackUsed: usedFallback, fraction: normalizedFraction, payable };
       };
 
-      const { workSession, fallbackUsed } = buildWorkSessionPayload();
+      const { workSession, fallbackUsed, fraction: sessionFraction, payable: sessionPayable } = buildWorkSessionPayload();
+
+      if (fallbackUsed && workSession) {
+        setFallbackDialogState({
+          employee,
+          date,
+          ledgerPayload: payload,
+          workSession,
+          fraction: sessionFraction,
+          payable: sessionPayable,
+        });
+        setFallbackAmount(workSession.rate_used ? Number(workSession.rate_used).toFixed(2) : '');
+        setFallbackError('');
+        setIsSubmitting(false);
+        return;
+      }
 
       if (workSession) {
         const creationResult = await createWorkSessions({
@@ -419,6 +438,92 @@ export default function LeaveOverview({
     }
   };
 
+  const resetFallbackDialog = () => {
+    setFallbackDialogState(null);
+    setFallbackAmount('');
+    setFallbackError('');
+  };
+
+  const handleFallbackDialogClose = (isOpen) => {
+    if (isOpen) return;
+    if (isFallbackSubmitting) return;
+    resetFallbackDialog();
+  };
+
+  const handleFallbackConfirm = async () => {
+    if (!fallbackDialogState) return;
+    const numericValue = Number(fallbackAmount);
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      setFallbackError('יש להזין שווי יום גדול מ-0.');
+      return;
+    }
+    setFallbackError('');
+    setIsFallbackSubmitting(true);
+    setIsSubmitting(true);
+    let createdWorkSessionId = null;
+    try {
+      if (!session) {
+        throw new Error('יש להתחבר מחדש לפני שמירת הרישום.');
+      }
+      if (!activeOrgId) {
+        throw new Error('בחרו ארגון פעיל לפני שמירת הרישום.');
+      }
+      const { workSession, ledgerPayload, fraction, payable } = fallbackDialogState;
+      const normalizedFraction = Number.isFinite(fraction) && fraction > 0 ? fraction : 1;
+      const nextWorkSession = {
+        ...workSession,
+        rate_used: payable ? numericValue : null,
+        total_payment: payable ? numericValue * normalizedFraction : 0,
+      };
+
+      const creationResult = await createWorkSessions({
+        session,
+        orgId: activeOrgId,
+        sessions: [nextWorkSession],
+      });
+
+      createdWorkSessionId = Array.isArray(creationResult?.created)
+        ? creationResult.created[0] || null
+        : null;
+
+      await createLeaveBalanceEntry({
+        session,
+        orgId: activeOrgId,
+        body: ledgerPayload,
+      });
+
+      toast.success('הרישום נשמר בהצלחה');
+      toast.info('שווי יום החופשה אושר ידנית על ידי המשתמש.');
+      if (onRefresh) await onRefresh();
+      await loadSupportingData();
+      setFormState(prev => ({
+        ...prev,
+        notes: '',
+        entryKind: prev.entryKind,
+        allocationAmount: 1,
+        usageAmount: prev.entryKind === 'usage' ? prev.usageAmount : 1,
+      }));
+      resetFallbackDialog();
+    } catch (error) {
+      if (createdWorkSessionId) {
+        try {
+          await deleteWorkSession({
+            session,
+            orgId: activeOrgId,
+            sessionId: createdWorkSessionId,
+          });
+        } catch (rollbackError) {
+          console.error('Failed to roll back work session after fallback confirmation', rollbackError);
+        }
+      }
+      console.error('Error saving leave entry after confirmation', error);
+      toast.error(error?.message || 'שמירת הרישום נכשלה');
+    } finally {
+      setIsFallbackSubmitting(false);
+      setIsSubmitting(false);
+    }
+  };
+
   const lockedUsageTypes = new Set(['half_day', 'system_paid', 'unpaid']);
   const isUsageLocked = lockedUsageTypes.has(formState.holidayType);
 
@@ -426,6 +531,13 @@ export default function LeaveOverview({
     if (!overrideEmployeeId) return null;
     return employees.find(emp => emp.id === overrideEmployeeId) || null;
   }, [employees, overrideEmployeeId]);
+
+  const parsedFallbackAmount = Number(fallbackAmount);
+  const fallbackFraction = fallbackDialogState?.fraction ?? 1;
+  const fallbackIsPayable = fallbackDialogState?.payable !== false;
+  const fallbackTotalPreview = fallbackDialogState && fallbackIsPayable && Number.isFinite(parsedFallbackAmount)
+    ? parsedFallbackAmount * fallbackFraction
+    : null;
 
   const hasOverrideEmployeeSelection = Boolean(selectedEmployee);
 
@@ -796,6 +908,62 @@ export default function LeaveOverview({
           </Table>
         </CardContent>
       </Card>
+      <Dialog open={Boolean(fallbackDialogState)} onOpenChange={handleFallbackDialogClose}>
+        <DialogContent className="sm:max-w-md text-right">
+          <DialogHeader>
+            <DialogTitle>אישור שווי יום החופשה</DialogTitle>
+            <DialogDescription className="text-sm text-slate-500">
+              שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר. עדכנו או אשרו את הסכום לפני שמירה סופית.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              {`שווי מוצע ליום מלא: ₪${Number.isFinite(parsedFallbackAmount)
+                ? parsedFallbackAmount.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                : '0.00'}`}
+            </p>
+            {fallbackTotalPreview !== null ? (
+              <p className="text-xs text-slate-500">
+                {`תשלום מתוכנן (${fallbackFraction === 0.5 ? 'חצי יום' : `מכפיל ${fallbackFraction}`}): ₪${fallbackTotalPreview.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              </p>
+            ) : null}
+            <div className="space-y-1">
+              <Label htmlFor="fallback-confirm-amount" className="text-sm font-semibold text-slate-700">
+                שווי יום חופשה לאישור (₪)
+              </Label>
+              <Input
+                id="fallback-confirm-amount"
+                type="number"
+                min="0"
+                step="0.01"
+                value={fallbackAmount}
+                onChange={(event) => {
+                  setFallbackAmount(event.target.value);
+                  if (fallbackError) setFallbackError('');
+                }}
+                autoFocus
+                disabled={isFallbackSubmitting}
+              />
+              {fallbackError ? (
+                <p className="text-xs text-red-600">{fallbackError}</p>
+              ) : null}
+            </div>
+          </div>
+          <DialogFooter className="flex flex-row-reverse gap-2">
+            <Button type="button" onClick={handleFallbackConfirm} disabled={isFallbackSubmitting}>
+              {isFallbackSubmitting ? 'שומר...' : 'אשר סכום'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleFallbackDialogClose(false)}
+              disabled={isFallbackSubmitting}
+            >
+              בטל
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={isOverrideDialogOpen} onOpenChange={(open) => (!open ? handleOverrideDialogClose() : null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader className="text-right">
