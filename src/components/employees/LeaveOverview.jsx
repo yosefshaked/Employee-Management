@@ -27,6 +27,7 @@ import { createLeaveBalanceEntry } from '@/api/leave-balances.js';
 import { createWorkSessions, deleteWorkSession, fetchWorkSessions } from '@/api/work-sessions.js';
 import { getServices } from '@/api/services.js';
 import { selectLeaveRemaining, selectHolidayForDate, selectLeaveDayValue } from '@/selectors.js';
+import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import {
   DEFAULT_LEAVE_POLICY,
   DEFAULT_LEAVE_PAY_POLICY,
@@ -38,10 +39,11 @@ import {
   getLeaveBaseKind,
   getNegativeBalanceFloor,
   getEntryTypeForLeaveKind,
+  isLeaveEntryType,
   isPayableLeaveKind,
   resolveLeavePayMethodContext,
 } from '@/lib/leave.js';
-import { buildLeaveMetadata, stripLeaveBusinessFields } from '@/lib/workSessionsMetadata.js';
+import { buildLeaveMetadata } from '@/lib/workSessionsMetadata.js';
 
 const EMPLOYEE_PLACEHOLDER_VALUE = '__employee_placeholder__';
 const OVERRIDE_METHOD_PLACEHOLDER_VALUE = '__no_override__';
@@ -247,6 +249,7 @@ export default function LeaveOverview({
     }
     setIsSubmitting(true);
     let createdWorkSessionId = null;
+    let usedFallbackNotice = false;
     try {
       if (!session) {
         throw new Error('יש להתחבר מחדש לפני שמירת רישום החופשה.');
@@ -268,22 +271,37 @@ export default function LeaveOverview({
 
       const shouldCreateWorkSession = entryKind === 'usage';
 
+      if (shouldCreateWorkSession) {
+        const hasWorkConflicts = workSessionsHistory.some(session => {
+          if (!session || session.deleted) return false;
+          if (session.employee_id !== employee.id) return false;
+          if (session.date !== date) return false;
+          if (isLeaveEntryType(session.entry_type) || session.entry_type === 'adjustment') return false;
+          return true;
+        });
+        if (hasWorkConflicts) {
+          throw new Error('לא ניתן להזין חופשה בתאריך זה כי קיימים בו רישומי עבודה. יש למחוק אותם תחילה.');
+        }
+      }
+
       const buildWorkSessionPayload = () => {
         if (!shouldCreateWorkSession) {
-          return null;
+          return { workSession: null, fallbackUsed: false };
         }
         const leaveType = formState.holidayType || 'employee_paid';
         const baseLeaveKind = getLeaveBaseKind(leaveType) || leaveType;
         const entryType = getEntryTypeForLeaveKind(baseLeaveKind)
           || getEntryTypeForLeaveKind('system_paid')
-          || 'leave';
+          || 'leave_unpaid';
         const payable = isPayableLeaveKind(baseLeaveKind);
         let fraction = Math.abs(delta);
         if (!Number.isFinite(fraction) || fraction <= 0) {
           fraction = baseLeaveKind === 'half_day' ? 0.5 : 1;
         }
         const normalizedFraction = Number.isFinite(fraction) && fraction > 0 ? fraction : 1;
+
         let fullDayValue = 0;
+        let usedFallback = false;
         if (payable) {
           const computedValue = selectLeaveDayValue(employee.id, date, {
             employees,
@@ -294,7 +312,29 @@ export default function LeaveOverview({
           if (typeof computedValue === 'number' && Number.isFinite(computedValue) && computedValue > 0) {
             fullDayValue = computedValue;
           }
+
+          if (!(fullDayValue > 0)) {
+            if (employee.employee_type === 'global') {
+              const monthlyRate = parseFloat(employee.current_rate);
+              if (Number.isFinite(monthlyRate) && monthlyRate > 0) {
+                try {
+                  fullDayValue = calculateGlobalDailyRate(employee, date, monthlyRate);
+                  usedFallback = true;
+                } catch (error) {
+                  console.error('Failed to calculate fallback global rate', error);
+                  fullDayValue = 0;
+                }
+              }
+            } else {
+              const currentRate = parseFloat(employee.current_rate);
+              if (Number.isFinite(currentRate) && currentRate > 0) {
+                fullDayValue = currentRate;
+                usedFallback = true;
+              }
+            }
+          }
         }
+
         const totalPaymentValue = payable ? fullDayValue * normalizedFraction : 0;
         const rateUsedValue = payable && fullDayValue > 0 ? fullDayValue : null;
         const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
@@ -306,6 +346,7 @@ export default function LeaveOverview({
           legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
           overrideApplied: payContext.override_applied,
         });
+
         const workSession = {
           employee_id: employee.id,
           date,
@@ -319,24 +360,25 @@ export default function LeaveOverview({
           total_payment: totalPaymentValue,
           notes: notesValue,
         };
-        const cleanedMetadata = stripLeaveBusinessFields(metadata);
-        if (cleanedMetadata) {
-          workSession.metadata = cleanedMetadata;
+        if (metadata) {
+          workSession.metadata = metadata;
         }
-        return workSession;
+
+        return { workSession, fallbackUsed: usedFallback };
       };
 
-      const workSessionPayload = buildWorkSessionPayload();
+      const { workSession, fallbackUsed } = buildWorkSessionPayload();
 
-      if (workSessionPayload) {
+      if (workSession) {
         const creationResult = await createWorkSessions({
           session,
           orgId: activeOrgId,
-          sessions: [workSessionPayload],
+          sessions: [workSession],
         });
         createdWorkSessionId = Array.isArray(creationResult?.created)
           ? creationResult.created[0] || null
           : null;
+        usedFallbackNotice = fallbackUsed;
       }
 
       await createLeaveBalanceEntry({
@@ -346,6 +388,9 @@ export default function LeaveOverview({
       });
 
       toast.success('הרישום נשמר בהצלחה');
+      if (usedFallbackNotice) {
+        toast.info('הערה: שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר.');
+      }
       if (onRefresh) await onRefresh();
       await loadSupportingData();
       setFormState(prev => ({

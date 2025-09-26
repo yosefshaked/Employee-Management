@@ -288,7 +288,7 @@ export default function TimeEntry() {
       }
 
       if (dayType === 'paid_leave') {
-        await saveLeaveDay({
+        const result = await saveLeaveDay({
           employee,
           day,
           date: dateStr,
@@ -301,6 +301,9 @@ export default function TimeEntry() {
           source: 'table',
         });
         toast.success('חופשה נשמרה בהצלחה.');
+        if (result?.usedFallbackRate) {
+          toast.info('הערה: שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר.');
+        }
       } else {
         await saveWorkDay({
           employee,

@@ -135,7 +135,7 @@ export function getLeaveBaseKind(value) {
 export const LEAVE_ENTRY_TYPES = {
   system_paid: 'leave_system_paid',
   employee_paid: 'leave_employee_paid',
-  unpaid: 'leave',
+  unpaid: 'leave_unpaid',
   half_day: 'leave_half_day',
   mixed: 'leave_mixed',
 };

@@ -636,7 +636,7 @@ export default function TimeEntryForm({
         </div>
         {showInsufficientHistoryHint ? (
           <div className="mt-1 text-xs text-amber-700 text-right">
-            אין מספיק נתוני עבר—הערכה עשויה להיות חלקית
+            הערה: שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר.
           </div>
         ) : null}
         {showPreStartWarning ? (
@@ -852,6 +852,9 @@ export default function TimeEntryForm({
             <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="סוג חופשה">
               {MIXED_SUBTYPE_OPTIONS.map(option => {
                 const isActive = normalizeMixedSubtype(mixedSubtype) === option.value;
+                const label = option.value === 'holiday' && mixedPaid
+                  ? `${option.label} (מערכת)`
+                  : option.label;
                 return (
                   <Button
                     key={option.value}
@@ -860,7 +863,7 @@ export default function TimeEntryForm({
                     className="h-10 w-full"
                     onClick={() => setMixedSubtype(option.value)}
                   >
-                    {option.label}
+                    {label}
                   </Button>
                 );
               })}
