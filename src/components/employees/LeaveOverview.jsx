@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
@@ -24,8 +24,9 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { updateEmployee } from '@/api/employees.js';
 import { createLeaveBalanceEntry } from '@/api/leave-balances.js';
-import { createWorkSessions, deleteWorkSession } from '@/api/work-sessions.js';
-import { selectLeaveRemaining, selectHolidayForDate } from '@/selectors.js';
+import { createWorkSessions, deleteWorkSession, fetchWorkSessions } from '@/api/work-sessions.js';
+import { getServices } from '@/api/services.js';
+import { selectLeaveRemaining, selectHolidayForDate, selectLeaveDayValue } from '@/selectors.js';
 import {
   DEFAULT_LEAVE_POLICY,
   DEFAULT_LEAVE_PAY_POLICY,
@@ -83,8 +84,41 @@ export default function LeaveOverview({
   const [overrideRate, setOverrideRate] = useState('');
   const [isSavingOverride, setIsSavingOverride] = useState(false);
   const [isOverrideDialogOpen, setIsOverrideDialogOpen] = useState(false);
+  const [servicesList, setServicesList] = useState([]);
+  const [workSessionsHistory, setWorkSessionsHistory] = useState([]);
   const { authClient, user, loading, session } = useSupabase();
   const { activeOrgId } = useOrg();
+
+  const loadSupportingData = useCallback(async () => {
+    if (!session || !activeOrgId) {
+      setServicesList([]);
+      setWorkSessionsHistory([]);
+      return;
+    }
+
+    try {
+      const [servicesResponse, sessionsResponse] = await Promise.all([
+        getServices({ session, orgId: activeOrgId }),
+        fetchWorkSessions({ session, orgId: activeOrgId }),
+      ]);
+
+      const nextServices = Array.isArray(servicesResponse?.services)
+        ? servicesResponse.services
+        : [];
+      const nextSessions = Array.isArray(sessionsResponse?.sessions)
+        ? sessionsResponse.sessions.filter(item => item && !item.deleted)
+        : [];
+
+      setServicesList(nextServices);
+      setWorkSessionsHistory(nextSessions);
+    } catch (error) {
+      console.error('Failed to load supporting leave data', error);
+    }
+  }, [session, activeOrgId]);
+
+  useEffect(() => {
+    loadSupportingData();
+  }, [loadSupportingData]);
 
   const usageOptions = useMemo(() => {
     return LEAVE_TYPE_OPTIONS.filter(option => leavePolicy.allow_half_day || option.value !== 'half_day');
@@ -248,18 +282,38 @@ export default function LeaveOverview({
         if (!Number.isFinite(fraction) || fraction <= 0) {
           fraction = baseLeaveKind === 'half_day' ? 0.5 : 1;
         }
+        const normalizedFraction = Number.isFinite(fraction) && fraction > 0 ? fraction : 1;
+        let dailyValue = 0;
+        let totalPaymentValue = 0;
+        let rateUsedValue = null;
+        if (payable) {
+          const computedValue = selectLeaveDayValue(employee.id, date, {
+            employees,
+            workSessions: workSessionsHistory,
+            services: servicesList,
+            leavePayPolicy,
+          });
+          if (typeof computedValue === 'number' && Number.isFinite(computedValue) && computedValue > 0) {
+            dailyValue = computedValue;
+          }
+          if (dailyValue > 0) {
+            totalPaymentValue = dailyValue * normalizedFraction;
+            rateUsedValue = dailyValue;
+          }
+        }
         const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
         const metadata = buildLeaveMetadata({
           source: 'employees_leave_overview',
           leaveType: baseLeaveKind,
           leaveKind: baseLeaveKind,
           payable,
-          fraction: payable ? fraction : null,
+          fraction: payable ? normalizedFraction : null,
           halfDay: baseLeaveKind === 'half_day',
           method: payContext.method,
           lookbackMonths: payContext.lookback_months,
           legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
           overrideApplied: payContext.override_applied,
+          dailyValueSnapshot: payable && dailyValue > 0 ? dailyValue : null,
         });
         const workSession = {
           employee_id: employee.id,
@@ -270,8 +324,8 @@ export default function LeaveOverview({
           sessions_count: null,
           students_count: null,
           payable,
-          rate_used: null,
-          total_payment: null,
+          rate_used: rateUsedValue,
+          total_payment: payable ? totalPaymentValue : 0,
           notes: notesValue,
         };
         if (metadata) {
@@ -301,6 +355,7 @@ export default function LeaveOverview({
 
       toast.success('הרישום נשמר בהצלחה');
       if (onRefresh) await onRefresh();
+      await loadSupportingData();
       setFormState(prev => ({
         ...prev,
         notes: '',

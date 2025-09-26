@@ -600,6 +600,9 @@ export function useTimeEntry({
     const leaveFraction = baseLeaveKind === 'half_day'
       ? 0.5
       : (isMixed ? (mixedHalfDayEnabled ? 0.5 : 1) : 1);
+    const normalizedLeaveFraction = Number.isFinite(leaveFraction) && leaveFraction > 0
+      ? leaveFraction
+      : 1;
 
     const ledgerDelta = getLeaveLedgerDelta(baseLeaveKind) || 0;
 
@@ -665,8 +668,11 @@ export function useTimeEntry({
             throw error;
           }
         }
-        const fraction = Number.isFinite(leaveFraction) && leaveFraction > 0 ? leaveFraction : 1;
-        totalPayment = resolvedLeaveValue * fraction;
+      }
+      if (resolvedLeaveValue > 0) {
+        totalPayment = resolvedLeaveValue * normalizedLeaveFraction;
+      } else {
+        totalPayment = 0;
       }
     }
 
@@ -675,7 +681,7 @@ export function useTimeEntry({
       date: normalizedDate,
       notes: paidLeaveNotes ? paidLeaveNotes : null,
       rate_used: isPayable ? (rateUsed || null) : null,
-      total_payment: isPayable && employee.employee_type === 'global' ? totalPayment : 0,
+      total_payment: isPayable ? totalPayment : 0,
       entry_type: entryType,
       hours: 0,
       service_id: null,
@@ -703,7 +709,7 @@ export function useTimeEntry({
         leaveKind: baseLeaveKind,
         subtype: isMixed ? resolvedMixedSubtype : leaveSubtype,
         payable: Boolean(isPayable),
-        fraction: isPayable ? leaveFraction : null,
+        fraction: isPayable ? normalizedLeaveFraction : null,
         halfDay: baseLeaveKind === 'half_day' || mixedHalfDayEnabled,
         mixedPaid: isMixed ? mixedIsPaid : null,
         method: payContext.method,
