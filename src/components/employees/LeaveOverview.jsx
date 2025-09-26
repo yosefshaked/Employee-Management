@@ -41,7 +41,7 @@ import {
   isPayableLeaveKind,
   resolveLeavePayMethodContext,
 } from '@/lib/leave.js';
-import { buildLeaveMetadata } from '@/lib/workSessionsMetadata.js';
+import { buildLeaveMetadata, stripLeaveBusinessFields } from '@/lib/workSessionsMetadata.js';
 
 const EMPLOYEE_PLACEHOLDER_VALUE = '__employee_placeholder__';
 const OVERRIDE_METHOD_PLACEHOLDER_VALUE = '__no_override__';
@@ -283,9 +283,7 @@ export default function LeaveOverview({
           fraction = baseLeaveKind === 'half_day' ? 0.5 : 1;
         }
         const normalizedFraction = Number.isFinite(fraction) && fraction > 0 ? fraction : 1;
-        let dailyValue = 0;
-        let totalPaymentValue = 0;
-        let rateUsedValue = null;
+        let fullDayValue = 0;
         if (payable) {
           const computedValue = selectLeaveDayValue(employee.id, date, {
             employees,
@@ -294,26 +292,19 @@ export default function LeaveOverview({
             leavePayPolicy,
           });
           if (typeof computedValue === 'number' && Number.isFinite(computedValue) && computedValue > 0) {
-            dailyValue = computedValue;
-          }
-          if (dailyValue > 0) {
-            totalPaymentValue = dailyValue * normalizedFraction;
-            rateUsedValue = dailyValue;
+            fullDayValue = computedValue;
           }
         }
+        const totalPaymentValue = payable ? fullDayValue * normalizedFraction : 0;
+        const rateUsedValue = payable && fullDayValue > 0 ? fullDayValue : null;
         const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
         const metadata = buildLeaveMetadata({
           source: 'employees_leave_overview',
-          leaveType: baseLeaveKind,
-          leaveKind: baseLeaveKind,
-          payable,
-          fraction: payable ? normalizedFraction : null,
           halfDay: baseLeaveKind === 'half_day',
           method: payContext.method,
           lookbackMonths: payContext.lookback_months,
           legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
           overrideApplied: payContext.override_applied,
-          dailyValueSnapshot: payable && dailyValue > 0 ? dailyValue : null,
         });
         const workSession = {
           employee_id: employee.id,
@@ -325,11 +316,12 @@ export default function LeaveOverview({
           students_count: null,
           payable,
           rate_used: rateUsedValue,
-          total_payment: payable ? totalPaymentValue : 0,
+          total_payment: totalPaymentValue,
           notes: notesValue,
         };
-        if (metadata) {
-          workSession.metadata = metadata;
+        const cleanedMetadata = stripLeaveBusinessFields(metadata);
+        if (cleanedMetadata) {
+          workSession.metadata = cleanedMetadata;
         }
         return workSession;
       };

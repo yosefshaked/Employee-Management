@@ -26,6 +26,7 @@ import {
   buildLeaveMetadata,
   buildSourceMetadata,
   canUseWorkSessionMetadata,
+  stripLeaveBusinessFields,
 } from '../../lib/workSessionsMetadata.js';
 import { selectLeaveDayValue, selectLeaveRemaining } from '../../selectors.js';
 
@@ -637,8 +638,7 @@ export function useTimeEntry({
 
     const canWriteMetadata = await resolveCanWriteMetadata();
 
-    let rateUsed = null;
-    let totalPayment = 0;
+    let resolvedRateForDate = 0;
     let resolvedLeaveValue = 0;
 
     if (isPayable) {
@@ -647,8 +647,8 @@ export function useTimeEntry({
         dayReference,
         GENERIC_RATE_SERVICE_ID,
       );
-      rateUsed = rate || 0;
-      if (!rateUsed && employee.employee_type === 'global') {
+      resolvedRateForDate = rate || 0;
+      if (!resolvedRateForDate && employee.employee_type === 'global') {
         const error = new Error(reason || 'לא הוגדר תעריף עבור תאריך זה.');
         error.code = 'TIME_ENTRY_RATE_MISSING';
         throw error;
@@ -662,26 +662,24 @@ export function useTimeEntry({
       if (employee.employee_type === 'global') {
         if (!(typeof resolvedLeaveValue === 'number' && Number.isFinite(resolvedLeaveValue) && resolvedLeaveValue > 0)) {
           try {
-            resolvedLeaveValue = calculateGlobalDailyRate(employee, dayReference, rateUsed);
+            resolvedLeaveValue = calculateGlobalDailyRate(employee, dayReference, resolvedRateForDate);
           } catch (error) {
             error.code = error.code || 'TIME_ENTRY_GLOBAL_RATE_FAILED';
             throw error;
           }
         }
       }
-      if (resolvedLeaveValue > 0) {
-        totalPayment = resolvedLeaveValue * normalizedLeaveFraction;
-      } else {
-        totalPayment = 0;
-      }
     }
+
+    const fullDayValue = resolvedLeaveValue > 0 ? resolvedLeaveValue : 0;
+    const totalPaymentValue = isPayable ? fullDayValue * normalizedLeaveFraction : 0;
 
     const leaveRow = {
       employee_id: employee.id,
       date: normalizedDate,
       notes: paidLeaveNotes ? paidLeaveNotes : null,
-      rate_used: isPayable ? (rateUsed || null) : null,
-      total_payment: isPayable ? totalPayment : 0,
+      rate_used: isPayable && fullDayValue > 0 ? fullDayValue : null,
+      total_payment: totalPaymentValue,
       entry_type: entryType,
       hours: 0,
       service_id: null,
@@ -698,28 +696,19 @@ export function useTimeEntry({
 
     if (canWriteMetadata) {
       const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
-      const dailyValueSnapshot = isPayable
-        ? ((typeof resolvedLeaveValue === 'number' && Number.isFinite(resolvedLeaveValue) && resolvedLeaveValue > 0)
-          ? resolvedLeaveValue
-          : null)
-        : null;
       const metadata = buildLeaveMetadata({
         source,
-        leaveType: baseLeaveKind,
-        leaveKind: baseLeaveKind,
-        subtype: isMixed ? resolvedMixedSubtype : leaveSubtype,
-        payable: Boolean(isPayable),
-        fraction: isPayable ? normalizedLeaveFraction : null,
         halfDay: baseLeaveKind === 'half_day' || mixedHalfDayEnabled,
         mixedPaid: isMixed ? mixedIsPaid : null,
+        subtype: isMixed ? resolvedMixedSubtype : leaveSubtype,
         method: payContext.method,
         lookbackMonths: payContext.lookback_months,
         legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
-        dailyValueSnapshot,
         overrideApplied: payContext.override_applied,
       });
-      if (metadata) {
-        leaveRow.metadata = metadata;
+      const cleanedMetadata = stripLeaveBusinessFields(metadata);
+      if (cleanedMetadata) {
+        leaveRow.metadata = cleanedMetadata;
       }
     }
 

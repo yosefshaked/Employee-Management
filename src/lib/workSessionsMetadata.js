@@ -198,6 +198,38 @@ export function buildSourceMetadata(source, extra = {}, version = 1) {
   return createMetadataEnvelope({ source, extra, version });
 }
 
+export function stripLeaveBusinessFields(metadata) {
+  if (!metadata || typeof metadata !== 'object') {
+    return undefined;
+  }
+
+  const clone = JSON.parse(JSON.stringify(metadata));
+
+  delete clone.leave_kind;
+  delete clone.leave_type;
+  delete clone.leave_fraction;
+
+  if (clone.leave && typeof clone.leave === 'object') {
+    delete clone.leave.kind;
+    delete clone.leave.type;
+    delete clone.leave.payable;
+    delete clone.leave.fraction;
+    if (Object.keys(clone.leave).length === 0) {
+      delete clone.leave;
+    }
+  }
+
+  if (clone.calc && typeof clone.calc === 'object') {
+    delete clone.calc.daily_value_snapshot;
+    if (Object.keys(clone.calc).length === 0) {
+      delete clone.calc;
+    }
+  }
+
+  const pruned = prune(clone);
+  return pruned;
+}
+
 export function __setWorkSessionMetadataSupportForTests(value) {
   if (typeof value === 'boolean') {
     forcedSupport = value;
