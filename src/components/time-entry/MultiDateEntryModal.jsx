@@ -419,13 +419,33 @@ export default function MultiDateEntryModal({
   const applyHalfDayToPaid = () => {
     if (!allowHalfDay) return;
     setMixedSelections(prev => {
+      let shouldEnableHalfDay = false;
+      selectedEmployees.forEach(empId => {
+        const inner = prev[empId] || {};
+        sortedDates.forEach(d => {
+          if (shouldEnableHalfDay) return;
+          const dateStr = format(d, 'yyyy-MM-dd');
+          const current = ensureMixedSelection(inner[dateStr]);
+          if (current.paid && !current.halfDay) {
+            shouldEnableHalfDay = true;
+          }
+        });
+      });
+
       const next = {};
       selectedEmployees.forEach(empId => {
         const inner = { ...(prev[empId] || {}) };
         sortedDates.forEach(d => {
           const dateStr = format(d, 'yyyy-MM-dd');
           const current = ensureMixedSelection(inner[dateStr]);
-          inner[dateStr] = current.paid ? { ...current, halfDay: true } : current;
+          if (!current.paid) {
+            inner[dateStr] = current;
+            return;
+          }
+          inner[dateStr] = {
+            ...current,
+            halfDay: shouldEnableHalfDay ? true : false,
+          };
         });
         next[empId] = inner;
       });
