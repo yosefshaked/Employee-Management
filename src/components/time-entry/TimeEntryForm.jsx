@@ -874,6 +874,9 @@ export default function TimeEntryForm({
   const fallbackTotal = fallbackPrompt && fallbackPrompt.payable !== false && Number.isFinite(parsedFallbackAmount)
     ? parsedFallbackAmount * fallbackFraction
     : null;
+  const fallbackDisplayAmount = Number.isFinite(parsedFallbackAmount)
+    ? parsedFallbackAmount.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '0.00';
 
   return (
     <form onSubmit={handleSave} className="flex flex-col w-[min(98vw,1100px)] max-w-[98vw] h-[min(92vh,calc(100dvh-2rem))]">
@@ -902,14 +905,12 @@ export default function TimeEntryForm({
           <DialogHeader>
             <DialogTitle>אישור שווי יום החופשה</DialogTitle>
             <DialogDescription>
-              שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר. ניתן לעדכן או לאשר את הסכום לפני שמירה סופית.
+              {`שווי יום החופשה חושב לפי תעריף נוכחי: ₪${fallbackDisplayAmount}. ניתן לעדכן או לאשר את הסכום לפני שמירה סופית.`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-slate-600">
-              {`שווי מוצע ליום מלא: ₪${Number.isFinite(parsedFallbackAmount)
-                ? parsedFallbackAmount.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                : '0.00'}`}
+              {`שווי מוצע ליום מלא: ₪${fallbackDisplayAmount}`}
             </p>
             {fallbackTotal !== null ? (
               <p className="text-xs text-slate-500">

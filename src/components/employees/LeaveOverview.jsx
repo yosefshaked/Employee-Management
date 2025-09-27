@@ -193,6 +193,76 @@ export default function LeaveOverview({
     setFormState(prev => ({ ...prev, ...updates }));
   };
 
+  const usagePreview = useMemo(() => {
+    if (formState.entryKind !== 'usage') return null;
+    const employee = employees.find(emp => emp.id === formState.employeeId);
+    if (!employee) return null;
+    const baseKind = getLeaveBaseKind(formState.holidayType) || formState.holidayType;
+    const fractionValue = Number(formState.usageAmount);
+    const normalizedFraction = Number.isFinite(fractionValue) && fractionValue > 0 ? fractionValue : 1;
+
+    if (!isPayableLeaveKind(baseKind)) {
+      return {
+        payable: false,
+        value: 0,
+        fraction: normalizedFraction,
+        insufficientData: false,
+      };
+    }
+
+    const computed = selectLeaveDayValue(employee.id, formState.date, {
+      employees,
+      workSessions: workSessionsHistory,
+      services: servicesList,
+      leavePayPolicy,
+      collectDiagnostics: true,
+    });
+
+    let value = 0;
+    let insufficientData = false;
+
+    if (computed && typeof computed === 'object') {
+      value = Number(computed.value) || 0;
+      insufficientData = Boolean(computed.insufficientData);
+    } else if (computed !== null && computed !== undefined) {
+      const numeric = Number(computed);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        value = numeric;
+      } else {
+        insufficientData = true;
+      }
+    } else {
+      insufficientData = true;
+    }
+
+    return {
+      payable: true,
+      value,
+      fraction: normalizedFraction,
+      insufficientData,
+    };
+  }, [
+    employees,
+    formState.date,
+    formState.employeeId,
+    formState.entryKind,
+    formState.holidayType,
+    formState.usageAmount,
+    leavePayPolicy,
+    servicesList,
+    workSessionsHistory,
+  ]);
+
+  const usagePreviewTotal = usagePreview && usagePreview.payable
+    ? usagePreview.value * usagePreview.fraction
+    : null;
+  const usagePreviewDailyDisplay = usagePreview && usagePreview.payable
+    ? Math.max(usagePreview.value || 0, 0).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : null;
+  const usagePreviewTotalDisplay = usagePreviewTotal !== null
+    ? Math.max(usagePreviewTotal, 0).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : null;
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!employees.length || formState.employeeId === EMPLOYEE_PLACEHOLDER_VALUE) {
@@ -538,6 +608,9 @@ export default function LeaveOverview({
   const fallbackTotalPreview = fallbackDialogState && fallbackIsPayable && Number.isFinite(parsedFallbackAmount)
     ? parsedFallbackAmount * fallbackFraction
     : null;
+  const fallbackDisplayAmount = Number.isFinite(parsedFallbackAmount)
+    ? parsedFallbackAmount.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '0.00';
 
   const hasOverrideEmployeeSelection = Boolean(selectedEmployee);
 
@@ -765,6 +838,25 @@ export default function LeaveOverview({
                 className="min-h-[48px]"
               />
             </div>
+            {usagePreview?.payable ? (
+              <div className="md:col-span-3 text-right space-y-1">
+                {usagePreviewDailyDisplay ? (
+                  <p className="text-sm text-slate-600">
+                    {`שווי משוער ליום מלא: ₪${usagePreviewDailyDisplay}`}
+                  </p>
+                ) : null}
+                {usagePreviewTotalDisplay ? (
+                  <p className="text-xs text-slate-500">
+                    {`תשלום משוער לרישום (${usagePreview.fraction === 0.5 ? 'חצי יום' : `מכפיל ${usagePreview.fraction}`}): ₪${usagePreviewTotalDisplay}`}
+                  </p>
+                ) : null}
+                {usagePreview.insufficientData ? (
+                  <p className="text-xs text-amber-700">
+                    הערה: שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             <div className="flex items-end md:col-span-3 justify-end">
               <Button type="submit" className="gap-2" disabled={isSubmitting}>
                 {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
@@ -913,14 +1005,12 @@ export default function LeaveOverview({
           <DialogHeader>
             <DialogTitle>אישור שווי יום החופשה</DialogTitle>
             <DialogDescription className="text-sm text-slate-500">
-              שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר. עדכנו או אשרו את הסכום לפני שמירה סופית.
+              {`שווי יום החופשה חושב לפי תעריף נוכחי: ₪${fallbackDisplayAmount}. עדכנו או אשרו את הסכום לפני שמירה סופית.`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-slate-600">
-              {`שווי מוצע ליום מלא: ₪${Number.isFinite(parsedFallbackAmount)
-                ? parsedFallbackAmount.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                : '0.00'}`}
+              {`שווי מוצע ליום מלא: ₪${fallbackDisplayAmount}`}
             </p>
             {fallbackTotalPreview !== null ? (
               <p className="text-xs text-slate-500">

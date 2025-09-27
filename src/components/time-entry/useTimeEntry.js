@@ -693,22 +693,26 @@ export function useTimeEntry({
     }
 
     const fullDayValue = resolvedLeaveValue > 0 ? resolvedLeaveValue : 0;
+    const fallbackDailyValue = Number.isFinite(fullDayValue) && fullDayValue > 0 ? fullDayValue : 0;
 
     if (isPayable && fallbackWasRequired && !hasOverrideDailyValue) {
-      if (!(fullDayValue > 0)) {
+      if (!(fallbackDailyValue > 0)) {
         const error = new Error('לא ניתן לחשב שווי יום חופשה תקין.');
         error.code = 'TIME_ENTRY_LEAVE_FALLBACK_INVALID';
         throw error;
       }
+      const fallbackValueForConfirmation = Number(
+        fallbackDailyValue.toFixed(2),
+      );
       return {
         needsConfirmation: true,
-        fallbackValue: fullDayValue,
+        fallbackValue: fallbackValueForConfirmation,
         fraction: normalizedLeaveFraction,
         payable: true,
       };
     }
 
-    const totalPaymentValue = isPayable ? fullDayValue * normalizedLeaveFraction : 0;
+    const totalPaymentValue = isPayable ? fallbackDailyValue * normalizedLeaveFraction : 0;
 
     const leaveRow = {
       employee_id: employee.id,
