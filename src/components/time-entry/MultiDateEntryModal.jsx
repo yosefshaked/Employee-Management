@@ -24,6 +24,8 @@ import {
 } from '@/lib/leave.js';
 import { Switch } from '@/components/ui/switch';
 import { selectLeaveDayValue } from '@/selectors.js';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
 
 function validateRow(row, employee, services, getRateForDate) {
   const errors = {};
@@ -94,12 +96,18 @@ export default function MultiDateEntryModal({
 
   const [rows, setRows] = useState(initialRows);
   useEffect(() => { setRows(initialRows); }, [initialRows]);
+  const { session, dataClient } = useSupabase();
+  const { activeOrgId } = useOrg();
+
   const { saveRows, saveMixedLeave, saveAdjustments } = useTimeEntry({
     employees,
     services,
     getRateForDate,
+    metadataClient: dataClient,
     workSessions,
     leavePayPolicy,
+    session,
+    orgId: activeOrgId,
   });
 
   const leaveValueResolver = useMemo(() => {
@@ -411,13 +419,33 @@ export default function MultiDateEntryModal({
   const applyHalfDayToPaid = () => {
     if (!allowHalfDay) return;
     setMixedSelections(prev => {
+      let shouldEnableHalfDay = false;
+      selectedEmployees.forEach(empId => {
+        const inner = prev[empId] || {};
+        sortedDates.forEach(d => {
+          if (shouldEnableHalfDay) return;
+          const dateStr = format(d, 'yyyy-MM-dd');
+          const current = ensureMixedSelection(inner[dateStr]);
+          if (current.paid && !current.halfDay) {
+            shouldEnableHalfDay = true;
+          }
+        });
+      });
+
       const next = {};
       selectedEmployees.forEach(empId => {
         const inner = { ...(prev[empId] || {}) };
         sortedDates.forEach(d => {
           const dateStr = format(d, 'yyyy-MM-dd');
           const current = ensureMixedSelection(inner[dateStr]);
-          inner[dateStr] = current.paid ? { ...current, halfDay: true } : current;
+          if (!current.paid) {
+            inner[dateStr] = current;
+            return;
+          }
+          inner[dateStr] = {
+            ...current,
+            halfDay: shouldEnableHalfDay ? true : false,
+          };
         });
         next[empId] = inner;
       });

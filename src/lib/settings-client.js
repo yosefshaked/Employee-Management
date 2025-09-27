@@ -1,53 +1,52 @@
-import { SupabaseHttpError } from './error-utils.js';
+import { fetchSettingsValue as fetchSettingsValueApi } from '@/api/settings.js';
 
-function ensureClient(client) {
-  if (!client || typeof client.from !== 'function') {
-    throw new Error('Supabase client is required to read Settings.');
+function normalizeOrgId(options) {
+  if (!options) {
+    return '';
   }
-  return client;
+  const candidate = options.orgId
+    ?? options.organizationId
+    ?? options.org_id
+    ?? options.organization_id
+    ?? null;
+  if (typeof candidate !== 'string') {
+    return '';
+  }
+  return candidate.trim();
 }
 
-export async function fetchSettingsValue(client, key) {
-  const supabase = ensureClient(client);
-  const sanitizedKey = typeof key === 'string' ? key.trim() : '';
-  if (!sanitizedKey) {
-    throw new Error('A settings key is required.');
+function normalizeOptions(options) {
+  if (!options || typeof options !== 'object') {
+    throw new Error('נדרש להעביר פרטי Session וזיהוי ארגון לקריאת הגדרות.');
   }
 
-  const { data, error, status } = await supabase
-    .from('Settings')
-    .select('settings_value')
-    .eq('key', sanitizedKey)
-    .maybeSingle();
-
-  if (status === 406) {
-    throw new SupabaseHttpError(
-      'בקשת Settings החזירה 406 (Not Acceptable). ודא שהכותרת Accept היא application/json ושהבחירה select נכונה.',
-      { status },
-    );
+  const session = options.session ?? options.accessToken ?? options.token ?? null;
+  if (!session) {
+    throw new Error('נדרשת התחברות פעילה כדי לקרוא הגדרות ארגון.');
   }
 
-  if (status === 401) {
-    throw new SupabaseHttpError(
-      'בקשת Settings החזירה 401 (Unauthorized). ודא שמפתח Supabase תקף ושלטבלת Settings קיימות הרשאות קריאה.',
-      { status },
-    );
+  const orgId = normalizeOrgId(options);
+  if (!orgId) {
+    throw new Error('נדרש מזהה ארגון תקף לקריאת הגדרות.');
   }
 
-  if (error) {
-    throw error;
-  }
+  const signal = options.signal ?? null;
 
-  const exists = Boolean(data && typeof data === 'object');
-  const value = exists ? data.settings_value ?? null : null;
-
-  return { exists, value };
+  return { session, orgId, signal };
 }
 
-export async function fetchLeavePolicySettings(client) {
-  return fetchSettingsValue(client, 'leave_policy');
+export async function fetchSettingsValue(options, key) {
+  if (!key) {
+    throw new Error('נדרש מפתח הגדרה לקריאה.');
+  }
+  const normalized = normalizeOptions(options);
+  return fetchSettingsValueApi({ ...normalized, key });
 }
 
-export async function fetchLeavePayPolicySettings(client) {
-  return fetchSettingsValue(client, 'leave_pay_policy');
+export async function fetchLeavePolicySettings(options) {
+  return fetchSettingsValue(options, 'leave_policy');
+}
+
+export async function fetchLeavePayPolicySettings(options) {
+  return fetchSettingsValue(options, 'leave_pay_policy');
 }

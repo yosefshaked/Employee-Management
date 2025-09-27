@@ -12,6 +12,8 @@ import { isLeaveEntryType } from '@/lib/leave.js';
 import { downloadCsvTemplate, downloadExcelTemplate } from '@/lib/excelTemplate.js';
 import { format } from 'date-fns';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
+import { createWorkSessions } from '@/api/work-sessions.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -24,7 +26,8 @@ export default function ImportModal({ open, onOpenChange, employees, services, g
   const [detectedDelim, setDetectedDelim] = useState(',');
   const [overrideDelim, setOverrideDelim] = useState('');
   const [includeDup, setIncludeDup] = useState(false);
-  const { dataClient, authClient, user, loading } = useSupabase();
+  const { authClient, user, loading, session } = useSupabase();
+  const { tenantClientReady, activeOrgId } = useOrg();
 
   const handleFileChange = e => {
     const f = e.target.files?.[0];
@@ -100,13 +103,18 @@ export default function ImportModal({ open, onOpenChange, employees, services, g
       }
       return;
     }
-    if (!dataClient) {
-      toast.error('חיבור Supabase אינו זמין.');
+    if (!session) {
+      toast.error('נדרשת התחברות לפני ביצוע הייבוא.');
       return;
     }
-    const { error } = await dataClient.from('WorkSessions').insert(filteredPayload);
-    if (error) {
-      toast.error(error.message);
+    if (!activeOrgId) {
+      toast.error('יש לבחור ארגון פעיל לפני ביצוע הייבוא.');
+      return;
+    }
+    try {
+      await createWorkSessions({ session, orgId: activeOrgId, sessions: filteredPayload });
+    } catch (error) {
+      toast.error(error.message || 'הייבוא נכשל. נסה שוב מאוחר יותר.');
       return;
     }
     toast.success(`${filteredPayload.length} שורות יובאו בהצלחה`);
@@ -159,7 +167,7 @@ export default function ImportModal({ open, onOpenChange, employees, services, g
     );
   }
 
-  if (!dataClient) {
+  if (!tenantClientReady || !activeOrgId) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent>

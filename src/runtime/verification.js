@@ -1,10 +1,11 @@
 import { fetchLeavePolicySettings } from '../lib/settings-client.js';
 
-export async function verifyOrgConnection(client) {
-  if (!client) {
-    throw new Error('Supabase client is required for verification.');
+export async function verifyOrgConnection(options, { fetchSettings = fetchLeavePolicySettings } = {}) {
+  if (!options || typeof options !== 'object') {
+    throw new Error('נדרש להעביר session ומזהה ארגון לבדיקת החיבור.');
   }
-  const { value } = await fetchLeavePolicySettings(client);
+
+  const { value } = await fetchSettings(options);
   return { ok: true, settingsValue: value };
 }
 

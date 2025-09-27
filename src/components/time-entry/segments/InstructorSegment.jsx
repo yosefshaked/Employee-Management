@@ -7,7 +7,17 @@ import { Select, SelectTrigger, SelectContent, SelectItem } from '@/components/u
 import { Copy, Trash2 } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
-export default function InstructorSegment({ segment, services, onChange, onDuplicate, onDelete, rate, errors = {}, disabled = false }) {
+export default function InstructorSegment({
+  segment,
+  index,
+  services,
+  onChange,
+  onDuplicate,
+  onDelete,
+  rate,
+  errors = {},
+  disabled = false,
+}) {
   const total = (parseFloat(segment.sessions_count || 0) * parseFloat(segment.students_count || 0)) * rate;
   return (
     <div className="rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4 md:p-5">
@@ -18,7 +28,7 @@ export default function InstructorSegment({ segment, services, onChange, onDupli
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => onDelete(segment.id)}
+              onClick={() => onDelete(index)}
               aria-label="מחק רישום"
               className="h-7 w-7"
               disabled={disabled}
@@ -32,7 +42,7 @@ export default function InstructorSegment({ segment, services, onChange, onDupli
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => onDuplicate(segment.id)}
+              onClick={() => onDuplicate(index)}
               aria-label="שכפל רישום"
               className="h-7 w-7"
               disabled={disabled}
@@ -44,7 +54,7 @@ export default function InstructorSegment({ segment, services, onChange, onDupli
       <div className="grid grid-cols-12 gap-4 items-start">
         <div className="col-span-6 md:col-span-7 space-y-1">
           <Label className="text-sm font-medium text-slate-700">שירות</Label>
-          <Select value={segment.service_id} onValueChange={v => onChange(segment.id, { service_id: v })} disabled={disabled}>
+          <Select value={segment.service_id} onValueChange={v => onChange(index, { service_id: v })} disabled={disabled}>
             <SelectTrigger className="h-10 text-base leading-6" disabled={disabled}>
               {segment.service_id ? services.find(s => s.id === segment.service_id)?.name : 'בחר שירות'}
             </SelectTrigger>
@@ -60,7 +70,7 @@ export default function InstructorSegment({ segment, services, onChange, onDupli
             type="number"
             min="1"
             value={segment.sessions_count}
-            onChange={e => onChange(segment.id, { sessions_count: e.target.value })}
+            onChange={e => onChange(index, { sessions_count: e.target.value })}
             className="bg-white h-10 text-base leading-6"
             disabled={disabled}
           />
@@ -72,7 +82,7 @@ export default function InstructorSegment({ segment, services, onChange, onDupli
             type="number"
             min="1"
             value={segment.students_count}
-            onChange={e => onChange(segment.id, { students_count: e.target.value })}
+            onChange={e => onChange(index, { students_count: e.target.value })}
             className="bg-white h-10 text-base leading-6"
             disabled={disabled}
           />
@@ -82,7 +92,7 @@ export default function InstructorSegment({ segment, services, onChange, onDupli
           <Label className="text-sm font-medium text-slate-700">הערות</Label>
           <Textarea
             value={segment.notes ?? ''}
-            onChange={e => onChange(segment.id, { notes: e.target.value })}
+            onChange={e => onChange(index, { notes: e.target.value })}
             className="bg-white text-base leading-6"
             rows={2}
             maxLength={300}

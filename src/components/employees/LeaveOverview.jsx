@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
@@ -23,7 +23,11 @@ import { Loader2, ShieldCheck, Info } from 'lucide-react';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { updateEmployee } from '@/api/employees.js';
-import { selectLeaveRemaining, selectHolidayForDate } from '@/selectors.js';
+import { createLeaveBalanceEntry } from '@/api/leave-balances.js';
+import { createWorkSessions, deleteWorkSession, fetchWorkSessions } from '@/api/work-sessions.js';
+import { getServices } from '@/api/services.js';
+import { selectLeaveRemaining, selectHolidayForDate, selectLeaveDayValue } from '@/selectors.js';
+import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import {
   DEFAULT_LEAVE_POLICY,
   DEFAULT_LEAVE_PAY_POLICY,
@@ -34,8 +38,12 @@ import {
   LEAVE_PAY_METHOD_LABELS,
   getLeaveBaseKind,
   getNegativeBalanceFloor,
+  getEntryTypeForLeaveKind,
+  isLeaveEntryType,
+  isPayableLeaveKind,
   resolveLeavePayMethodContext,
 } from '@/lib/leave.js';
+import { buildLeaveMetadata } from '@/lib/workSessionsMetadata.js';
 
 const EMPLOYEE_PLACEHOLDER_VALUE = '__employee_placeholder__';
 const OVERRIDE_METHOD_PLACEHOLDER_VALUE = '__no_override__';
@@ -78,8 +86,45 @@ export default function LeaveOverview({
   const [overrideRate, setOverrideRate] = useState('');
   const [isSavingOverride, setIsSavingOverride] = useState(false);
   const [isOverrideDialogOpen, setIsOverrideDialogOpen] = useState(false);
-  const { dataClient, authClient, user, loading, session } = useSupabase();
+  const [servicesList, setServicesList] = useState([]);
+  const [workSessionsHistory, setWorkSessionsHistory] = useState([]);
+  const [fallbackDialogState, setFallbackDialogState] = useState(null);
+  const [fallbackAmount, setFallbackAmount] = useState('');
+  const [fallbackError, setFallbackError] = useState('');
+  const [isFallbackSubmitting, setIsFallbackSubmitting] = useState(false);
+  const { authClient, user, loading, session } = useSupabase();
   const { activeOrgId } = useOrg();
+
+  const loadSupportingData = useCallback(async () => {
+    if (!session || !activeOrgId) {
+      setServicesList([]);
+      setWorkSessionsHistory([]);
+      return;
+    }
+
+    try {
+      const [servicesResponse, sessionsResponse] = await Promise.all([
+        getServices({ session, orgId: activeOrgId }),
+        fetchWorkSessions({ session, orgId: activeOrgId }),
+      ]);
+
+      const nextServices = Array.isArray(servicesResponse?.services)
+        ? servicesResponse.services
+        : [];
+      const nextSessions = Array.isArray(sessionsResponse?.sessions)
+        ? sessionsResponse.sessions.filter(item => item && !item.deleted)
+        : [];
+
+      setServicesList(nextServices);
+      setWorkSessionsHistory(nextSessions);
+    } catch (error) {
+      console.error('Failed to load supporting leave data', error);
+    }
+  }, [session, activeOrgId]);
+
+  useEffect(() => {
+    loadSupportingData();
+  }, [loadSupportingData]);
 
   const usageOptions = useMemo(() => {
     return LEAVE_TYPE_OPTIONS.filter(option => leavePolicy.allow_half_day || option.value !== 'half_day');
@@ -148,6 +193,76 @@ export default function LeaveOverview({
     setFormState(prev => ({ ...prev, ...updates }));
   };
 
+  const usagePreview = useMemo(() => {
+    if (formState.entryKind !== 'usage') return null;
+    const employee = employees.find(emp => emp.id === formState.employeeId);
+    if (!employee) return null;
+    const baseKind = getLeaveBaseKind(formState.holidayType) || formState.holidayType;
+    const fractionValue = Number(formState.usageAmount);
+    const normalizedFraction = Number.isFinite(fractionValue) && fractionValue > 0 ? fractionValue : 1;
+
+    if (!isPayableLeaveKind(baseKind)) {
+      return {
+        payable: false,
+        value: 0,
+        fraction: normalizedFraction,
+        insufficientData: false,
+      };
+    }
+
+    const computed = selectLeaveDayValue(employee.id, formState.date, {
+      employees,
+      workSessions: workSessionsHistory,
+      services: servicesList,
+      leavePayPolicy,
+      collectDiagnostics: true,
+    });
+
+    let value = 0;
+    let insufficientData = false;
+
+    if (computed && typeof computed === 'object') {
+      value = Number(computed.value) || 0;
+      insufficientData = Boolean(computed.insufficientData);
+    } else if (computed !== null && computed !== undefined) {
+      const numeric = Number(computed);
+      if (Number.isFinite(numeric) && numeric > 0) {
+        value = numeric;
+      } else {
+        insufficientData = true;
+      }
+    } else {
+      insufficientData = true;
+    }
+
+    return {
+      payable: true,
+      value,
+      fraction: normalizedFraction,
+      insufficientData,
+    };
+  }, [
+    employees,
+    formState.date,
+    formState.employeeId,
+    formState.entryKind,
+    formState.holidayType,
+    formState.usageAmount,
+    leavePayPolicy,
+    servicesList,
+    workSessionsHistory,
+  ]);
+
+  const usagePreviewTotal = usagePreview && usagePreview.payable
+    ? usagePreview.value * usagePreview.fraction
+    : null;
+  const usagePreviewDailyDisplay = usagePreview && usagePreview.payable
+    ? Math.max(usagePreview.value || 0, 0).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : null;
+  const usagePreviewTotalDisplay = usagePreviewTotal !== null
+    ? Math.max(usagePreviewTotal, 0).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : null;
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!employees.length || formState.employeeId === EMPLOYEE_PLACEHOLDER_VALUE) {
@@ -207,21 +322,166 @@ export default function LeaveOverview({
       }
     }
     setIsSubmitting(true);
+    let createdWorkSessionId = null;
+    let usedFallbackNotice = false;
     try {
-      if (!dataClient) {
-        throw new Error('חיבור Supabase אינו זמין.');
+      if (!session) {
+        throw new Error('יש להתחבר מחדש לפני שמירת רישום החופשה.');
       }
+      if (!activeOrgId) {
+        throw new Error('בחרו ארגון פעיל לפני שמירת רישום החופשה.');
+      }
+
+      const normalizedNotes = typeof formState.notes === 'string' ? formState.notes.trim() : '';
+      const notesValue = normalizedNotes ? normalizedNotes : null;
+
       const payload = {
         employee_id: employee.id,
         effective_date: date,
         balance: delta,
         leave_type: ledgerType,
-        notes: formState.notes ? formState.notes.trim() : null,
+        notes: notesValue,
       };
-      const { error } = await dataClient.from('LeaveBalances').insert([payload]);
-      if (error) throw error;
+
+      const shouldCreateWorkSession = entryKind === 'usage';
+
+      if (shouldCreateWorkSession) {
+        const hasWorkConflicts = workSessionsHistory.some(session => {
+          if (!session || session.deleted) return false;
+          if (session.employee_id !== employee.id) return false;
+          if (session.date !== date) return false;
+          if (isLeaveEntryType(session.entry_type) || session.entry_type === 'adjustment') return false;
+          return true;
+        });
+        if (hasWorkConflicts) {
+          throw new Error('לא ניתן להזין חופשה בתאריך זה כי קיימים בו רישומי עבודה. יש למחוק אותם תחילה.');
+        }
+      }
+
+      const buildWorkSessionPayload = () => {
+        if (!shouldCreateWorkSession) {
+          return { workSession: null, fallbackUsed: false, fraction: 1, payable: false };
+        }
+        const leaveType = formState.holidayType || 'employee_paid';
+        const baseLeaveKind = getLeaveBaseKind(leaveType) || leaveType;
+        const entryType = getEntryTypeForLeaveKind(baseLeaveKind)
+          || getEntryTypeForLeaveKind('system_paid')
+          || 'leave_unpaid';
+        const payable = isPayableLeaveKind(baseLeaveKind);
+        let fraction = Math.abs(delta);
+        if (!Number.isFinite(fraction) || fraction <= 0) {
+          fraction = baseLeaveKind === 'half_day' ? 0.5 : 1;
+        }
+        const normalizedFraction = Number.isFinite(fraction) && fraction > 0 ? fraction : 1;
+
+        let fullDayValue = 0;
+        let usedFallback = false;
+        if (payable) {
+          const computedValue = selectLeaveDayValue(employee.id, date, {
+            employees,
+            workSessions: workSessionsHistory,
+            services: servicesList,
+            leavePayPolicy,
+          });
+          if (typeof computedValue === 'number' && Number.isFinite(computedValue) && computedValue > 0) {
+            fullDayValue = computedValue;
+          }
+
+          if (!(fullDayValue > 0)) {
+            if (employee.employee_type === 'global') {
+              const monthlyRate = parseFloat(employee.current_rate);
+              if (Number.isFinite(monthlyRate) && monthlyRate > 0) {
+                try {
+                  fullDayValue = calculateGlobalDailyRate(employee, date, monthlyRate);
+                  usedFallback = true;
+                } catch (error) {
+                  console.error('Failed to calculate fallback global rate', error);
+                  fullDayValue = 0;
+                }
+              }
+            } else {
+              const currentRate = parseFloat(employee.current_rate);
+              if (Number.isFinite(currentRate) && currentRate > 0) {
+                fullDayValue = currentRate;
+                usedFallback = true;
+              }
+            }
+          }
+        }
+
+        const totalPaymentValue = payable ? fullDayValue * normalizedFraction : 0;
+        const rateUsedValue = payable && fullDayValue > 0 ? fullDayValue : null;
+        const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
+        const metadata = buildLeaveMetadata({
+          source: 'employees_leave_overview',
+          halfDay: baseLeaveKind === 'half_day',
+          method: payContext.method,
+          lookbackMonths: payContext.lookback_months,
+          legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
+          overrideApplied: payContext.override_applied,
+        });
+
+        const workSession = {
+          employee_id: employee.id,
+          date,
+          entry_type: entryType,
+          hours: 0,
+          service_id: null,
+          sessions_count: null,
+          students_count: null,
+          payable,
+          rate_used: rateUsedValue,
+          total_payment: totalPaymentValue,
+          notes: notesValue,
+        };
+        if (metadata) {
+          workSession.metadata = metadata;
+        }
+
+        return { workSession, fallbackUsed: usedFallback, fraction: normalizedFraction, payable };
+      };
+
+      const { workSession, fallbackUsed, fraction: sessionFraction, payable: sessionPayable } = buildWorkSessionPayload();
+
+      if (fallbackUsed && workSession) {
+        setFallbackDialogState({
+          employee,
+          date,
+          ledgerPayload: payload,
+          workSession,
+          fraction: sessionFraction,
+          payable: sessionPayable,
+        });
+        setFallbackAmount(workSession.rate_used ? Number(workSession.rate_used).toFixed(2) : '');
+        setFallbackError('');
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (workSession) {
+        const creationResult = await createWorkSessions({
+          session,
+          orgId: activeOrgId,
+          sessions: [workSession],
+        });
+        createdWorkSessionId = Array.isArray(creationResult?.created)
+          ? creationResult.created[0] || null
+          : null;
+        usedFallbackNotice = fallbackUsed;
+      }
+
+      await createLeaveBalanceEntry({
+        session,
+        orgId: activeOrgId,
+        body: payload,
+      });
+
       toast.success('הרישום נשמר בהצלחה');
+      if (usedFallbackNotice) {
+        toast.info('הערה: שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר.');
+      }
       if (onRefresh) await onRefresh();
+      await loadSupportingData();
       setFormState(prev => ({
         ...prev,
         notes: '',
@@ -230,10 +490,108 @@ export default function LeaveOverview({
         usageAmount: prev.entryKind === 'usage' ? prev.usageAmount : 1,
       }));
     } catch (error) {
+      if (createdWorkSessionId) {
+        try {
+          await deleteWorkSession({
+            session,
+            orgId: activeOrgId,
+            sessionId: createdWorkSessionId,
+          });
+        } catch (rollbackError) {
+          console.error('Failed to roll back work session creation', rollbackError);
+        }
+      }
       console.error('Error saving leave entry', error);
-      toast.error('שמירת הרישום נכשלה');
+      toast.error(error?.message || 'שמירת הרישום נכשלה');
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
+  };
+
+  const resetFallbackDialog = () => {
+    setFallbackDialogState(null);
+    setFallbackAmount('');
+    setFallbackError('');
+  };
+
+  const handleFallbackDialogClose = (isOpen) => {
+    if (isOpen) return;
+    if (isFallbackSubmitting) return;
+    resetFallbackDialog();
+  };
+
+  const handleFallbackConfirm = async () => {
+    if (!fallbackDialogState) return;
+    const numericValue = Number(fallbackAmount);
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      setFallbackError('יש להזין שווי יום גדול מ-0.');
+      return;
+    }
+    setFallbackError('');
+    setIsFallbackSubmitting(true);
+    setIsSubmitting(true);
+    let createdWorkSessionId = null;
+    try {
+      if (!session) {
+        throw new Error('יש להתחבר מחדש לפני שמירת הרישום.');
+      }
+      if (!activeOrgId) {
+        throw new Error('בחרו ארגון פעיל לפני שמירת הרישום.');
+      }
+      const { workSession, ledgerPayload, fraction, payable } = fallbackDialogState;
+      const normalizedFraction = Number.isFinite(fraction) && fraction > 0 ? fraction : 1;
+      const nextWorkSession = {
+        ...workSession,
+        rate_used: payable ? numericValue : null,
+        total_payment: payable ? numericValue * normalizedFraction : 0,
+      };
+
+      const creationResult = await createWorkSessions({
+        session,
+        orgId: activeOrgId,
+        sessions: [nextWorkSession],
+      });
+
+      createdWorkSessionId = Array.isArray(creationResult?.created)
+        ? creationResult.created[0] || null
+        : null;
+
+      await createLeaveBalanceEntry({
+        session,
+        orgId: activeOrgId,
+        body: ledgerPayload,
+      });
+
+      toast.success('הרישום נשמר בהצלחה');
+      toast.info('שווי יום החופשה אושר ידנית על ידי המשתמש.');
+      if (onRefresh) await onRefresh();
+      await loadSupportingData();
+      setFormState(prev => ({
+        ...prev,
+        notes: '',
+        entryKind: prev.entryKind,
+        allocationAmount: 1,
+        usageAmount: prev.entryKind === 'usage' ? prev.usageAmount : 1,
+      }));
+      resetFallbackDialog();
+    } catch (error) {
+      if (createdWorkSessionId) {
+        try {
+          await deleteWorkSession({
+            session,
+            orgId: activeOrgId,
+            sessionId: createdWorkSessionId,
+          });
+        } catch (rollbackError) {
+          console.error('Failed to roll back work session after fallback confirmation', rollbackError);
+        }
+      }
+      console.error('Error saving leave entry after confirmation', error);
+      toast.error(error?.message || 'שמירת הרישום נכשלה');
+    } finally {
+      setIsFallbackSubmitting(false);
+      setIsSubmitting(false);
+    }
   };
 
   const lockedUsageTypes = new Set(['half_day', 'system_paid', 'unpaid']);
@@ -243,6 +601,16 @@ export default function LeaveOverview({
     if (!overrideEmployeeId) return null;
     return employees.find(emp => emp.id === overrideEmployeeId) || null;
   }, [employees, overrideEmployeeId]);
+
+  const parsedFallbackAmount = Number(fallbackAmount);
+  const fallbackFraction = fallbackDialogState?.fraction ?? 1;
+  const fallbackIsPayable = fallbackDialogState?.payable !== false;
+  const fallbackTotalPreview = fallbackDialogState && fallbackIsPayable && Number.isFinite(parsedFallbackAmount)
+    ? parsedFallbackAmount * fallbackFraction
+    : null;
+  const fallbackDisplayAmount = Number.isFinite(parsedFallbackAmount)
+    ? parsedFallbackAmount.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '0.00';
 
   const hasOverrideEmployeeSelection = Boolean(selectedEmployee);
 
@@ -362,11 +730,11 @@ export default function LeaveOverview({
     );
   }
 
-  if (!dataClient) {
+  if (!activeOrgId) {
     return (
       <Card className="border-0 shadow-lg bg-white/80">
         <CardHeader className="border-b">
-          <CardTitle className="text-xl font-semibold text-slate-900">נדרש חיבור Supabase פעיל לארגון.</CardTitle>
+          <CardTitle className="text-xl font-semibold text-slate-900">בחרו ארגון פעיל כדי לנהל חופשות.</CardTitle>
         </CardHeader>
       </Card>
     );
@@ -470,6 +838,25 @@ export default function LeaveOverview({
                 className="min-h-[48px]"
               />
             </div>
+            {usagePreview?.payable ? (
+              <div className="md:col-span-3 text-right space-y-1">
+                {usagePreviewDailyDisplay ? (
+                  <p className="text-sm text-slate-600">
+                    {`שווי משוער ליום מלא: ₪${usagePreviewDailyDisplay}`}
+                  </p>
+                ) : null}
+                {usagePreviewTotalDisplay ? (
+                  <p className="text-xs text-slate-500">
+                    {`תשלום משוער לרישום (${usagePreview.fraction === 0.5 ? 'חצי יום' : `מכפיל ${usagePreview.fraction}`}): ₪${usagePreviewTotalDisplay}`}
+                  </p>
+                ) : null}
+                {usagePreview.insufficientData ? (
+                  <p className="text-xs text-amber-700">
+                    הערה: שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             <div className="flex items-end md:col-span-3 justify-end">
               <Button type="submit" className="gap-2" disabled={isSubmitting}>
                 {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
@@ -613,6 +1000,60 @@ export default function LeaveOverview({
           </Table>
         </CardContent>
       </Card>
+      <Dialog open={Boolean(fallbackDialogState)} onOpenChange={handleFallbackDialogClose}>
+        <DialogContent className="sm:max-w-md text-right">
+          <DialogHeader>
+            <DialogTitle>אישור שווי יום החופשה</DialogTitle>
+            <DialogDescription className="text-sm text-slate-500">
+              {`שווי יום החופשה חושב לפי תעריף נוכחי: ₪${fallbackDisplayAmount}. עדכנו או אשרו את הסכום לפני שמירה סופית.`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-slate-600">
+              {`שווי מוצע ליום מלא: ₪${fallbackDisplayAmount}`}
+            </p>
+            {fallbackTotalPreview !== null ? (
+              <p className="text-xs text-slate-500">
+                {`תשלום מתוכנן (${fallbackFraction === 0.5 ? 'חצי יום' : `מכפיל ${fallbackFraction}`}): ₪${fallbackTotalPreview.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+              </p>
+            ) : null}
+            <div className="space-y-1">
+              <Label htmlFor="fallback-confirm-amount" className="text-sm font-semibold text-slate-700">
+                שווי יום חופשה לאישור (₪)
+              </Label>
+              <Input
+                id="fallback-confirm-amount"
+                type="number"
+                min="0"
+                step="0.01"
+                value={fallbackAmount}
+                onChange={(event) => {
+                  setFallbackAmount(event.target.value);
+                  if (fallbackError) setFallbackError('');
+                }}
+                autoFocus
+                disabled={isFallbackSubmitting}
+              />
+              {fallbackError ? (
+                <p className="text-xs text-red-600">{fallbackError}</p>
+              ) : null}
+            </div>
+          </div>
+          <DialogFooter className="flex flex-row-reverse gap-2">
+            <Button type="button" onClick={handleFallbackConfirm} disabled={isFallbackSubmitting}>
+              {isFallbackSubmitting ? 'שומר...' : 'אשר סכום'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleFallbackDialogClose(false)}
+              disabled={isFallbackSubmitting}
+            >
+              בטל
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={isOverrideDialogOpen} onOpenChange={(open) => (!open ? handleOverrideDialogClose() : null)}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader className="text-right">

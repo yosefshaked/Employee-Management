@@ -182,7 +182,7 @@ export default function EntryRow({
             </Label>
             <Input
               type="number"
-              step="0.1"
+              step="0.25"
               value={row.hours}
               onChange={(e) => handleChange('hours', e.target.value)}
               required
@@ -219,7 +219,7 @@ export default function EntryRow({
               </Label>
               <Input
                 type="number"
-                step="0.1"
+                step="0.25"
                 value={row.hours}
                 onChange={(e) => handleChange('hours', e.target.value)}
                 required={row.isNew}
