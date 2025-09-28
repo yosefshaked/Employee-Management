@@ -6,7 +6,7 @@ import InstructorSegment from './segments/InstructorSegment.jsx';
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { sumHours, removeSegment } from './dayUtils.js';
 import ConfirmPermanentDeleteModal from './ConfirmPermanentDeleteModal.jsx';
-import { softDeleteWorkSession } from '@/api/workSessions.js';
+import { deleteWorkSession } from '@/api/work-sessions.js';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import he from '@/i18n/he.json';
@@ -33,6 +33,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Trash2 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
 
 const VALID_LEAVE_PAY_METHODS = new Set(Object.keys(LEAVE_PAY_METHOD_LABELS));
 
@@ -62,6 +64,17 @@ export default function TimeEntryForm({
 }) {
   const isGlobal = employee.employee_type === 'global';
   const isHourly = employee.employee_type === 'hourly';
+  const { session } = useSupabase();
+  const { activeOrgId } = useOrg();
+
+  const ensureSessionAndOrg = useCallback(() => {
+    if (!session) {
+      throw new Error('נדרשת התחברות כדי לבצע פעולה זו.');
+    }
+    if (!activeOrgId) {
+      throw new Error('יש לבחור ארגון פעיל לפני ביצוע הפעולה.');
+    }
+  }, [session, activeOrgId]);
 
   const createSeg = useCallback(() => ({
     hours: '',
@@ -422,8 +435,20 @@ export default function TimeEntryForm({
     if (!pendingDelete) return;
     const target = pendingDelete;
     try {
-      const deletedRow = await softDeleteWorkSession(target.id);
-      let payload = deletedRow ? [deletedRow] : [];
+      ensureSessionAndOrg();
+      const existingRow = workSessions.find(
+        (sessionRow) => String(sessionRow?.id) === String(target.id),
+      );
+      const timestamp = new Date().toISOString();
+      await deleteWorkSession({
+        session,
+        orgId: activeOrgId,
+        sessionId: target.id,
+      });
+      const deletedRow = existingRow
+        ? { ...existingRow, deleted: true, deleted_at: timestamp }
+        : null;
+      const payload = deletedRow ? [deletedRow] : [];
       if (target.kind === 'segment') {
         setSegments(prev => prev.filter(s => s.id !== target.id));
       }
@@ -450,7 +475,7 @@ export default function TimeEntryForm({
       toast.success(he['toast.delete.success']);
       setPendingDelete(null);
     } catch (err) {
-      toast.error(he['toast.delete.error']);
+      toast.error(err?.message || he['toast.delete.error']);
       setPendingDelete(null);
       throw err;
     }
