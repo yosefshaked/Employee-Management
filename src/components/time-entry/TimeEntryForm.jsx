@@ -495,7 +495,8 @@ export default function TimeEntryForm({
 
       const response = await onSubmit(submissionPayload);
       if (response?.needsConfirmation) {
-        const fallbackValueNumber = Number(response.fallbackValue) || 0;
+        const fallbackValueNumber = Number(response.fallbackValue);
+        const hasValidFallbackValue = Number.isFinite(fallbackValueNumber) && fallbackValueNumber > 0;
         const fractionValue = Number.isFinite(response.fraction) && response.fraction > 0
           ? response.fraction
           : 1;
@@ -504,7 +505,9 @@ export default function TimeEntryForm({
           fraction: fractionValue,
           payable: response.payable !== false,
         });
-        setFallbackAmount(fallbackValueNumber > 0 ? fallbackValueNumber.toFixed(2) : '');
+        setFallbackAmount(hasValidFallbackValue
+          ? String(response.fallbackValue ?? fallbackValueNumber)
+          : '');
         setFallbackError('');
       }
       return;
@@ -544,7 +547,8 @@ export default function TimeEntryForm({
       };
       const response = await onSubmit(payload);
       if (response?.needsConfirmation) {
-        const fallbackValueNumber = Number(response.fallbackValue) || 0;
+        const fallbackValueNumber = Number(response.fallbackValue);
+        const hasValidFallbackValue = Number.isFinite(fallbackValueNumber) && fallbackValueNumber > 0;
         const fractionValue = Number.isFinite(response.fraction) && response.fraction > 0
           ? response.fraction
           : fallbackPrompt.fraction;
@@ -553,7 +557,9 @@ export default function TimeEntryForm({
           fraction: fractionValue,
           payable: response.payable !== false,
         });
-        setFallbackAmount(fallbackValueNumber > 0 ? fallbackValueNumber.toFixed(2) : '');
+        setFallbackAmount(hasValidFallbackValue
+          ? String(response.fallbackValue ?? fallbackValueNumber)
+          : '');
         setFallbackError('');
         setIsConfirmingFallback(false);
         return;
@@ -874,9 +880,14 @@ export default function TimeEntryForm({
   const fallbackTotal = fallbackPrompt && fallbackPrompt.payable !== false && Number.isFinite(parsedFallbackAmount)
     ? parsedFallbackAmount * fallbackFraction
     : null;
-  const fallbackDisplayAmount = Number.isFinite(parsedFallbackAmount)
-    ? parsedFallbackAmount.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : '0.00';
+  const fallbackDisplayAmount = typeof fallbackAmount === 'string' && fallbackAmount.trim().length > 0
+    ? fallbackAmount.trim()
+    : (Number.isFinite(parsedFallbackAmount) && parsedFallbackAmount !== 0
+      ? String(parsedFallbackAmount)
+      : '0');
+  const fallbackTotalDisplay = fallbackTotal !== null
+    ? String(fallbackTotal)
+    : null;
 
   return (
     <form onSubmit={handleSave} className="flex flex-col w-[min(98vw,1100px)] max-w-[98vw] h-[min(92vh,calc(100dvh-2rem))]">
@@ -912,9 +923,9 @@ export default function TimeEntryForm({
             <p className="text-sm text-slate-600">
               {`שווי מוצע ליום מלא: ₪${fallbackDisplayAmount}`}
             </p>
-            {fallbackTotal !== null ? (
+            {fallbackTotalDisplay !== null ? (
               <p className="text-xs text-slate-500">
-                {`תשלום מתוכנן לפי בחירה (${fallbackFraction === 0.5 ? 'חצי יום' : `מכפיל ${fallbackFraction}`}): ₪${fallbackTotal.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                {`תשלום מתוכנן לפי בחירה (${fallbackFraction === 0.5 ? 'חצי יום' : `מכפיל ${fallbackFraction}`}): ₪${fallbackTotalDisplay}`}
               </p>
             ) : null}
             <div className="space-y-1">

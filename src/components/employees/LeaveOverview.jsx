@@ -452,7 +452,11 @@ export default function LeaveOverview({
           fraction: sessionFraction,
           payable: sessionPayable,
         });
-        setFallbackAmount(workSession.rate_used ? Number(workSession.rate_used).toFixed(2) : '');
+        const fallbackRateNumber = Number(workSession.rate_used);
+        const hasValidRate = Number.isFinite(fallbackRateNumber) && fallbackRateNumber > 0;
+        setFallbackAmount(hasValidRate
+          ? String(workSession.rate_used ?? fallbackRateNumber)
+          : '');
         setFallbackError('');
         setIsSubmitting(false);
         return;
@@ -608,9 +612,14 @@ export default function LeaveOverview({
   const fallbackTotalPreview = fallbackDialogState && fallbackIsPayable && Number.isFinite(parsedFallbackAmount)
     ? parsedFallbackAmount * fallbackFraction
     : null;
-  const fallbackDisplayAmount = Number.isFinite(parsedFallbackAmount)
-    ? parsedFallbackAmount.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : '0.00';
+  const fallbackDisplayAmount = typeof fallbackAmount === 'string' && fallbackAmount.trim().length > 0
+    ? fallbackAmount.trim()
+    : (Number.isFinite(parsedFallbackAmount) && parsedFallbackAmount !== 0
+      ? String(parsedFallbackAmount)
+      : '0');
+  const fallbackTotalDisplay = fallbackTotalPreview !== null
+    ? String(fallbackTotalPreview)
+    : null;
 
   const hasOverrideEmployeeSelection = Boolean(selectedEmployee);
 
@@ -1012,9 +1021,9 @@ export default function LeaveOverview({
             <p className="text-sm text-slate-600">
               {`שווי מוצע ליום מלא: ₪${fallbackDisplayAmount}`}
             </p>
-            {fallbackTotalPreview !== null ? (
+            {fallbackTotalDisplay !== null ? (
               <p className="text-xs text-slate-500">
-                {`תשלום מתוכנן (${fallbackFraction === 0.5 ? 'חצי יום' : `מכפיל ${fallbackFraction}`}): ₪${fallbackTotalPreview.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                {`תשלום מתוכנן (${fallbackFraction === 0.5 ? 'חצי יום' : `מכפיל ${fallbackFraction}`}): ₪${fallbackTotalDisplay}`}
               </p>
             ) : null}
             <div className="space-y-1">

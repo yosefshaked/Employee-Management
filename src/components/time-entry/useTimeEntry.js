@@ -701,9 +701,7 @@ export function useTimeEntry({
         error.code = 'TIME_ENTRY_LEAVE_FALLBACK_INVALID';
         throw error;
       }
-      const fallbackValueForConfirmation = Number(
-        fallbackDailyValue.toFixed(2),
-      );
+      const fallbackValueForConfirmation = fallbackDailyValue;
       return {
         needsConfirmation: true,
         fallbackValue: fallbackValueForConfirmation,
