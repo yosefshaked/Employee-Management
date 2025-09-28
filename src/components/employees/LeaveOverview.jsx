@@ -43,6 +43,7 @@ import {
   isLeaveEntryType,
   isPayableLeaveKind,
   resolveLeavePayMethodContext,
+  formatLeaveTypeLabel,
 } from '@/lib/leave.js';
 import { buildLeaveMetadata } from '@/lib/workSessionsMetadata.js';
 
@@ -131,7 +132,11 @@ export default function LeaveOverview({
   const usageOptions = useMemo(() => {
     return LEAVE_TYPE_OPTIONS
       .filter(option => option.value !== 'mixed')
-      .filter(option => leavePolicy.allow_half_day || option.value !== 'half_day');
+      .filter(option => leavePolicy.allow_half_day || option.value !== 'half_day')
+      .map(option => ({
+        ...option,
+        label: formatLeaveTypeLabel(option.value, option.label),
+      }));
   }, [leavePolicy.allow_half_day]);
 
   const defaultUsageType = useMemo(() => {

@@ -29,6 +29,7 @@ import {
   normalizeLeavePayPolicy,
   normalizeMixedSubtype,
   DEFAULT_MIXED_SUBTYPE,
+  formatLeaveTypeLabel,
 } from '@/lib/leave.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Trash2 } from 'lucide-react';
@@ -183,7 +184,7 @@ export default function TimeEntryForm({
     return LEAVE_TYPE_OPTIONS
       .filter(option => option.value !== 'mixed')
       .filter(option => allowHalfDay || option.value !== 'half_day')
-      .map(option => [option.value, option.label]);
+      .map(option => [option.value, formatLeaveTypeLabel(option.value, option.label)]);
   }, [allowHalfDay]);
   const defaultNonSystemLeaveType = useMemo(() => {
     const candidate = leaveTypeOptions.find(([value]) => value !== 'system_paid');
@@ -192,7 +193,7 @@ export default function TimeEntryForm({
   const secondaryLeaveTypeOptions = useMemo(() => (
     LEAVE_TYPE_OPTIONS
       .filter(option => option.value !== 'mixed' && option.value !== 'half_day')
-      .map(option => [option.value, option.label])
+      .map(option => [option.value, formatLeaveTypeLabel(option.value, option.label)])
   ), []);
 
   useEffect(() => {
