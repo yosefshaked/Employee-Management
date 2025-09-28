@@ -23,6 +23,7 @@ import {
   LEAVE_PAY_METHOD_DESCRIPTIONS,
   LEAVE_PAY_METHOD_LABELS,
   LEAVE_TYPE_OPTIONS,
+  SYSTEM_PAID_ALERT_TEXT,
   getLeaveBaseKind,
   isPayableLeaveKind,
   normalizeLeavePayPolicy,
@@ -143,6 +144,7 @@ export default function TimeEntryForm({
   const [dayType, setDayType] = useState(initialDayType);
   const [paidLeaveNotes, setPaidLeaveNotes] = useState(initialPaidLeaveNotes);
   const [leaveType, setLeaveType] = useState(initialLeaveType || '');
+  const [lastNonSystemLeaveType, setLastNonSystemLeaveType] = useState('employee_paid');
   const [errors, setErrors] = useState({});
   const [pendingDelete, setPendingDelete] = useState(null);
   const [currentPaidLeaveId, setCurrentPaidLeaveId] = useState(paidLeaveId);
@@ -158,12 +160,22 @@ export default function TimeEntryForm({
     setCurrentPaidLeaveId(paidLeaveId);
   }, [paidLeaveId]);
 
+  useEffect(() => {
+    if (leaveType && leaveType !== 'system_paid') {
+      setLastNonSystemLeaveType(leaveType);
+    }
+  }, [leaveType]);
+
   const leaveTypeOptions = useMemo(() => {
     return LEAVE_TYPE_OPTIONS
       .filter(option => option.value !== 'mixed')
       .filter(option => allowHalfDay || option.value !== 'half_day')
       .map(option => [option.value, option.label]);
   }, [allowHalfDay]);
+  const defaultNonSystemLeaveType = useMemo(() => {
+    const candidate = leaveTypeOptions.find(([value]) => value !== 'system_paid');
+    return candidate ? candidate[0] : 'employee_paid';
+  }, [leaveTypeOptions]);
   const secondaryLeaveTypeOptions = useMemo(() => (
     LEAVE_TYPE_OPTIONS
       .filter(option => option.value !== 'mixed' && option.value !== 'half_day')
@@ -302,11 +314,22 @@ export default function TimeEntryForm({
   const showPreStartWarning = leaveDayValueInfo.preStartDate;
 
   const isHalfDaySelection = leaveType === 'half_day';
+  const isSystemPaidSelection = leaveType === 'system_paid';
   const secondHalfEnabled = isLeaveDay && isHalfDaySelection && includeSecondHalf;
   const shouldIncludeWorkSegments = secondHalfEnabled && secondHalfMode === 'work';
   const shouldIncludeLeaveSecondHalf = secondHalfEnabled && secondHalfMode === 'leave';
 
   const addSeg = () => setSegments(prev => [...prev, createSeg()]);
+  const handleSystemPaidToggle = useCallback((checked) => {
+    if (checked) {
+      setLeaveType('system_paid');
+      return;
+    }
+    const fallbackType = (lastNonSystemLeaveType && leaveTypeOptions.some(([value]) => value === lastNonSystemLeaveType))
+      ? lastNonSystemLeaveType
+      : defaultNonSystemLeaveType;
+    setLeaveType(fallbackType);
+  }, [defaultNonSystemLeaveType, lastNonSystemLeaveType, leaveTypeOptions]);
   const duplicateSeg = (index) => {
     setSegments(prev => {
       if (index < 0 || index >= prev.length) return prev;
@@ -943,6 +966,30 @@ export default function TimeEntryForm({
             ))}
           </SelectContent>
         </Select>
+      </div>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <Label
+            htmlFor="time-entry-system-paid-toggle"
+            className="text-sm font-medium text-slate-700"
+          >
+            על חשבון המערכת
+          </Label>
+          <Switch
+            id="time-entry-system-paid-toggle"
+            checked={isSystemPaidSelection}
+            onCheckedChange={handleSystemPaidToggle}
+            aria-label="על חשבון המערכת"
+          />
+        </div>
+        {isSystemPaidSelection ? (
+          <div
+            role="alert"
+            className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+          >
+            {SYSTEM_PAID_ALERT_TEXT}
+          </div>
+        ) : null}
       </div>
       <div className="space-y-1">
         <Label className="text-sm font-medium text-slate-700">הערות</Label>

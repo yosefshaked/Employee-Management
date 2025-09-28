@@ -18,9 +18,9 @@ import { calculateGlobalDailyRate, aggregateGlobalDays, createLeaveDayValueResol
 import {
   isLeaveEntryType,
   LEAVE_TYPE_OPTIONS,
-  MIXED_SUBTYPE_OPTIONS,
   DEFAULT_MIXED_SUBTYPE,
   normalizeMixedSubtype,
+  SYSTEM_PAID_ALERT_TEXT,
 } from '@/lib/leave.js';
 import { Switch } from '@/components/ui/switch';
 import { selectLeaveDayValue } from '@/selectors.js';
@@ -379,6 +379,12 @@ export default function MultiDateEntryModal({
     }));
   };
 
+  const handleDefaultSystemPaidToggle = useCallback((checked) => {
+    const nextSubtype = checked ? 'holiday' : 'vacation';
+    setGlobalMixedSubtype(nextSubtype);
+    applySubtypeToAll(nextSubtype);
+  }, [applySubtypeToAll]);
+
   const markAllMixed = (paid) => {
     setMixedSelections(prev => {
       const next = {};
@@ -399,7 +405,7 @@ export default function MultiDateEntryModal({
     });
   };
 
-  const applySubtypeToAll = (subtype) => {
+  const applySubtypeToAll = useCallback((subtype) => {
     const normalized = normalizeMixedSubtype(subtype) || DEFAULT_MIXED_SUBTYPE;
     setMixedSelections(prev => {
       const next = {};
@@ -414,7 +420,7 @@ export default function MultiDateEntryModal({
       });
       return next;
     });
-  };
+  }, [ensureMixedSelection, selectedEmployees, sortedDates]);
 
   const applyHalfDayToPaid = () => {
     if (!allowHalfDay) return;
@@ -819,25 +825,22 @@ export default function MultiDateEntryModal({
                   <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:items-end">
                     <div className="space-y-2">
                       <Label className="text-sm font-medium text-slate-700">סוג חופשה (ברירת מחדל)</Label>
-                      <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="סוג חופשה מעורבת">
-                        {MIXED_SUBTYPE_OPTIONS.map(option => {
-                          const active = globalMixedSubtype === option.value;
-                          return (
-                            <Button
-                              key={option.value}
-                              type="button"
-                              variant={active ? 'default' : 'ghost'}
-                              className="h-10"
-                              onClick={() => {
-                                setGlobalMixedSubtype(option.value);
-                                applySubtypeToAll(option.value);
-                              }}
-                            >
-                              {option.label}
-                            </Button>
-                          );
-                        })}
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium text-slate-700">על חשבון המערכת</span>
+                        <Switch
+                          checked={globalMixedSubtype === 'holiday'}
+                          onCheckedChange={handleDefaultSystemPaidToggle}
+                          aria-label="על חשבון המערכת"
+                        />
                       </div>
+                      {globalMixedSubtype === 'holiday' ? (
+                        <div
+                          role="alert"
+                          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                        >
+                          {SYSTEM_PAID_ALERT_TEXT}
+                        </div>
+                      ) : null}
                       <p className="text-xs text-slate-500">ניתן לשנות לכל יום בנפרד ברשימה למטה.</p>
                     </div>
                     <div className="flex flex-wrap gap-2 justify-end">
@@ -907,22 +910,28 @@ export default function MultiDateEntryModal({
                                         </Button>
                                       </div>
                                     </div>
-                                    <div className="flex flex-wrap items-center justify-between gap-3">
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-xs font-medium text-slate-600">סוג חופשה</span>
-                                        <Select
-                                          value={subtypeValue}
-                                          onValueChange={value => updateMixedSelection(empId, dateStr, { subtype: value })}
-                                        >
-                                          <SelectTrigger className="h-9 w-[120px] bg-white text-sm">
-                                            <SelectValue />
-                                          </SelectTrigger>
-                                          <SelectContent>
-                                            {MIXED_SUBTYPE_OPTIONS.map(option => (
-                                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                                            ))}
-                                          </SelectContent>
-                                        </Select>
+                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                      <div className="flex flex-col gap-1">
+                                        <div className="flex items-center gap-2">
+                                          <span className={`text-xs font-medium ${paid ? 'text-slate-600' : 'text-slate-400'}`}>
+                                            על חשבון המערכת
+                                          </span>
+                                          <Switch
+                                            checked={subtypeValue === 'holiday'}
+                                            onCheckedChange={checked => updateMixedSelection(empId, dateStr, {
+                                              subtype: checked ? 'holiday' : 'vacation',
+                                            })}
+                                            aria-label="על חשבון המערכת"
+                                          />
+                                        </div>
+                                        {paid && subtypeValue === 'holiday' ? (
+                                          <div
+                                            role="alert"
+                                            className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900"
+                                          >
+                                            {SYSTEM_PAID_ALERT_TEXT}
+                                          </div>
+                                        ) : null}
                                       </div>
                                       <div className="flex items-center gap-2">
                                         <span className={`text-xs font-medium ${paid ? 'text-slate-600' : 'text-slate-400'}`}>חצי יום</span>

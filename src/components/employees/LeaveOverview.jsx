@@ -36,6 +36,7 @@ import {
   LEAVE_PAY_METHOD_OPTIONS,
   LEAVE_PAY_METHOD_DESCRIPTIONS,
   LEAVE_PAY_METHOD_LABELS,
+  SYSTEM_PAID_ALERT_TEXT,
   getLeaveBaseKind,
   getNegativeBalanceFloor,
   getEntryTypeForLeaveKind,
@@ -81,6 +82,7 @@ export default function LeaveOverview({
     allocationAmount: 1,
     notes: '',
   }));
+  const [lastNonSystemHolidayType, setLastNonSystemHolidayType] = useState('employee_paid');
   const [overrideEmployeeId, setOverrideEmployeeId] = useState(null);
   const [overrideMethod, setOverrideMethod] = useState(OVERRIDE_METHOD_PLACEHOLDER_VALUE);
   const [overrideRate, setOverrideRate] = useState('');
@@ -127,8 +129,15 @@ export default function LeaveOverview({
   }, [loadSupportingData]);
 
   const usageOptions = useMemo(() => {
-    return LEAVE_TYPE_OPTIONS.filter(option => leavePolicy.allow_half_day || option.value !== 'half_day');
+    return LEAVE_TYPE_OPTIONS
+      .filter(option => option.value !== 'mixed')
+      .filter(option => leavePolicy.allow_half_day || option.value !== 'half_day');
   }, [leavePolicy.allow_half_day]);
+
+  const defaultUsageType = useMemo(() => {
+    const option = usageOptions.find(item => item.value !== 'system_paid');
+    return option ? option.value : 'employee_paid';
+  }, [usageOptions]);
 
   useEffect(() => {
     if (employees.length === 0) {
@@ -173,6 +182,12 @@ export default function LeaveOverview({
     });
   }, [formState.date, formState.entryKind, formState.holidayType, leavePolicy]);
 
+  useEffect(() => {
+    if (formState.holidayType && formState.holidayType !== 'system_paid') {
+      setLastNonSystemHolidayType(formState.holidayType);
+    }
+  }, [formState.holidayType]);
+
   const summaryRows = useMemo(() => {
     const evaluation = evaluationDate;
     return employees
@@ -192,6 +207,28 @@ export default function LeaveOverview({
   const handleFormChange = (updates) => {
     setFormState(prev => ({ ...prev, ...updates }));
   };
+
+  const isSystemPaidSelection = formState.holidayType === 'system_paid';
+
+  const handleSystemPaidToggle = useCallback((checked) => {
+    if (checked) {
+      setFormState(prev => ({
+        ...prev,
+        holidayType: 'system_paid',
+        usageAmount: determineUsageAmount('system_paid'),
+      }));
+      return;
+    }
+    const fallbackType = (lastNonSystemHolidayType
+      && usageOptions.some(option => option.value === lastNonSystemHolidayType))
+      ? lastNonSystemHolidayType
+      : defaultUsageType;
+    setFormState(prev => ({
+      ...prev,
+      holidayType: fallbackType,
+      usageAmount: determineUsageAmount(fallbackType),
+    }));
+  }, [defaultUsageType, lastNonSystemHolidayType, usageOptions]);
 
   const usagePreview = useMemo(() => {
     if (formState.entryKind !== 'usage') return null;
@@ -818,12 +855,36 @@ export default function LeaveOverview({
                     <SelectTrigger className="bg-white">
                       <SelectValue />
                     </SelectTrigger>
-                  <SelectContent>
-                    {usageOptions.map(option => (
-                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                    ))}
-                  </SelectContent>
+                    <SelectContent>
+                      {usageOptions.map(option => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))}
+                    </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label
+                      htmlFor="employees-system-paid-toggle"
+                      className="text-sm font-semibold text-slate-700"
+                    >
+                      על חשבון המערכת
+                    </Label>
+                    <Switch
+                      id="employees-system-paid-toggle"
+                      checked={isSystemPaidSelection}
+                      onCheckedChange={handleSystemPaidToggle}
+                      aria-label="על חשבון המערכת"
+                    />
+                  </div>
+                  {isSystemPaidSelection ? (
+                    <div
+                      role="alert"
+                      className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+                    >
+                      {SYSTEM_PAID_ALERT_TEXT}
+                    </div>
+                  ) : null}
                 </div>
                 <div className="space-y-1">
                   <Label className="text-sm font-semibold text-slate-700">כמות לניכוי</Label>

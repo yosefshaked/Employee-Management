@@ -92,6 +92,9 @@ export const LEAVE_TYPE_OPTIONS = [
   { value: 'half_day', label: 'חצי יום' },
 ];
 
+export const SYSTEM_PAID_ALERT_TEXT =
+  'שימו לב: יום חופשה זה יירשם כחג ולא ינוכה ממכסת החופשה של העובד.';
+
 export const HOLIDAY_TYPE_LABELS = LEAVE_TYPE_OPTIONS.reduce((acc, option) => {
   acc[option.value] = option.label;
   return acc;
@@ -146,7 +149,6 @@ const ENTRY_TYPE_TO_KIND = {
   leave_unpaid: 'unpaid',
   leave: 'unpaid',
   leave_half_day: 'half_day',
-  leave_mixed: 'system_paid',
 };
 
 export function getLeaveKindFromEntryType(entryType) {
