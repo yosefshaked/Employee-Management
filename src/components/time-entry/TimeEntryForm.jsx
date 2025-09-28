@@ -31,6 +31,7 @@ import {
 } from '@/lib/leave.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Trash2 } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 
 const VALID_LEAVE_PAY_METHODS = new Set(Object.keys(LEAVE_PAY_METHOD_LABELS));
 
@@ -54,19 +55,21 @@ export default function TimeEntryForm({
   initialMixedPaid = true,
   initialMixedSubtype = DEFAULT_MIXED_SUBTYPE,
   initialMixedHalfDay = false,
+  initialHalfDaySecondHalfMode = null,
+  initialHalfDaySecondLeaveType = 'employee_paid',
   leavePayPolicy = DEFAULT_LEAVE_PAY_POLICY,
 }) {
   const isGlobal = employee.employee_type === 'global';
   const isHourly = employee.employee_type === 'hourly';
 
-  const createSeg = () => ({
+  const createSeg = useCallback(() => ({
     hours: '',
     service_id: '',
     sessions_count: '',
     students_count: '',
     notes: '',
     _status: 'new',
-  });
+  }), []);
   const [segments, setSegments] = useState(() => {
     if (initialDayType === 'paid_leave') return initialRows || [];
     if (initialRows && initialRows.length > 0) {
@@ -85,6 +88,20 @@ export default function TimeEntryForm({
     notes: '',
     _status: 'new',
   }), []);
+  const sanitizeSegmentsForSubmit = useCallback((list = []) => (
+    Array.isArray(list)
+      ? list
+        .filter(segment => segment && segment._status !== 'deleted')
+        .map(segment => {
+          const next = { ...segment };
+          if (!next.id) {
+            delete next.id;
+          }
+          delete next._status;
+          return next;
+        })
+      : []
+  ), []);
   const mapInitialAdjustments = useCallback((items = []) => {
     if (!Array.isArray(items) || items.length === 0) {
       return [createAdjustment()];
@@ -133,6 +150,9 @@ export default function TimeEntryForm({
   const [fallbackAmount, setFallbackAmount] = useState('');
   const [fallbackError, setFallbackError] = useState('');
   const [isConfirmingFallback, setIsConfirmingFallback] = useState(false);
+  const [includeSecondHalf, setIncludeSecondHalf] = useState(false);
+  const [secondHalfMode, setSecondHalfMode] = useState('work');
+  const [secondHalfLeaveType, setSecondHalfLeaveType] = useState('employee_paid');
 
   useEffect(() => {
     setCurrentPaidLeaveId(paidLeaveId);
@@ -144,6 +164,11 @@ export default function TimeEntryForm({
       .filter(option => allowHalfDay || option.value !== 'half_day')
       .map(option => [option.value, option.label]);
   }, [allowHalfDay]);
+  const secondaryLeaveTypeOptions = useMemo(() => (
+    LEAVE_TYPE_OPTIONS
+      .filter(option => option.value !== 'mixed' && option.value !== 'half_day')
+      .map(option => [option.value, option.label])
+  ), []);
 
   useEffect(() => {
     if (initialLeaveType !== 'mixed') return;
@@ -163,11 +188,44 @@ export default function TimeEntryForm({
   }, [initialLeaveType, initialMixedSubtype, initialMixedPaid, initialMixedHalfDay, allowHalfDay]);
 
   useEffect(() => {
+    if (initialDayType !== 'paid_leave') return;
+    if (initialLeaveType !== 'half_day') return;
+    if (initialHalfDaySecondHalfMode === 'leave') {
+      setIncludeSecondHalf(true);
+      setSecondHalfMode('leave');
+      setSecondHalfLeaveType(initialHalfDaySecondLeaveType || 'employee_paid');
+      return;
+    }
+    const hasExistingWork = Array.isArray(initialRows) && initialRows.length > 0;
+    if (hasExistingWork || initialHalfDaySecondHalfMode === 'work') {
+      setIncludeSecondHalf(true);
+      setSecondHalfMode('work');
+    }
+  }, [
+    initialDayType,
+    initialLeaveType,
+    initialRows,
+    initialHalfDaySecondHalfMode,
+    initialHalfDaySecondLeaveType,
+  ]);
+
+  useEffect(() => {
     if (!allowHalfDay && leaveType === 'half_day') {
       const [firstOption] = leaveTypeOptions;
       setLeaveType(firstOption ? firstOption[0] : '');
     }
   }, [allowHalfDay, leaveType, leaveTypeOptions]);
+
+  useEffect(() => {
+    if (leaveType !== 'half_day') {
+      if (includeSecondHalf) setIncludeSecondHalf(false);
+      if (secondHalfMode !== 'work') setSecondHalfMode('work');
+      return;
+    }
+    if (includeSecondHalf && secondHalfMode === 'work') {
+      setSegments(prev => (prev && prev.length > 0 ? prev : [createSeg()]));
+    }
+  }, [leaveType, includeSecondHalf, secondHalfMode, createSeg]);
 
   const dailyRate = useMemo(() => {
     if (!isGlobal) return 0;
@@ -244,6 +302,9 @@ export default function TimeEntryForm({
   const showPreStartWarning = leaveDayValueInfo.preStartDate;
 
   const isHalfDaySelection = leaveType === 'half_day';
+  const secondHalfEnabled = isLeaveDay && isHalfDaySelection && includeSecondHalf;
+  const shouldIncludeWorkSegments = secondHalfEnabled && secondHalfMode === 'work';
+  const shouldIncludeLeaveSecondHalf = secondHalfEnabled && secondHalfMode === 'leave';
 
   const addSeg = () => setSegments(prev => [...prev, createSeg()]);
   const duplicateSeg = (index) => {
@@ -257,6 +318,12 @@ export default function TimeEntryForm({
       return [...prev.slice(0, index + 1), copy, ...prev.slice(index + 1)];
     });
   };
+
+  useEffect(() => {
+    if (!shouldIncludeWorkSegments && Object.keys(errors).length > 0) {
+      setErrors({});
+    }
+  }, [shouldIncludeWorkSegments, errors]);
   const deleteSeg = (index) => {
     if (index < 0 || index >= segments.length) return;
     const target = segments[index];
@@ -458,23 +525,28 @@ export default function TimeEntryForm({
         toast.error('יש לבחור סוג חופשה.', { duration: 15000 });
         return;
       }
-      const conflicts = segments.reduce((list, segment, index) => {
-        if (!segment || segment._status === 'deleted') {
+      if (shouldIncludeWorkSegments && !validate()) {
+        return;
+      }
+      const conflicts = shouldIncludeWorkSegments
+        ? []
+        : segments.reduce((list, segment, index) => {
+          if (!segment || segment._status === 'deleted') {
+            return list;
+          }
+          if (segment._status === 'existing') {
+            return [...list, { segment, index }];
+          }
+          const hasData =
+            (segment.hours && parseFloat(segment.hours) > 0) ||
+            segment.service_id ||
+            segment.sessions_count ||
+            segment.students_count;
+          if (hasData) {
+            return [...list, { segment, index }];
+          }
           return list;
-        }
-        if (segment._status === 'existing') {
-          return [...list, { segment, index }];
-        }
-        const hasData =
-          (segment.hours && parseFloat(segment.hours) > 0) ||
-          segment.service_id ||
-          segment.sessions_count ||
-          segment.students_count;
-        if (hasData) {
-          return [...list, { segment, index }];
-        }
-        return list;
-      }, []);
+        }, []);
       if (conflicts.length > 0) {
         const dateStr = format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy');
         const details = conflicts.map(({ segment, index }) => {
@@ -485,12 +557,42 @@ export default function TimeEntryForm({
         toast.error(`קיימים רישומי עבודה מתנגשים:\n${details}`, { duration: 10000 });
         return;
       }
+      const sanitizedWorkRows = shouldIncludeWorkSegments
+        ? sanitizeSegmentsForSubmit(segments)
+        : [];
+      if (shouldIncludeWorkSegments && sanitizedWorkRows.length === 0) {
+        toast.error('נדרש להזין לפחות רישום עבודה לחצי היום השני.', { duration: 15000 });
+        return;
+      }
+      if (shouldIncludeLeaveSecondHalf && !secondHalfLeaveType) {
+        toast.error('יש לבחור סוג חופשה לחצי היום השני.', { duration: 15000 });
+        return;
+      }
+      const sanitizedWorkIds = new Set(
+        sanitizedWorkRows
+          .filter(row => row && row.id)
+          .map(row => String(row.id)),
+      );
+      const removedWorkIds = Array.from(new Set(
+        segments
+          .filter(segment => segment && segment._status === 'existing' && segment.id)
+          .filter(segment => (
+            !shouldIncludeWorkSegments
+            || !sanitizedWorkIds.has(String(segment.id))
+          ))
+          .map(segment => segment.id),
+      ));
       const submissionPayload = {
-        rows: [],
+        rows: sanitizedWorkRows,
         dayType,
         paidLeaveId: currentPaidLeaveId,
         paidLeaveNotes,
         leaveType,
+        halfDaySecondHalfMode: secondHalfEnabled ? secondHalfMode : null,
+        halfDayWorkSegments: sanitizedWorkRows,
+        halfDaySecondLeaveType: shouldIncludeLeaveSecondHalf ? secondHalfLeaveType : null,
+        includeHalfDaySecondHalf: secondHalfEnabled,
+        halfDayRemovedWorkIds: removedWorkIds,
       };
 
       const response = await onSubmit(submissionPayload);
@@ -513,13 +615,7 @@ export default function TimeEntryForm({
       return;
     }
     if (!validate()) return;
-    const sanitizedRows = segments.map(segment => {
-      const next = { ...segment };
-      if (!segment.id) {
-        delete next.id;
-      }
-      return next;
-    });
+    const sanitizedRows = sanitizeSegmentsForSubmit(segments);
     await onSubmit({ rows: sanitizedRows, dayType, paidLeaveId: currentPaidLeaveId, leaveType: null });
   };
 
@@ -635,6 +731,11 @@ export default function TimeEntryForm({
       ? 'חופשה מהמכסה'
       : (optionLabel || 'חופשה');
     const timePrefix = isHalfDaySelection ? 'שווי חצי יום' : 'שווי יום';
+    const secondHalfSummary = secondHalfEnabled
+      ? (shouldIncludeWorkSegments
+        ? 'החצי השני יסומן כיום עבודה.'
+        : 'החצי השני יסומן כחופשה נוספת.')
+      : null;
 
     return (
       <>
@@ -643,6 +744,9 @@ export default function TimeEntryForm({
           <span>{`שיטה: ${leaveMethodLabel}`}</span>
           {leaveMethodDescription ? <InfoTooltip text={leaveMethodDescription} /> : null}
         </div>
+        {secondHalfSummary ? (
+          <div className="mt-1 text-xs text-slate-600 text-right">{secondHalfSummary}</div>
+        ) : null}
         {showInsufficientHistoryHint ? (
           <div className="mt-1 text-xs text-amber-700 text-right">
             הערה: שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר.
@@ -665,6 +769,8 @@ export default function TimeEntryForm({
     leaveMethodDescription,
     showInsufficientHistoryHint,
     showPreStartWarning,
+    secondHalfEnabled,
+    shouldIncludeWorkSegments,
   ]);
 
   const summary = dayType === 'adjustment'
@@ -849,24 +955,115 @@ export default function TimeEntryForm({
           placeholder="הערה חופשית (לא חובה)"
         />
       </div>
-      {/* Mixed leave controls were removed in favor of explicit leave types */}
+      {isHalfDaySelection ? (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <Label className="text-sm font-medium text-slate-700" htmlFor="second-half-toggle">
+              הוסף רישום לחצי היום השני
+            </Label>
+            <Switch
+              id="second-half-toggle"
+              checked={secondHalfEnabled}
+              onCheckedChange={(checked) => {
+                setIncludeSecondHalf(checked);
+                if (!checked) {
+                  setSecondHalfMode('work');
+                }
+              }}
+              aria-label="הוסף רישום לחצי היום השני"
+            />
+          </div>
+          {secondHalfEnabled ? (
+            <div className="space-y-3 rounded-xl bg-slate-50 px-3 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="text-sm font-medium text-slate-700">סוג הרישום הנוסף:</span>
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm ${secondHalfMode === 'work' ? 'font-semibold text-slate-900' : 'text-slate-500'}`}>
+                    עבודה
+                  </span>
+                  <Switch
+                    checked={secondHalfMode === 'leave'}
+                    onCheckedChange={(checked) => setSecondHalfMode(checked ? 'leave' : 'work')}
+                    aria-label="סוג הרישום הנוסף"
+                  />
+                  <span className={`text-sm ${secondHalfMode === 'leave' ? 'font-semibold text-slate-900' : 'text-slate-500'}`}>
+                    חופשה
+                  </span>
+                </div>
+              </div>
+              {shouldIncludeLeaveSecondHalf ? (
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium text-slate-700">סוג חופשה נוסף</Label>
+                  <Select
+                    value={secondHalfLeaveType}
+                    onValueChange={value => setSecondHalfLeaveType(value)}
+                  >
+                    <SelectTrigger className="bg-white h-10 text-base leading-6">
+                      <SelectValue placeholder="בחר סוג לחצי השני" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {secondaryLeaveTypeOptions.map(([value, label]) => (
+                        <SelectItem key={value} value={value}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
+              {!shouldIncludeWorkSegments ? null : (
+                <p className="text-xs text-slate-600 text-right">
+                  מלאו את מקטעי העבודה למטה כדי לשמור את חצי היום השני כרישום עבודה.
+                </p>
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 
-  const visibleSegments = dayType === 'paid_leave'
-    ? [{ id: 'paid_leave_notes' }]
-    : dayType === 'adjustment'
-      ? adjustments
-      : segments;
+  const visibleSegments = useMemo(() => {
+    if (dayType === 'paid_leave') {
+      const base = [{ id: 'paid_leave_notes', kind: 'leave' }];
+      if (shouldIncludeWorkSegments) {
+        segments.forEach((segment, index) => {
+          if (!segment || segment._status === 'deleted') {
+            return;
+          }
+          base.push({
+            id: segment.id || `work-${index}`,
+            kind: 'work',
+            segment,
+            originalIndex: index,
+          });
+        });
+      }
+      return base;
+    }
+    if (dayType === 'adjustment') {
+      return adjustments;
+    }
+    return segments;
+  }, [dayType, segments, adjustments, shouldIncludeWorkSegments]);
 
-  const segmentRenderer = dayType === 'paid_leave'
-    ? renderPaidLeaveSegment
-    : dayType === 'adjustment'
-      ? renderAdjustmentSegment
-      : renderSegment;
+  const segmentRenderer = (item, idx) => {
+    if (dayType === 'paid_leave') {
+      if (!item) return null;
+      if (item.kind === 'leave') {
+        return renderPaidLeaveSegment();
+      }
+      if (item.kind === 'work') {
+        return renderSegment(item.segment, item.originalIndex);
+      }
+      return null;
+    }
+    if (dayType === 'adjustment') {
+      return renderAdjustmentSegment(item, idx);
+    }
+    return renderSegment(item, idx);
+  };
 
   const addHandler = dayType === 'paid_leave'
-    ? null
+    ? (shouldIncludeWorkSegments ? addSeg : null)
     : dayType === 'adjustment'
       ? addAdjustment
       : addSeg;

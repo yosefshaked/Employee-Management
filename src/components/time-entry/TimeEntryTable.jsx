@@ -608,6 +608,23 @@ function TimeEntryTableInner({
                                                 payload.mixedSubtype = resolvedSubtype;
                                                 payload.mixedHalfDay = isPaid && mixedDetails.halfDay === true;
                                               }
+                                              if ((payload.leaveType || leaveKind) === 'half_day') {
+                                                if (regularSessions.length > 0) {
+                                                  payload.halfDaySecondHalfMode = 'work';
+                                                } else {
+                                                  const otherLeaveSessions = dailySessions.filter(session => (
+                                                    isLeaveEntryType(session.entry_type)
+                                                    && session.id !== paidLeave.id
+                                                  ));
+                                                  if (otherLeaveSessions.length > 0) {
+                                                    payload.halfDaySecondHalfMode = 'leave';
+                                                    const inferredSecondary = inferLeaveType(otherLeaveSessions[0]);
+                                                    payload.halfDaySecondLeaveType = inferredSecondary
+                                                      || getLeaveKindFromEntryType(otherLeaveSessions[0].entry_type)
+                                                      || 'employee_paid';
+                                                  }
+                                                }
+                                              }
                                             } else if (activeTab === 'adjustments') {
                                               payload.dayType = 'adjustment';
                                             } else if (activeTab === 'leave') {
@@ -800,6 +817,8 @@ function TimeEntryTableInner({
               initialMixedPaid={editingCell.mixedPaid}
               initialMixedSubtype={editingCell.mixedSubtype}
               initialMixedHalfDay={editingCell.mixedHalfDay}
+              initialHalfDaySecondHalfMode={editingCell.halfDaySecondHalfMode}
+              initialHalfDaySecondLeaveType={editingCell.halfDaySecondLeaveType}
               leavePayPolicy={leavePayPolicy}
               onSubmit={async (result) => {
                 if (!result) {
@@ -807,20 +826,25 @@ function TimeEntryTableInner({
                   return { cancelled: true };
                 }
                 try {
-                  const submissionResponse = await onTableSubmit({
-                    employee: editingCell.employee,
-                    day: editingCell.day,
-                    dayType: result.dayType,
-                    updatedRows: result.rows,
-                    paidLeaveId: result.paidLeaveId,
-                    paidLeaveNotes: result.paidLeaveNotes,
-                    leaveType: result.leaveType,
-                    mixedPaid: result.mixedPaid,
-                    mixedSubtype: result.mixedSubtype,
-                    mixedHalfDay: result.mixedHalfDay,
-                    adjustments: result.adjustments,
-                    overrideDailyValue: result.overrideDailyValue,
-                  });
+                    const submissionResponse = await onTableSubmit({
+                      employee: editingCell.employee,
+                      day: editingCell.day,
+                      dayType: result.dayType,
+                      updatedRows: result.rows,
+                      paidLeaveId: result.paidLeaveId,
+                      paidLeaveNotes: result.paidLeaveNotes,
+                      leaveType: result.leaveType,
+                      mixedPaid: result.mixedPaid,
+                      mixedSubtype: result.mixedSubtype,
+                      mixedHalfDay: result.mixedHalfDay,
+                      halfDaySecondHalfMode: result.halfDaySecondHalfMode,
+                      halfDayWorkSegments: result.halfDayWorkSegments,
+                      halfDaySecondLeaveType: result.halfDaySecondLeaveType,
+                      includeHalfDaySecondHalf: result.includeHalfDaySecondHalf,
+                      halfDayRemovedWorkIds: result.halfDayRemovedWorkIds,
+                      adjustments: result.adjustments,
+                      overrideDailyValue: result.overrideDailyValue,
+                    });
                   if (!submissionResponse?.needsConfirmation) {
                     setEditingCell(null);
                   }

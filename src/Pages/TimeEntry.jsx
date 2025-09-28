@@ -271,6 +271,11 @@ export default function TimeEntry() {
     mixedHalfDay,
     adjustments = [],
     overrideDailyValue = null,
+    halfDaySecondHalfMode = null,
+    halfDayWorkSegments = [],
+    halfDaySecondLeaveType = null,
+    includeHalfDaySecondHalf = false,
+    halfDayRemovedWorkIds = [],
   }) => {
     setIsLoading(true);
     try {
@@ -301,6 +306,11 @@ export default function TimeEntry() {
           mixedHalfDay,
           source: 'table',
           overrideDailyValue,
+          halfDaySecondHalfMode,
+          halfDayWorkSegments: Array.isArray(halfDayWorkSegments) ? halfDayWorkSegments : [],
+          halfDaySecondLeaveType,
+          includeHalfDaySecondHalf,
+          halfDayRemovedWorkIds: Array.isArray(halfDayRemovedWorkIds) ? halfDayRemovedWorkIds : [],
         });
         if (result?.needsConfirmation) {
           return result;
