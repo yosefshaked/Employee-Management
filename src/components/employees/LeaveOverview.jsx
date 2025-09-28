@@ -1075,7 +1075,7 @@ export default function LeaveOverview({
           <DialogHeader>
             <DialogTitle>אישור שווי יום החופשה</DialogTitle>
             <DialogDescription className="text-sm text-slate-500">
-              {`שווי יום החופשה חושב לפי תעריף נוכחי: ₪${fallbackDisplayAmount}. עדכנו או אשרו את הסכום לפני שמירה סופית.`}
+              {`שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר: ₪${fallbackDisplayAmount}. עדכנו או אשרו את הסכום לפני שמירה סופית.`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">

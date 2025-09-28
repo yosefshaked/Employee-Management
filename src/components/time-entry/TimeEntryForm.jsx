@@ -1185,7 +1185,7 @@ export default function TimeEntryForm({
           <DialogHeader>
             <DialogTitle>אישור שווי יום החופשה</DialogTitle>
             <DialogDescription>
-              {`שווי יום החופשה חושב לפי תעריף נוכחי: ₪${fallbackDisplayAmount}. ניתן לעדכן או לאשר את הסכום לפני שמירה סופית.`}
+              {`שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר: ₪${fallbackDisplayAmount}. ניתן לעדכן או לאשר את הסכום לפני שמירה סופית.`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
