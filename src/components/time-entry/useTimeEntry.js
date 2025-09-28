@@ -8,6 +8,7 @@ import {
   getLeaveKindFromEntryType,
   getLeaveBaseKind,
   getLeaveSubtypeFromValue,
+  inferLeaveKind,
   inferLeaveType,
   getLeaveValueMultiplier,
   isLeaveEntryType,
@@ -95,6 +96,50 @@ export function useTimeEntry({
       error.code = 'ORG_REQUIRED';
       throw error;
     }
+  };
+
+  const isHalfDayLeaveSession = (session) => {
+    if (!session) return false;
+    const entryKind = getLeaveKindFromEntryType(session.entry_type);
+    if (entryKind === 'half_day') {
+      return true;
+    }
+    const inferredKind = inferLeaveKind(session);
+    if (inferredKind === 'half_day') {
+      return true;
+    }
+    const rawMetadata = session.metadata;
+    let metadata = null;
+    if (rawMetadata && typeof rawMetadata === 'object' && !Array.isArray(rawMetadata)) {
+      metadata = rawMetadata;
+    } else if (typeof rawMetadata === 'string') {
+      try {
+        const parsed = JSON.parse(rawMetadata);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          metadata = parsed;
+        }
+      } catch (error) {
+        console.warn('Failed to parse work session metadata when detecting half-day leave', error);
+      }
+    }
+    if (!metadata) {
+      return false;
+    }
+    const halfDayFlags = [
+      metadata?.leave?.half_day,
+      metadata?.leave?.halfDay,
+      metadata?.leave_half_day,
+      metadata?.leaveHalfDay,
+    ];
+    if (halfDayFlags.some(flag => flag === true)) {
+      return true;
+    }
+    const fractionCandidates = [
+      metadata?.leave?.fraction,
+      metadata?.leave_fraction,
+      metadata?.fraction,
+    ].map(value => (typeof value === 'string' ? Number(value) : value));
+    return fractionCandidates.some(value => Number.isFinite(value) && Math.abs(value - 0.5) < 1e-6);
   };
 
   const saveRows = async (rows, dayTypeMap = {}) => {
@@ -284,13 +329,18 @@ export function useTimeEntry({
     }
 
     const conflictingLeaveSessions = Array.isArray(workSessions)
-      ? workSessions.filter(ws =>
-        ws &&
-        ws.employee_id === employee.id &&
-        ws.date === normalizedDate &&
-        isLeaveEntryType(ws.entry_type) &&
-        !segmentList.some(segment => segment.id && segment.id === ws.id),
-      )
+      ? workSessions.filter(ws => {
+        if (!ws || ws.employee_id !== employee.id || ws.date !== normalizedDate) {
+          return false;
+        }
+        if (!isLeaveEntryType(ws.entry_type)) {
+          return false;
+        }
+        if (segmentList.some(segment => segment.id && segment.id === ws.id)) {
+          return false;
+        }
+        return !isHalfDayLeaveSession(ws);
+      })
       : [];
 
     if (conflictingLeaveSessions.length > 0) {
@@ -576,10 +626,16 @@ export function useTimeEntry({
       return !workRemovalSet.has(sessionId);
     });
 
-    if (workConflicts.length > 0) {
+    const skipWorkConflictValidation = baseLeaveKind === 'half_day'
+      && !shouldSaveWorkHalf
+      && !shouldSaveLeaveHalf;
+
+    const filteredWorkConflicts = skipWorkConflictValidation ? [] : workConflicts;
+
+    if (filteredWorkConflicts.length > 0) {
       const error = new Error('לא ניתן להזין חופשה בתאריך זה כי קיימים בו רישומי עבודה. יש למחוק אותם תחילה.');
       error.code = 'TIME_ENTRY_WORK_CONFLICT';
-      error.conflicts = workConflicts;
+      error.conflicts = filteredWorkConflicts;
       throw error;
     }
 
