@@ -371,6 +371,23 @@ export default function MultiDateEntryModal({
     });
   }, [ensureMixedSelection]);
 
+  const applySubtypeToAll = useCallback((subtype) => {
+    const normalized = normalizeMixedSubtype(subtype) || DEFAULT_MIXED_SUBTYPE;
+    setMixedSelections(prev => {
+      const next = {};
+      selectedEmployees.forEach(empId => {
+        const inner = { ...(prev[empId] || {}) };
+        sortedDates.forEach(d => {
+          const dateStr = format(d, 'yyyy-MM-dd');
+          const current = ensureMixedSelection(inner[dateStr]);
+          inner[dateStr] = { ...current, subtype: normalized };
+        });
+        next[empId] = inner;
+      });
+      return next;
+    });
+  }, [ensureMixedSelection, selectedEmployees, sortedDates]);
+
   const toggleMixedSelection = (empId, dateStr, paid) => {
     updateMixedSelection(empId, dateStr, current => ({
       ...current,
@@ -404,23 +421,6 @@ export default function MultiDateEntryModal({
       return next;
     });
   };
-
-  const applySubtypeToAll = useCallback((subtype) => {
-    const normalized = normalizeMixedSubtype(subtype) || DEFAULT_MIXED_SUBTYPE;
-    setMixedSelections(prev => {
-      const next = {};
-      selectedEmployees.forEach(empId => {
-        const inner = { ...(prev[empId] || {}) };
-        sortedDates.forEach(d => {
-          const dateStr = format(d, 'yyyy-MM-dd');
-          const current = ensureMixedSelection(inner[dateStr]);
-          inner[dateStr] = { ...current, subtype: normalized };
-        });
-        next[empId] = inner;
-      });
-      return next;
-    });
-  }, [ensureMixedSelection, selectedEmployees, sortedDates]);
 
   const applyHalfDayToPaid = () => {
     if (!allowHalfDay) return;
