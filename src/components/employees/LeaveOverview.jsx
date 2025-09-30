@@ -31,6 +31,7 @@ import {
   LEAVE_PAY_METHOD_OPTIONS,
   LEAVE_PAY_METHOD_DESCRIPTIONS,
   LEAVE_PAY_METHOD_LABELS,
+  formatLeaveHistoryEntryType,
   resolveLeavePayMethodContext,
 } from '@/lib/leave.js';
 
@@ -65,6 +66,73 @@ function formatLedgerDate(value) {
   } catch {
     return parsed.toISOString().slice(0, 10);
   }
+}
+
+function parseEntryMetadata(raw) {
+  if (!raw) {
+    return null;
+  }
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw;
+  }
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function extractCalculationMethod(metadata) {
+  if (!metadata || typeof metadata !== 'object') {
+    return null;
+  }
+  const candidates = [
+    metadata?.calc?.method,
+    metadata?.calc_method,
+    metadata?.calculation_method,
+    metadata?.work_session?.calculation_method,
+    metadata?.work_session?.calc_method,
+    metadata?.workSession?.calculationMethod,
+    metadata?.workSession?.calcMethod,
+    metadata?.method,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') {
+      continue;
+    }
+    const trimmed = candidate.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return null;
+}
+
+function resolveEntryNotes(entry, metadata) {
+  const candidates = [
+    entry?.notes,
+    metadata?.note,
+    metadata?.note_internal,
+    metadata?.notes,
+    metadata?.leave?.note,
+    metadata?.leave?.notes,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') {
+      continue;
+    }
+    const trimmed = candidate.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return null;
 }
 
 export default function LeaveOverview({
@@ -451,27 +519,69 @@ export default function LeaveOverview({
                                 <p className="text-sm text-slate-500 text-right">לא נמצאו רשומות חופשה עבור העובד.</p>
                               ) : (
                                 <div className="overflow-x-auto">
-                                  <table className="min-w-full text-sm text-right">
+                                  <table className="min-w-full table-fixed text-sm text-slate-700">
+                                    <colgroup>
+                                      <col className="w-[20%]" />
+                                      <col className="w-[18%]" />
+                                      <col className="w-[14%]" />
+                                      <col className="w-[18%]" />
+                                      <col className="w-[12%]" />
+                                      <col className="w-[14%]" />
+                                      <col className="w-[18%]" />
+                                    </colgroup>
                                     <thead className="bg-slate-100 text-slate-600">
-                                      <tr>
-                                        <th className="px-3 py-2 font-medium">תאריך תחולה</th>
+                                      <tr className="text-center text-xs uppercase tracking-tight">
+                                        <th className="px-3 py-2 font-medium text-slate-400" aria-hidden="true">
+                                          <span className="sr-only">עמודה ריקה</span>
+                                        </th>
+                                        <th className="px-3 py-2 font-medium text-slate-400" aria-hidden="true">
+                                          <span className="sr-only">עמודה ריקה</span>
+                                        </th>
+                                        <th className="px-3 py-2 font-medium">תאריך</th>
                                         <th className="px-3 py-2 font-medium">סוג חופשה</th>
                                         <th className="px-3 py-2 font-medium">שינוי במאזן</th>
+                                        <th className="px-3 py-2 font-medium">שיטת חישוב</th>
                                         <th className="px-3 py-2 font-medium">הערות</th>
                                       </tr>
                                     </thead>
                                     <tbody>
                                       {history.map((entry) => {
-                                        const changeValue = Number(entry.balance || entry.amount || 0);
-                                        const changeDisplay = Number.isFinite(changeValue)
-                                          ? changeValue.toFixed(2)
+                                        const rawDelta = Number(entry.balance ?? entry.amount ?? entry.delta ?? entry.days_delta ?? entry.days ?? 0);
+                                        let changeDisplay = '—';
+                                        if (Number.isFinite(rawDelta)) {
+                                          if (rawDelta > 0) {
+                                            changeDisplay = `+${Math.abs(rawDelta).toFixed(2)}`;
+                                          } else if (rawDelta < 0) {
+                                            changeDisplay = `-${Math.abs(rawDelta).toFixed(2)}`;
+                                          } else {
+                                            changeDisplay = '0.00';
+                                          }
+                                        }
+                                        const changeToneClass = rawDelta > 0
+                                          ? 'text-emerald-600'
+                                          : rawDelta < 0
+                                            ? 'text-rose-600'
+                                            : 'text-slate-600';
+                                        const metadata = parseEntryMetadata(entry.metadata);
+                                        const calculationMethodKey = extractCalculationMethod(metadata);
+                                        const calculationMethodLabel = calculationMethodKey
+                                          ? (LEAVE_PAY_METHOD_LABELS[calculationMethodKey] || calculationMethodKey)
                                           : '—';
+                                        const notes = resolveEntryNotes(entry, metadata) || '—';
+                                        const dateValue = entry.effective_date || entry.date || entry.entry_date || entry.change_date;
+                                        const typeLabel = formatLeaveHistoryEntryType(entry);
                                         return (
-                                          <tr key={entry.id || `${entry.employee_id}-${entry.effective_date}-${entry.leave_type}`} className="border-b border-slate-200 last:border-0">
-                                            <td className="px-3 py-2 whitespace-nowrap">{formatLedgerDate(entry.effective_date || entry.date)}</td>
-                                            <td className="px-3 py-2">{entry.leave_type || '—'}</td>
-                                            <td className="px-3 py-2 font-mono text-sm">{changeDisplay}</td>
-                                            <td className="px-3 py-2 text-slate-600">{entry.notes || '—'}</td>
+                                          <tr
+                                            key={entry.id || `${entry.employee_id}-${entry.effective_date}-${entry.leave_type}`}
+                                            className="border-b border-slate-200 last:border-0"
+                                          >
+                                            <td className="px-3 py-2" aria-hidden="true" />
+                                            <td className="px-3 py-2" aria-hidden="true" />
+                                            <td className="px-3 py-2 text-center align-middle whitespace-nowrap">{formatLedgerDate(dateValue)}</td>
+                                            <td className="px-3 py-2 text-center align-middle whitespace-nowrap">{typeLabel}</td>
+                                            <td className={`px-3 py-2 text-center align-middle font-mono ${changeToneClass}`}>{changeDisplay}</td>
+                                            <td className="px-3 py-2 text-center align-middle whitespace-nowrap">{calculationMethodLabel}</td>
+                                            <td className="px-3 py-2 text-center align-middle whitespace-pre-line">{notes}</td>
                                           </tr>
                                         );
                                       })}
