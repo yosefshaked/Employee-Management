@@ -582,10 +582,12 @@ export function useTimeEntry({
 
     const duplicateReference = Array.isArray(workSessions) ? workSessions.slice() : [];
 
+    const baseLeaveKind = getLeaveBaseKind(leaveType) || leaveType;
+
     const normalizedSecondHalfMode = typeof halfDaySecondHalfMode === 'string'
       ? halfDaySecondHalfMode.trim().toLowerCase()
       : null;
-    const resolvedSecondHalfMode = getLeaveBaseKind(leaveType) === 'half_day'
+    const resolvedSecondHalfMode = baseLeaveKind === 'half_day'
       ? (normalizedSecondHalfMode || (includeHalfDaySecondHalf ? 'work' : null))
       : null;
     const shouldSaveWorkHalf = resolvedSecondHalfMode === 'work';
@@ -681,7 +683,6 @@ export function useTimeEntry({
       }
     }
 
-    const baseLeaveKind = getLeaveBaseKind(leaveType) || leaveType;
     const isMixed = baseLeaveKind === 'mixed';
     const resolvedMixedSubtype = isMixed
       ? (normalizeMixedSubtype(mixedSubtype) || DEFAULT_MIXED_SUBTYPE)
