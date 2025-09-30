@@ -767,8 +767,19 @@ export function useTimeEntry({
       }
 
       const selectorValue = resolveLeaveValue(employee.id, normalizedDate);
-      if (typeof selectorValue === 'number' && Number.isFinite(selectorValue) && selectorValue > 0) {
-        resolvedLeaveValue = selectorValue;
+      const baseDailyValue = typeof selectorValue === 'number' && Number.isFinite(selectorValue)
+        ? selectorValue
+        : 0;
+      if (!hasOverrideDailyValue && !(baseDailyValue > 0)) {
+        return {
+          needsConfirmation: true,
+          fallbackValue: 0,
+          fraction: normalizedLeaveFraction,
+          payable: true,
+        };
+      }
+      if (baseDailyValue > 0) {
+        resolvedLeaveValue = baseDailyValue;
       }
 
       const hasComputedValue = typeof resolvedLeaveValue === 'number'
