@@ -508,9 +508,9 @@ export default function LeaveOverview({
                         </TableRow>
                       </CollapsibleTrigger>
                       <CollapsibleContent asChild>
-                        <TableRow className="bg-slate-50">
-                          <TableCell colSpan={7} className="p-4">
-                            <div className="space-y-3">
+                        <TableRow className="bg-transparent">
+                          <TableCell colSpan={7} className="bg-slate-50 p-6">
+                            <div className="space-y-4">
                               <div className="flex flex-row-reverse items-center justify-between">
                                 <h4 className="text-sm font-semibold text-slate-800">פירוט היסטוריית חופשות</h4>
                                 <span className="text-xs text-slate-500">סך רשומות: {history.length}</span>
@@ -518,75 +518,60 @@ export default function LeaveOverview({
                               {history.length === 0 ? (
                                 <p className="text-sm text-slate-500 text-right">לא נמצאו רשומות חופשה עבור העובד.</p>
                               ) : (
-                                <div className="overflow-x-auto">
-                                  <table className="min-w-full table-fixed text-sm text-slate-700">
-                                    <colgroup>
-                                      <col className="w-[20%]" />
-                                      <col className="w-[18%]" />
-                                      <col className="w-[14%]" />
-                                      <col className="w-[18%]" />
-                                      <col className="w-[12%]" />
-                                      <col className="w-[14%]" />
-                                      <col className="w-[18%]" />
-                                    </colgroup>
-                                    <thead className="bg-slate-100 text-slate-600">
-                                      <tr className="text-center text-xs uppercase tracking-tight">
-                                        <th className="px-3 py-2 font-medium text-slate-400" aria-hidden="true">
-                                          <span className="sr-only">עמודה ריקה</span>
-                                        </th>
-                                        <th className="px-3 py-2 font-medium text-slate-400" aria-hidden="true">
-                                          <span className="sr-only">עמודה ריקה</span>
-                                        </th>
-                                        <th className="px-3 py-2 font-medium">תאריך</th>
-                                        <th className="px-3 py-2 font-medium">סוג חופשה</th>
-                                        <th className="px-3 py-2 font-medium">שינוי במאזן</th>
-                                        <th className="px-3 py-2 font-medium">שיטת חישוב</th>
-                                        <th className="px-3 py-2 font-medium">הערות</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {history.map((entry) => {
-                                        const rawDelta = Number(entry.balance ?? entry.amount ?? entry.delta ?? entry.days_delta ?? entry.days ?? 0);
-                                        let changeDisplay = '—';
-                                        if (Number.isFinite(rawDelta)) {
-                                          if (rawDelta > 0) {
-                                            changeDisplay = `+${Math.abs(rawDelta).toFixed(2)}`;
-                                          } else if (rawDelta < 0) {
-                                            changeDisplay = `-${Math.abs(rawDelta).toFixed(2)}`;
-                                          } else {
-                                            changeDisplay = '0.00';
+                                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+                                  <div className="overflow-x-auto">
+                                    <table className="min-w-full text-sm text-slate-700">
+                                      <thead className="bg-slate-100 text-slate-600">
+                                        <tr className="text-right text-xs font-semibold uppercase tracking-tight">
+                                          <th scope="col" className="px-4 py-3 whitespace-nowrap">תאריך</th>
+                                          <th scope="col" className="px-4 py-3 whitespace-nowrap">סוג חופשה</th>
+                                          <th scope="col" className="px-4 py-3 whitespace-nowrap">שינוי במאזן</th>
+                                          <th scope="col" className="px-4 py-3 whitespace-nowrap">שיטת חישוב</th>
+                                          <th scope="col" className="px-4 py-3 whitespace-nowrap">הערות</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-slate-100">
+                                        {history.map((entry) => {
+                                          const rawDelta = Number(entry.balance ?? entry.amount ?? entry.delta ?? entry.days_delta ?? entry.days ?? 0);
+                                          let changeDisplay = '—';
+                                          if (Number.isFinite(rawDelta)) {
+                                            if (rawDelta > 0) {
+                                              changeDisplay = `+${Math.abs(rawDelta).toFixed(2)}`;
+                                            } else if (rawDelta < 0) {
+                                              changeDisplay = `-${Math.abs(rawDelta).toFixed(2)}`;
+                                            } else {
+                                              changeDisplay = '0.00';
+                                            }
                                           }
-                                        }
-                                        const changeToneClass = rawDelta > 0
-                                          ? 'text-emerald-600'
-                                          : rawDelta < 0
-                                            ? 'text-rose-600'
-                                            : 'text-slate-600';
-                                        const metadata = parseEntryMetadata(entry.metadata);
-                                        const calculationMethodKey = extractCalculationMethod(metadata);
-                                        const calculationMethodLabel = calculationMethodKey
-                                          ? (LEAVE_PAY_METHOD_LABELS[calculationMethodKey] || calculationMethodKey)
-                                          : '—';
-                                        const notes = resolveEntryNotes(entry, metadata) || '—';
-                                        const dateValue = entry.effective_date || entry.date || entry.entry_date || entry.change_date;
-                                        const typeLabel = formatLeaveHistoryEntryType(entry);
-                                        return (
-                                          <tr
-                                            key={entry.id || `${entry.employee_id}-${entry.effective_date}-${entry.leave_type}`}
-                                            className="border-b border-slate-200 last:border-0"
-                                          >
-                                            <td className="px-3 py-2" aria-hidden="true" />
-                                            <td className="px-3 py-2" aria-hidden="true" />
-                                            <td className="px-3 py-2 text-center align-middle whitespace-nowrap">{formatLedgerDate(dateValue)}</td>
-                                            <td className="px-3 py-2 text-center align-middle whitespace-nowrap">{typeLabel}</td>
-                                            <td className={`px-3 py-2 text-center align-middle font-mono ${changeToneClass}`}>{changeDisplay}</td>
-                                            <td className="px-3 py-2 text-center align-middle whitespace-nowrap">{calculationMethodLabel}</td>
-                                            <td className="px-3 py-2 text-center align-middle whitespace-pre-line">{notes}</td>
-                                          </tr>
-                                        );
-                                      })}
-                                    </tbody>
-                                  </table>
+                                          const changeToneClass = rawDelta > 0
+                                            ? 'text-emerald-600'
+                                            : rawDelta < 0
+                                              ? 'text-rose-600'
+                                              : 'text-slate-600';
+                                          const metadata = parseEntryMetadata(entry.metadata);
+                                          const calculationMethodKey = extractCalculationMethod(metadata);
+                                          const calculationMethodLabel = calculationMethodKey
+                                            ? (LEAVE_PAY_METHOD_LABELS[calculationMethodKey] || calculationMethodKey)
+                                            : '—';
+                                          const notes = resolveEntryNotes(entry, metadata) || '—';
+                                          const dateValue = entry.effective_date || entry.date || entry.entry_date || entry.change_date;
+                                          const typeLabel = formatLeaveHistoryEntryType(entry);
+                                          return (
+                                            <tr
+                                              key={entry.id || `${entry.employee_id}-${entry.effective_date}-${entry.leave_type}`}
+                                              className="bg-white"
+                                            >
+                                              <td className="px-4 py-3 align-middle text-right whitespace-nowrap">{formatLedgerDate(dateValue)}</td>
+                                              <td className="px-4 py-3 align-middle text-right whitespace-nowrap">{typeLabel}</td>
+                                              <td className={`px-4 py-3 align-middle text-right font-mono ${changeToneClass}`}>{changeDisplay}</td>
+                                              <td className="px-4 py-3 align-middle text-right whitespace-nowrap">{calculationMethodLabel}</td>
+                                              <td className="px-4 py-3 align-middle text-right whitespace-pre-line">{notes}</td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
                                 </div>
                               )}
                             </div>
