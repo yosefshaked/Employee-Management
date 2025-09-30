@@ -508,8 +508,8 @@ export default function LeaveOverview({
                         </TableRow>
                       </CollapsibleTrigger>
                       <CollapsibleContent asChild>
-                        <TableRow className="bg-transparent">
-                          <TableCell colSpan={7} className="bg-slate-50 p-6">
+                        <TableRow className="bg-slate-50">
+                          <TableCell colSpan={7} className="p-6 align-top">
                             <div className="space-y-4">
                               <div className="flex flex-row-reverse items-center justify-between">
                                 <h4 className="text-sm font-semibold text-slate-800">פירוט היסטוריית חופשות</h4>
