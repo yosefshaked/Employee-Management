@@ -14,8 +14,17 @@ import { InfoTooltip } from '@/components/InfoTooltip.jsx';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { isLeaveEntryType } from '@/lib/leave.js';
-import { useEffect, useState } from 'react';
-import ConfirmPermanentDeleteModal from './ConfirmPermanentDeleteModal.jsx';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export function computeRowPayment(row, employee, services, getRateForDate, options = {}) {
   const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
@@ -75,6 +84,40 @@ export default function EntryRow({
   const rowPayment = computeRowPayment(row, employee, services, getRateForDate, { leaveValueResolver });
   const [flash, setFlash] = useState(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [isRemoving, setIsRemoving] = useState(false);
+
+  const archiveSummary = useMemo(() => {
+    if (!row?.date) return '';
+    const dateLabel = format(new Date(row.date + 'T00:00:00'), 'dd/MM/yyyy');
+    const base = `רישום עבור ${employee.name} בתאריך ${dateLabel}`;
+    if (employee.employee_type === 'instructor') {
+      const meetings = row.sessions_count ? Number(row.sessions_count) : null;
+      return meetings ? `${base} • ${meetings} מפגשים` : base;
+    }
+    if (row.hours) {
+      return `${base} • שעות ${row.hours}`;
+    }
+    return base;
+  }, [employee.name, employee.employee_type, row.date, row.hours, row.sessions_count]);
+
+  const closeConfirmDialog = () => {
+    setConfirmOpen(false);
+    setIsRemoving(false);
+  };
+
+  const handleConfirmRemoval = async () => {
+    if (isRemoving) {
+      return;
+    }
+    try {
+      setIsRemoving(true);
+      await onRemove();
+      closeConfirmDialog();
+    } catch (error) {
+      setIsRemoving(false);
+      throw error;
+    }
+  };
 
   useEffect(() => {
     if (flashField) {
@@ -308,29 +351,40 @@ export default function EntryRow({
         </div>
       )}
       {allowRemove && (
-        <ConfirmPermanentDeleteModal
-          isOpen={confirmOpen}
-          onClose={() => setConfirmOpen(false)}
-          onConfirm={async () => {
-            await onRemove();
+        <AlertDialog
+          open={confirmOpen}
+          onOpenChange={(open) => {
+            if (!open) {
+              closeConfirmDialog();
+            } else {
+              setConfirmOpen(true);
+            }
           }}
-          summary={{
-            employeeName: employee.name,
-            date: format(new Date(row.date + 'T00:00:00'), 'dd/MM/yyyy'),
-            entryTypeLabel:
-              employee.employee_type === 'instructor'
-                ? 'מפגש'
-                : 'שעות',
-            hours:
-              employee.employee_type === 'instructor'
-                ? null
-                : row.hours,
-            meetings:
-              employee.employee_type === 'instructor'
-                ? row.sessions_count
-                : null
-          }}
-        />
+        >
+          <AlertDialogContent dir="rtl" className="sm:max-w-md">
+            <AlertDialogHeader>
+              <AlertDialogTitle>מחיקת רישום</AlertDialogTitle>
+              <AlertDialogDescription>
+                האם למחוק את הרישום? הרישום יועבר לסל האשפה. מומלץ למחוק פריטים מסל האשפה לצמיתות לאחר 90 יום.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {archiveSummary ? (
+              <p className="text-sm text-slate-600">{archiveSummary}</p>
+            ) : null}
+            <AlertDialogFooter className="flex flex-row-reverse gap-2 sm:flex-row">
+              <AlertDialogCancel onClick={closeConfirmDialog} disabled={isRemoving}>
+                בטל
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleConfirmRemoval}
+                className="bg-sky-600 hover:bg-sky-700"
+                disabled={isRemoving}
+              >
+                כן, העבר לארכיון
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       )}
     </div>
   );

@@ -12,11 +12,18 @@ function buildSearchParams(orgId, query = {}) {
   if (orgId) {
     params.set('org_id', orgId);
   }
-  if (query.start_date) {
-    params.set('start_date', query.start_date);
-  }
-  if (query.end_date) {
-    params.set('end_date', query.end_date);
+  if (query && typeof query === 'object') {
+    if (query.start_date) {
+      params.set('start_date', query.start_date);
+    }
+    if (query.end_date) {
+      params.set('end_date', query.end_date);
+    }
+    Object.entries(query).forEach(([key, value]) => {
+      if (value == null) return;
+      if (key === 'start_date' || key === 'end_date') return;
+      params.set(key, String(value));
+    });
   }
   return params.toString();
 }
@@ -92,11 +99,25 @@ export function updateWorkSession(options = {}) {
   return workSessionsRequest('PATCH', options);
 }
 
-export function deleteWorkSession(options = {}) {
+export function softDeleteWorkSession(options = {}) {
   if (!options.sessionId && !options?.body?.session_id && !options?.body?.id) {
     throw new Error('נדרש מזהה רישום למחיקה.');
   }
   return workSessionsRequest('DELETE', options);
+}
+
+export function permanentlyDeleteWorkSession(options = {}) {
+  if (!options.sessionId && !options?.body?.session_id && !options?.body?.id) {
+    throw new Error('נדרש מזהה רישום למחיקה.');
+  }
+  const normalizedOptions = {
+    ...options,
+    query: {
+      ...(options.query || {}),
+      permanent: 'true',
+    },
+  };
+  return workSessionsRequest('DELETE', normalizedOptions);
 }
 
 export function restoreWorkSession(options = {}) {

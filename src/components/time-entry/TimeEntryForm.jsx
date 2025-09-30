@@ -5,8 +5,7 @@ import HourlySegment from './segments/HourlySegment.jsx';
 import InstructorSegment from './segments/InstructorSegment.jsx';
 import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import { sumHours, removeSegment } from './dayUtils.js';
-import ConfirmPermanentDeleteModal from './ConfirmPermanentDeleteModal.jsx';
-import { deleteWorkSession } from '@/api/work-sessions.js';
+import { softDeleteWorkSession } from '@/api/work-sessions.js';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import he from '@/i18n/he.json';
@@ -17,6 +16,16 @@ import { Button } from '@/components/ui/button';
 import { InfoTooltip } from '@/components/InfoTooltip.jsx';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { selectLeaveDayValue } from '@/selectors.js';
 import {
   DEFAULT_LEAVE_PAY_POLICY,
@@ -161,6 +170,8 @@ export default function TimeEntryForm({
   const [lastNonSystemLeaveType, setLastNonSystemLeaveType] = useState('employee_paid');
   const [errors, setErrors] = useState({});
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [isArchiveDialogOpen, setIsArchiveDialogOpen] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const [currentPaidLeaveId, setCurrentPaidLeaveId] = useState(paidLeaveId);
   const [fallbackPrompt, setFallbackPrompt] = useState(null);
   const [fallbackAmount, setFallbackAmount] = useState('');
@@ -377,7 +388,7 @@ export default function TimeEntryForm({
       hours: isHourly || isGlobal ? target.hours : null,
       meetings: isHourly || isGlobal ? null : target.sessions_count
     };
-    setPendingDelete({ id: target.id, summary, kind: 'segment' });
+    openArchiveDialog({ id: target.id, summary, kind: 'segment' });
   };
   const addAdjustment = () => setAdjustments(prev => [...prev, createAdjustment()]);
   const updateAdjustment = (id, patch) => {
@@ -403,7 +414,7 @@ export default function TimeEntryForm({
       const summaryText = Number.isFinite(amountValue) && amountValue > 0
         ? `התאמה ${target.type === 'debit' ? 'ניכוי' : 'זיכוי'} על סך ₪${Math.abs(amountValue).toLocaleString()}`
         : 'התאמה';
-      setPendingDelete({
+      openArchiveDialog({
         id: target.workSessionId,
         summary,
         summaryText,
@@ -430,18 +441,34 @@ export default function TimeEntryForm({
       date: format(new Date(selectedDate + 'T00:00:00'), 'dd/MM/yyyy'),
       entryTypeLabel: 'חופשה',
     };
-    setPendingDelete({ id: currentPaidLeaveId, summary, kind: 'leave' });
+    openArchiveDialog({ id: currentPaidLeaveId, summary, kind: 'leave' });
   };
-  const confirmDelete = async () => {
+  const handleArchiveDialogClose = useCallback(() => {
+    setIsArchiveDialogOpen(false);
+    setPendingDelete(null);
+    setIsArchiving(false);
+  }, []);
+
+  const openArchiveDialog = useCallback((details) => {
+    setPendingDelete(details);
+    setIsArchiveDialogOpen(true);
+    setIsArchiving(false);
+  }, []);
+
+  const handleConfirmArchive = async () => {
     if (!pendingDelete) return;
     const target = pendingDelete;
     try {
+      if (isArchiving) {
+        return;
+      }
+      setIsArchiving(true);
       ensureSessionAndOrg();
       const existingRow = workSessions.find(
         (sessionRow) => String(sessionRow?.id) === String(target.id),
       );
       const timestamp = new Date().toISOString();
-      await deleteWorkSession({
+      await softDeleteWorkSession({
         session,
         orgId: activeOrgId,
         sessionId: target.id,
@@ -474,13 +501,37 @@ export default function TimeEntryForm({
       }
       onDeleted?.([target.id], payload);
       toast.success(he['toast.delete.success']);
-      setPendingDelete(null);
+      handleArchiveDialogClose();
     } catch (err) {
       toast.error(err?.message || he['toast.delete.error']);
-      setPendingDelete(null);
-      throw err;
+      handleArchiveDialogClose();
     }
   };
+
+  const archiveSummaryText = useMemo(() => {
+    if (!pendingDelete) return '';
+    if (pendingDelete.summaryText) {
+      return pendingDelete.summaryText;
+    }
+    const summary = pendingDelete.summary;
+    if (!summary) {
+      return '';
+    }
+    if (summary.segmentsCount != null) {
+      return he['delete.summary.day'].replace('{{count}}', String(summary.segmentsCount));
+    }
+    let base = he['delete.summary.global']
+      .replace('{{employee}}', summary.employeeName || '')
+      .replace('{{date}}', summary.date || '')
+      .replace('{{entryType}}', summary.entryTypeLabel || '');
+    if (summary.hours != null) {
+      base += ` • שעות ${summary.hours}`;
+    }
+    if (summary.meetings != null) {
+      base += ` • מפגשים ${summary.meetings}`;
+    }
+    return base;
+  }, [pendingDelete]);
   const changeSeg = (index, patch) => {
     setSegments(prev => prev.map((segment, idx) => (
       idx === index ? { ...segment, ...patch } : segment
@@ -1174,13 +1225,38 @@ export default function TimeEntryForm({
         summary={summary}
         onCancel={() => onSubmit(null)}
       />
-      <ConfirmPermanentDeleteModal
-        isOpen={pendingDelete !== null}
-        onClose={() => setPendingDelete(null)}
-        onConfirm={confirmDelete}
-        summary={pendingDelete ? pendingDelete.summary : null}
-        summaryText={pendingDelete?.summaryText || ''}
-      />
+      <AlertDialog
+        open={isArchiveDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            handleArchiveDialogClose();
+          }
+        }}
+      >
+        <AlertDialogContent dir="rtl" className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>מחיקת רישום</AlertDialogTitle>
+            <AlertDialogDescription>
+              האם למחוק את הרישום? הרישום יועבר לסל האשפה. מומלץ למחוק פריטים מסל האשפה לצמיתות לאחר 90 יום.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {archiveSummaryText ? (
+            <p className="text-sm text-slate-600">{archiveSummaryText}</p>
+          ) : null}
+          <AlertDialogFooter className="flex flex-row-reverse gap-2 sm:flex-row">
+            <AlertDialogCancel onClick={handleArchiveDialogClose} disabled={isArchiving}>
+              בטל
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmArchive}
+              className="bg-sky-600 hover:bg-sky-700"
+              disabled={isArchiving}
+            >
+              כן, העבר לארכיון
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <Dialog open={Boolean(fallbackPrompt)} onOpenChange={handleFallbackDialogClose}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>

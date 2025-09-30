@@ -500,6 +500,29 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid session id' });
     }
 
+    const permanentFlag = normalizeString(req?.query?.permanent ?? context.bindingData?.permanent);
+
+    const wantsPermanent = permanentFlag === 'true' || permanentFlag === '1';
+
+    if (wantsPermanent) {
+      const { error, data } = await tenantClient
+        .from('WorkSessions')
+        .delete()
+        .eq('id', sessionId)
+        .select('id');
+
+      if (error) {
+        context.log?.error?.('work-sessions permanent delete failed', { message: error.message, sessionId });
+        return respond(context, 500, { message: 'failed_to_permanently_delete_session' });
+      }
+
+      if (!data || data.length === 0) {
+        return respond(context, 404, { message: 'session_not_found' });
+      }
+
+      return respond(context, 200, { deleted: true, permanent: true });
+    }
+
     const timestamp = new Date().toISOString();
     const { error, data } = await tenantClient
       .from('WorkSessions')
@@ -516,7 +539,7 @@ export default async function (context, req) {
       return respond(context, 404, { message: 'session_not_found' });
     }
 
-    return respond(context, 200, { deleted: true });
+    return respond(context, 200, { deleted: true, permanent: false });
   }
 
   return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET,POST,PATCH,PUT,DELETE' });

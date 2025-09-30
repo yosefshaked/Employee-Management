@@ -1,5 +1,5 @@
 import { format } from 'date-fns';
-import { createWorkSessions, updateWorkSession, deleteWorkSession } from '@/api/work-sessions.js';
+import { createWorkSessions, updateWorkSession, softDeleteWorkSession } from '@/api/work-sessions.js';
 import { createLeaveBalanceEntry, deleteLeaveBalanceEntries } from '@/api/leave-balances.js';
 import { hasDuplicateSession } from '@/lib/workSessionsUtils.js';
 import { calculateGlobalDailyRate } from '../../lib/payroll.js';
@@ -1136,12 +1136,12 @@ export function useTimeEntry({
 
     if (workDeleteIds.length || secondaryLeaveDeleteIds.length) {
       await Promise.all([
-        ...workDeleteIds.map(id => deleteWorkSession({
+        ...workDeleteIds.map(id => softDeleteWorkSession({
           session,
           orgId,
           sessionId: id,
         })),
-        ...secondaryLeaveDeleteIds.map(id => deleteWorkSession({
+        ...secondaryLeaveDeleteIds.map(id => softDeleteWorkSession({
           session,
           orgId,
           sessionId: id,
