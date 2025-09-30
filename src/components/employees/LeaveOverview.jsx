@@ -173,24 +173,6 @@ export default function LeaveOverview({
   const shouldIncludeSecondHalfLeave = secondHalfEnabled && secondHalfMode === 'leave';
   const shouldIncludeSecondHalfWork = secondHalfEnabled && secondHalfMode === 'work';
 
-  const { saveLeaveDay } = useTimeEntry({
-    employees,
-    services: servicesList,
-    getRateForDate,
-    metadataClient: dataClient,
-    workSessions: workSessionsHistory,
-    leavePayPolicy,
-    leavePolicy,
-    leaveBalances,
-    session,
-    orgId: activeOrgId,
-  });
-
-  const defaultUsageType = useMemo(() => {
-    const option = usageOptions.find(item => item.value !== 'system_paid');
-    return option ? option.value : 'employee_paid';
-  }, [usageOptions]);
-
   const getRateForDate = useCallback((employeeId, dateValue, serviceId = null) => {
     const employee = employees.find(emp => emp.id === employeeId);
     if (!employee) {
@@ -237,6 +219,24 @@ export default function LeaveOverview({
 
     return { rate: 0, reason: 'לא הוגדר תעריף' };
   }, [employees, rateHistories]);
+
+  const { saveLeaveDay } = useTimeEntry({
+    employees,
+    services: servicesList,
+    getRateForDate,
+    metadataClient: dataClient,
+    workSessions: workSessionsHistory,
+    leavePayPolicy,
+    leavePolicy,
+    leaveBalances,
+    session,
+    orgId: activeOrgId,
+  });
+
+  const defaultUsageType = useMemo(() => {
+    const option = usageOptions.find(item => item.value !== 'system_paid');
+    return option ? option.value : 'employee_paid';
+  }, [usageOptions]);
 
   useEffect(() => {
     if (employees.length === 0) {
