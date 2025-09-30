@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.6.0**
-**Last Updated: 2025-09-25**
+**Version: 1.6.1**
+**Last Updated: 2025-09-26**
 
 ## 1. Vision & Purpose
 
@@ -131,6 +131,13 @@ The work log. Each row represents a completed work session.
   - Monthly totals and reports sum `total_payment` from `WorkSessions` rows only, deduplicating global rows by day; no external base salary is added.
   - Unpaid absence = no row. Paid leave is explicitly recorded with an `entry_type='paid_leave'` row.
   - Each row may include optional `notes` (free text, max 300 chars).
+
+#### WorkSessions Deletion Workflow
+
+- **Soft delete is the default:** Any removal initiated outside the Trash tab issues a soft delete (`deleted=true`, `deleted_at=NOW()`). The record remains recoverable and surfaces in the Trash view.
+- **Permanent delete is restricted:** Only the Trash tab can trigger a permanent delete. The UI requires the administrator to type "מחק" to confirm and the API must receive `DELETE /api/work-sessions/{id}?permanent=true`.
+- **API contract:** The Azure Function interprets `permanent=true` as an irreversible delete (`DELETE`). Calls without the flag always perform the soft-delete update.
+- **UI confirmations:** Standard delete flows (forms, inline rows) show an informational dialog clarifying that the row will move to the Trash. The Trash tab exclusively presents the high-friction confirmation before final deletion.
 
 ### 3.5. `Settings` Table
 Stores organization-wide configuration values, accessed via a stable `key`.

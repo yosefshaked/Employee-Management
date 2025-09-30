@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
-import { deleteWorkSession, restoreWorkSession } from '@/api/work-sessions.js';
+import { permanentlyDeleteWorkSession, restoreWorkSession } from '@/api/work-sessions.js';
 
 function resolveEmployeeName(employeesById, id) {
   const record = employeesById.get(id);
@@ -216,7 +216,7 @@ export default function TrashTab({
       ensureSessionAndOrg();
       setSubmitting(true);
       await Promise.all(
-        normalizedIds.map(sessionId => deleteWorkSession({
+        normalizedIds.map(sessionId => permanentlyDeleteWorkSession({
           session,
           orgId: activeOrgId,
           sessionId,
