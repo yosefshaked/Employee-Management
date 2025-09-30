@@ -25,10 +25,9 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { fetchEmployeesList, updateEmployee } from '@/api/employees.js';
 import { createLeaveBalanceEntry } from '@/api/leave-balances.js';
-import { createWorkSessions, deleteWorkSession, fetchWorkSessions } from '@/api/work-sessions.js';
+import { fetchWorkSessions } from '@/api/work-sessions.js';
 import { getServices } from '@/api/services.js';
 import { selectLeaveRemaining, selectHolidayForDate, selectLeaveDayValue } from '@/selectors.js';
-import { calculateGlobalDailyRate } from '@/lib/payroll.js';
 import {
   DEFAULT_LEAVE_POLICY,
   DEFAULT_LEAVE_PAY_POLICY,
@@ -39,14 +38,11 @@ import {
   LEAVE_PAY_METHOD_LABELS,
   SYSTEM_PAID_ALERT_TEXT,
   getLeaveBaseKind,
-  getNegativeBalanceFloor,
-  getEntryTypeForLeaveKind,
-  isLeaveEntryType,
   isPayableLeaveKind,
   resolveLeavePayMethodContext,
   formatLeaveTypeLabel,
 } from '@/lib/leave.js';
-import { buildLeaveMetadata, buildSourceMetadata } from '@/lib/workSessionsMetadata.js';
+import { useTimeEntry } from '@/components/time-entry/useTimeEntry.js';
 
 const EMPLOYEE_PLACEHOLDER_VALUE = '__employee_placeholder__';
 const OVERRIDE_METHOD_PLACEHOLDER_VALUE = '__no_override__';
@@ -105,7 +101,7 @@ export default function LeaveOverview({
   const [fallbackAmount, setFallbackAmount] = useState('');
   const [fallbackError, setFallbackError] = useState('');
   const [isFallbackSubmitting, setIsFallbackSubmitting] = useState(false);
-  const { authClient, user, loading, session } = useSupabase();
+  const { authClient, user, loading, session, dataClient } = useSupabase();
   const { activeOrgId } = useOrg();
 
   const loadSupportingData = useCallback(async () => {
@@ -176,6 +172,19 @@ export default function LeaveOverview({
   const secondHalfEnabled = isUsageEntry && isHalfDaySelection && includeSecondHalf;
   const shouldIncludeSecondHalfLeave = secondHalfEnabled && secondHalfMode === 'leave';
   const shouldIncludeSecondHalfWork = secondHalfEnabled && secondHalfMode === 'work';
+
+  const { saveLeaveDay } = useTimeEntry({
+    employees,
+    services: servicesList,
+    getRateForDate,
+    metadataClient: dataClient,
+    workSessions: workSessionsHistory,
+    leavePayPolicy,
+    leavePolicy,
+    leaveBalances,
+    session,
+    orgId: activeOrgId,
+  });
 
   const defaultUsageType = useMemo(() => {
     const option = usageOptions.find(item => item.value !== 'system_paid');
@@ -446,6 +455,45 @@ export default function LeaveOverview({
     ? Math.max(usagePreviewTotal, 0).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     : null;
 
+  const resetFallbackDialog = useCallback(() => {
+    setFallbackDialogState(null);
+    setFallbackAmount('');
+    setFallbackError('');
+  }, []);
+
+  const resetFormState = useCallback(() => {
+    setFormState(prev => ({
+      ...prev,
+      notes: '',
+      entryKind: prev.entryKind,
+      allocationAmount: 1,
+      usageAmount: prev.entryKind === 'usage' ? prev.usageAmount : 1,
+    }));
+    setIncludeSecondHalf(false);
+    setSecondHalfMode('work');
+    setSecondHalfLeaveType('employee_paid');
+    setSecondHalfHours('4');
+    setSecondHalfServiceId('');
+    setSecondHalfSessionsCount('1');
+    setSecondHalfStudentsCount('');
+  }, []);
+
+  const handleSuccessfulSave = useCallback(async (result = null) => {
+    toast.success('הרישום נשמר בהצלחה');
+    if (result?.usedFallbackRate) {
+      toast.info('הערה: שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר.');
+    }
+    if (result?.overrideApplied) {
+      toast.info('שווי יום החופשה אושר ידנית על ידי המשתמש.');
+    }
+    if (onRefresh) {
+      await onRefresh();
+    }
+    await loadSupportingData();
+    resetFormState();
+    resetFallbackDialog();
+  }, [loadSupportingData, onRefresh, resetFallbackDialog, resetFormState]);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     if (!employees.length || formState.employeeId === EMPLOYEE_PLACEHOLDER_VALUE) {
@@ -457,11 +505,20 @@ export default function LeaveOverview({
       toast.error('העובד שנבחר לא נמצא');
       return;
     }
+    if (!session) {
+      toast.error('יש להתחבר מחדש לפני שמירת הרישום.');
+      return;
+    }
+    if (!activeOrgId) {
+      toast.error('בחרו ארגון פעיל לפני שמירת הרישום.');
+      return;
+    }
+
     const date = formState.date || new Date().toISOString().slice(0, 10);
     const entryKind = formState.entryKind;
-    const baseHolidayType = formState.holidayType || 'employee_paid';
-    let delta = 0;
-    let ledgerType = 'manual';
+    const notesValue = formState.notes && formState.notes.trim().length > 0
+      ? formState.notes.trim()
+      : null;
 
     if (entryKind === 'allocation') {
       const allocation = Number(formState.allocationAmount);
@@ -469,391 +526,116 @@ export default function LeaveOverview({
         toast.error('הזן כמות ימים גדולה מאפס להקצאה');
         return;
       }
-      delta = allocation;
-      ledgerType = 'allocation';
-    } else {
-      let amount = Number(formState.usageAmount);
-      if (Number.isNaN(amount) || amount < 0) {
-        toast.error('כמות ימי החופשה אינה תקינה');
-        return;
-      }
-      if (!leavePolicy.allow_half_day && amount % 1 !== 0) {
-        toast.error('חצי יום אינו מאושר במדיניות הנוכחית');
-        return;
-      }
-      delta = -amount;
-      ledgerType = `usage_${baseHolidayType}`;
-    }
-
-    const summary = selectLeaveRemaining(employee.id, date, {
-      employees,
-      leaveBalances,
-      policy: leavePolicy,
-    });
-    const currentRemaining = summary.remaining;
-    const projected = currentRemaining + delta;
-
-    if (entryKind === 'usage' && delta < 0) {
-      if (!leavePolicy.allow_negative_balance) {
-        if (currentRemaining <= 0 || projected < 0) {
-          toast.error('חריגה ממכסה ימי החופשה המותרים');
-          return;
-        }
-      } else {
-        const floorLimit = getNegativeBalanceFloor(leavePolicy);
-        if (projected < floorLimit) {
-          toast.error('חריגה ממכסה ימי החופשה המותרים');
-          return;
-        }
-      }
-    }
-
-    if (isUsageEntry && isHalfDaySelection && secondHalfEnabled) {
-      if (shouldIncludeSecondHalfLeave && !secondHalfLeaveType) {
-        toast.error('יש לבחור סוג חופשה לחצי היום השני.');
-        return;
-      }
-      if (shouldIncludeSecondHalfWork) {
-        if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
-          const hoursValue = Number(secondHalfHours);
-          if (!Number.isFinite(hoursValue) || hoursValue <= 0) {
-            toast.error('יש להזין מספר שעות גדול מ-0 לחצי השני.');
-            return;
-          }
-        } else if (employee.employee_type === 'instructor') {
-          if (!secondHalfServiceId) {
-            toast.error('בחר שירות עבור חצי היום השני.');
-            return;
-          }
-          const sessionsCount = Number(secondHalfSessionsCount);
-          if (!Number.isFinite(sessionsCount) || sessionsCount <= 0) {
-            toast.error('מספר המפגשים לחצי השני חייב להיות גדול מ-0.');
-            return;
-          }
-          const targetService = servicesList.find(service => service.id === secondHalfServiceId);
-          const studentsCount = Number(secondHalfStudentsCount);
-          if (targetService && targetService.payment_model === 'per_student') {
-            if (!Number.isFinite(studentsCount) || studentsCount <= 0) {
-              toast.error('מספר התלמידים לחצי השני חייב להיות גדול מ-0.');
-              return;
-            }
-          }
-        }
-      }
-    }
-
-    setIsSubmitting(true);
-    let createdWorkSessionIds = [];
-    let usedFallbackNotice = false;
-
-    try {
-      if (!session) {
-        throw new Error('יש להתחבר מחדש לפני שמירת רישום החופשה.');
-      }
-      if (!activeOrgId) {
-        throw new Error('בחרו ארגון פעיל לפני שמירת רישום החופשה.');
-      }
-
-      const normalizedNotes = typeof formState.notes === 'string' ? formState.notes.trim() : '';
-      const notesValue = normalizedNotes ? normalizedNotes : null;
 
       const payload = {
         employee_id: employee.id,
         effective_date: date,
-        balance: delta,
-        leave_type: ledgerType,
+        balance: allocation,
+        leave_type: 'allocation',
         notes: notesValue,
       };
 
-      const shouldCreatePrimaryLeaveSession = entryKind === 'usage';
-      const shouldCreateSecondLeave = shouldCreatePrimaryLeaveSession && shouldIncludeSecondHalfLeave;
-      const shouldCreateSecondWork = shouldCreatePrimaryLeaveSession && shouldIncludeSecondHalfWork;
-
-      if (shouldCreatePrimaryLeaveSession) {
-        const hasWorkConflicts = workSessionsHistory.some(sessionRow => {
-          if (!sessionRow || sessionRow.deleted) return false;
-          if (sessionRow.employee_id !== employee.id) return false;
-          if (sessionRow.date !== date) return false;
-          if (isLeaveEntryType(sessionRow.entry_type) || sessionRow.entry_type === 'adjustment') return false;
-          return true;
-        });
-        if (hasWorkConflicts && !shouldCreateSecondWork) {
-          throw new Error('לא ניתן להזין חופשה בתאריך זה כי קיימים בו רישומי עבודה. יש למחוק אותם תחילה.');
-        }
-      }
-
-      const sessionsToCreate = [];
-      const fallbackEntries = [];
-
-      const appendSession = (result) => {
-        if (!result || !result.session) return;
-        const index = sessionsToCreate.length;
-        sessionsToCreate.push(result.session);
-        if (result.fallbackUsed) {
-          fallbackEntries.push({
-            index,
-            fraction: result.fraction,
-            payable: result.payable,
-            rateSuggestion: result.rateSuggestion,
-          });
-          usedFallbackNotice = true;
-        }
-      };
-
-      const buildLeaveSession = (leaveTypeValue, fractionOverride = null, source = 'employees_leave_overview') => {
-        const baseLeaveKind = getLeaveBaseKind(leaveTypeValue) || leaveTypeValue;
-        const entryType = getEntryTypeForLeaveKind(baseLeaveKind)
-          || getEntryTypeForLeaveKind('system_paid')
-          || 'leave_unpaid';
-        const payable = isPayableLeaveKind(baseLeaveKind);
-        const fraction = Number.isFinite(fractionOverride) && fractionOverride > 0
-          ? fractionOverride
-          : (baseLeaveKind === 'half_day' ? 0.5 : 1);
-        let fullDayValue = 0;
-        let fallbackUsed = false;
-
-        if (payable) {
-          const computed = selectLeaveDayValue(employee.id, date, {
-            employees,
-            workSessions: workSessionsHistory,
-            services: servicesList,
-            leavePayPolicy,
-          });
-
-          if (computed && typeof computed === 'object') {
-            const numeric = Number(computed.value);
-            if (Number.isFinite(numeric) && numeric > 0) {
-              fullDayValue = numeric;
-            }
-          } else if (computed !== null && computed !== undefined) {
-            const numeric = Number(computed);
-            if (Number.isFinite(numeric) && numeric > 0) {
-              fullDayValue = numeric;
-            }
-          }
-
-          if (!(fullDayValue > 0)) {
-            if (employee.employee_type === 'global') {
-              const { rate: resolvedRate } = getRateForDate(employee.id, date, GENERIC_RATE_SERVICE_ID);
-              if (Number.isFinite(resolvedRate) && resolvedRate > 0) {
-                try {
-                  fullDayValue = calculateGlobalDailyRate(employee, date, resolvedRate);
-                  fallbackUsed = true;
-                } catch (calcError) {
-                  console.error('Failed to calculate fallback global rate', calcError);
-                  fullDayValue = 0;
-                }
-              }
-            } else {
-              const { rate: resolvedRate } = getRateForDate(employee.id, date, null);
-              if (Number.isFinite(resolvedRate) && resolvedRate > 0) {
-                fullDayValue = resolvedRate;
-                fallbackUsed = true;
-              }
-            }
-          }
-        }
-
-        const rateUsedValue = payable && fullDayValue > 0 ? fullDayValue : null;
-        const totalPaymentValue = payable && fullDayValue > 0 ? fullDayValue * fraction : 0;
-        const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
-        const metadata = buildLeaveMetadata({
-          source,
-          leaveType: baseLeaveKind,
-          leaveKind: baseLeaveKind,
-          payable,
-          fraction,
-          halfDay: fraction === 0.5,
-          method: payContext.method,
-          lookbackMonths: payContext.lookback_months,
-          legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
-          overrideApplied: payContext.override_applied,
-        });
-
-        const sessionPayload = {
-          employee_id: employee.id,
-          date,
-          entry_type: entryType,
-          hours: 0,
-          service_id: null,
-          sessions_count: null,
-          students_count: null,
-          payable,
-          rate_used: rateUsedValue,
-          total_payment: totalPaymentValue,
-          notes: notesValue,
-        };
-
-        if (metadata) {
-          sessionPayload.metadata = metadata;
-        }
-
-        return {
-          session: sessionPayload,
-          fallbackUsed,
-          fraction,
-          payable,
-          rateSuggestion: rateUsedValue,
-        };
-      };
-
-      const buildSecondHalfWorkSession = () => {
-        if (!shouldCreateSecondWork) return null;
-        const employeeType = employee.employee_type;
-        const baseMetadata = buildSourceMetadata('employees_leave_overview_second_half') || undefined;
-
-        if (employeeType === 'hourly' || employeeType === 'global') {
-          const hoursValue = Number(secondHalfHours);
-          const { rate, reason } = getRateForDate(employee.id, date, GENERIC_RATE_SERVICE_ID);
-          if (!Number.isFinite(rate) || rate <= 0) {
-            throw new Error(reason || 'לא הוגדר תעריף עבור חצי היום השני.');
-          }
-          const totalPayment = rate * hoursValue;
-          const sessionPayload = {
-            employee_id: employee.id,
-            date,
-            entry_type: 'hours',
-            service_id: employeeType === 'hourly' ? GENERIC_RATE_SERVICE_ID : null,
-            hours: hoursValue,
-            sessions_count: null,
-            students_count: null,
-            payable: true,
-            rate_used: rate,
-            total_payment: totalPayment,
-            notes: notesValue,
-          };
-          if (baseMetadata) {
-            sessionPayload.metadata = baseMetadata;
-          }
-          return { session: sessionPayload, fallbackUsed: false, fraction: 0, payable: true };
-        }
-
-        const serviceId = secondHalfServiceId;
-        if (!serviceId) {
-          throw new Error('בחר שירות עבור חצי היום השני.');
-        }
-        const { rate, reason } = getRateForDate(employee.id, date, serviceId);
-        if (!Number.isFinite(rate) || rate <= 0) {
-          throw new Error(reason || 'לא הוגדר תעריף עבור חצי היום השני.');
-        }
-        const sessionsCount = Number(secondHalfSessionsCount);
-        const studentsCount = Number(secondHalfStudentsCount);
-        const service = servicesList.find(item => item.id === serviceId);
-        const perStudent = service?.payment_model === 'per_student';
-        if (perStudent && (!Number.isFinite(studentsCount) || studentsCount <= 0)) {
-          throw new Error('מספר התלמידים לחצי השני חייב להיות גדול מ-0.');
-        }
-        const totalPayment = perStudent
-          ? rate * sessionsCount * (Number.isFinite(studentsCount) ? studentsCount : 0)
-          : rate * sessionsCount;
-
-        const sessionPayload = {
-          employee_id: employee.id,
-          date,
-          entry_type: 'session',
-          service_id: serviceId,
-          hours: null,
-          sessions_count: sessionsCount,
-          students_count: Number.isFinite(studentsCount) && studentsCount >= 0 ? studentsCount : null,
-          payable: true,
-          rate_used: rate,
-          total_payment: totalPayment,
-          notes: notesValue,
-        };
-        if (baseMetadata) {
-          sessionPayload.metadata = baseMetadata;
-        }
-        return { session: sessionPayload, fallbackUsed: false, fraction: 0, payable: true };
-      };
-
-      if (shouldCreatePrimaryLeaveSession) {
-        const primaryFraction = baseHolidayType === 'half_day' ? 0.5 : Math.abs(delta);
-        appendSession(buildLeaveSession(baseHolidayType, primaryFraction, 'employees_leave_overview'));
-      }
-
-      if (shouldCreateSecondLeave) {
-        appendSession(buildLeaveSession(secondHalfLeaveType, 0.5, 'employees_leave_overview_second_half'));
-      }
-
-      const secondHalfWorkResult = buildSecondHalfWorkSession();
-      if (secondHalfWorkResult) {
-        appendSession(secondHalfWorkResult);
-      }
-
-      if (fallbackEntries.length > 0) {
-        const fallbackRateSuggestion = fallbackEntries.find(entry => Number.isFinite(entry.rateSuggestion) && entry.rateSuggestion > 0)?.rateSuggestion;
-        setFallbackDialogState({
-          employee,
-          date,
-          ledgerPayload: payload,
-          sessions: sessionsToCreate.map(session => ({ ...session })),
-          fallbackEntries: fallbackEntries.map(entry => ({ ...entry })),
-          showFallbackNotice: usedFallbackNotice,
-        });
-        setFallbackAmount(fallbackRateSuggestion ? String(fallbackRateSuggestion) : '');
-        setFallbackError('');
-        setIsSubmitting(false);
-        return;
-      }
-
-      if (sessionsToCreate.length > 0) {
-        const creationResult = await createWorkSessions({
+      setIsSubmitting(true);
+      try {
+        await createLeaveBalanceEntry({
           session,
           orgId: activeOrgId,
-          sessions: sessionsToCreate,
+          body: payload,
         });
-        createdWorkSessionIds = Array.isArray(creationResult?.created)
-          ? creationResult.created.filter(Boolean)
-          : [];
+        await handleSuccessfulSave();
+      } catch (error) {
+        console.error('Error saving leave allocation', error);
+        toast.error(error?.message || 'שמירת הרישום נכשלה');
+      } finally {
+        setIsSubmitting(false);
       }
+      return;
+    }
 
-      await createLeaveBalanceEntry({
-        session,
-        orgId: activeOrgId,
-        body: payload,
-      });
+    if (isUsageEntry && isHalfDaySelection && secondHalfEnabled && shouldIncludeSecondHalfLeave && !secondHalfLeaveType) {
+      toast.error('יש לבחור סוג חופשה לחצי היום השני.');
+      return;
+    }
 
-      toast.success('הרישום נשמר בהצלחה');
-      if (usedFallbackNotice) {
-        toast.info('הערה: שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר.');
-      }
-      if (onRefresh) await onRefresh();
-      await loadSupportingData();
-      setFormState(prev => ({
-        ...prev,
-        notes: '',
-        entryKind: prev.entryKind,
-        allocationAmount: 1,
-        usageAmount: prev.entryKind === 'usage' ? prev.usageAmount : 1,
-      }));
-      setIncludeSecondHalf(false);
-      setSecondHalfMode('work');
-      setSecondHalfLeaveType('employee_paid');
-      setSecondHalfHours('4');
-      setSecondHalfServiceId('');
-      setSecondHalfSessionsCount('1');
-      setSecondHalfStudentsCount('');
-    } catch (error) {
-      if (createdWorkSessionIds.length > 0) {
-        for (const id of createdWorkSessionIds) {
-          try {
-            await deleteWorkSession({ session, orgId: activeOrgId, sessionId: id });
-          } catch (rollbackError) {
-            console.error('Failed to roll back work session creation', rollbackError);
+    let halfDayWorkSegments = [];
+    if (isUsageEntry && isHalfDaySelection && secondHalfEnabled && shouldIncludeSecondHalfWork) {
+      try {
+        if (employee.employee_type === 'hourly' || employee.employee_type === 'global') {
+          const hoursValue = Number(secondHalfHours);
+          if (!Number.isFinite(hoursValue) || hoursValue <= 0) {
+            throw new Error('יש להזין מספר שעות גדול מ-0 לחצי השני.');
           }
+          halfDayWorkSegments = [{
+            hours: hoursValue,
+            notes: notesValue,
+          }];
+        } else {
+          if (!secondHalfServiceId) {
+            throw new Error('בחר שירות עבור חצי היום השני.');
+          }
+          const service = servicesList.find(item => item.id === secondHalfServiceId);
+          if (!service) {
+            throw new Error('בחר שירות עבור חצי היום השני.');
+          }
+          const sessionsCountValue = Number(secondHalfSessionsCount);
+          if (!Number.isFinite(sessionsCountValue) || sessionsCountValue <= 0) {
+            throw new Error('מספר המפגשים לחצי השני חייב להיות גדול מ-0.');
+          }
+          const studentsCountRaw = secondHalfStudentsCount === '' ? null : Number(secondHalfStudentsCount);
+          if (service.payment_model === 'per_student') {
+            if (!Number.isFinite(studentsCountRaw) || studentsCountRaw <= 0) {
+              throw new Error('מספר התלמידים לחצי השני חייב להיות גדול מ-0.');
+            }
+          }
+          halfDayWorkSegments = [{
+            service_id: secondHalfServiceId,
+            sessions_count: sessionsCountValue,
+            students_count: Number.isFinite(studentsCountRaw) && studentsCountRaw >= 0 ? studentsCountRaw : null,
+            notes: notesValue,
+          }];
         }
+      } catch (validationError) {
+        toast.error(validationError.message || 'פרטי חצי היום השני אינם תקינים.');
+        return;
       }
+    }
+
+    const baseHolidayType = formState.holidayType || 'employee_paid';
+    const requestPayload = {
+      employee,
+      day: new Date(`${date}T00:00:00`),
+      date,
+      leaveType: baseHolidayType,
+      paidLeaveNotes: notesValue,
+      source: 'employees_leave_overview',
+      includeHalfDaySecondHalf: Boolean(secondHalfEnabled),
+      halfDaySecondHalfMode: secondHalfEnabled ? secondHalfMode : null,
+      halfDaySecondLeaveType: shouldIncludeSecondHalfLeave ? secondHalfLeaveType : null,
+      halfDayWorkSegments,
+      halfDayRemovedWorkIds: [],
+    };
+
+    setIsSubmitting(true);
+    try {
+      const result = await saveLeaveDay(requestPayload);
+      if (result?.needsConfirmation) {
+        setFallbackDialogState({
+          request: requestPayload,
+          fallbackValue: result.fallbackValue,
+          fraction: result.fraction ?? 1,
+          payable: result.payable !== false,
+        });
+        setFallbackAmount(result.fallbackValue ? String(result.fallbackValue) : '');
+        setFallbackError('');
+        return;
+      }
+      await handleSuccessfulSave(result);
+    } catch (error) {
       console.error('Error saving leave entry', error);
       toast.error(error?.message || 'שמירת הרישום נכשלה');
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const resetFallbackDialog = () => {
-    setFallbackDialogState(null);
-    setFallbackAmount('');
-    setFallbackError('');
   };
 
   const handleFallbackDialogClose = (isOpen) => {
@@ -872,84 +654,24 @@ export default function LeaveOverview({
     setFallbackError('');
     setIsFallbackSubmitting(true);
     setIsSubmitting(true);
-    let createdWorkSessionIds = [];
     try {
-      if (!session) {
-        throw new Error('יש להתחבר מחדש לפני שמירת הרישום.');
-      }
-      if (!activeOrgId) {
-        throw new Error('בחרו ארגון פעיל לפני שמירת הרישום.');
-      }
-      const { sessions = [], ledgerPayload, fallbackEntries = [], showFallbackNotice } = fallbackDialogState;
-      const normalizedSessions = sessions.map(item => ({ ...item }));
-      fallbackEntries.forEach((entry) => {
-        const index = entry?.index ?? -1;
-        if (index < 0 || index >= normalizedSessions.length) return;
-        const fraction = Number.isFinite(entry?.fraction) && entry.fraction > 0 ? entry.fraction : 1;
-        if (entry?.payable === false) {
-          normalizedSessions[index] = {
-            ...normalizedSessions[index],
-            rate_used: null,
-            total_payment: 0,
-          };
-        } else {
-          normalizedSessions[index] = {
-            ...normalizedSessions[index],
-            rate_used: numericValue,
-            total_payment: numericValue * fraction,
-          };
-        }
-      });
-
-      if (normalizedSessions.length > 0) {
-        const creationResult = await createWorkSessions({
-          session,
-          orgId: activeOrgId,
-          sessions: normalizedSessions,
+      const requestPayload = {
+        ...fallbackDialogState.request,
+        overrideDailyValue: numericValue,
+      };
+      const result = await saveLeaveDay(requestPayload);
+      if (result?.needsConfirmation) {
+        setFallbackDialogState({
+          request: requestPayload,
+          fallbackValue: result.fallbackValue,
+          fraction: result.fraction ?? 1,
+          payable: result.payable !== false,
         });
-        createdWorkSessionIds = Array.isArray(creationResult?.created)
-          ? creationResult.created.filter(Boolean)
-          : [];
+        setFallbackAmount(result.fallbackValue ? String(result.fallbackValue) : '');
+        return;
       }
-
-      await createLeaveBalanceEntry({
-        session,
-        orgId: activeOrgId,
-        body: ledgerPayload,
-      });
-
-      toast.success('הרישום נשמר בהצלחה');
-      toast.info('שווי יום החופשה אושר ידנית על ידי המשתמש.');
-      if (showFallbackNotice) {
-        toast.info('הערה: שווי יום החופשה חושב לפי תעריף נוכחי עקב חוסר בנתוני עבר.');
-      }
-      if (onRefresh) await onRefresh();
-      await loadSupportingData();
-      setFormState(prev => ({
-        ...prev,
-        notes: '',
-        entryKind: prev.entryKind,
-        allocationAmount: 1,
-        usageAmount: prev.entryKind === 'usage' ? prev.usageAmount : 1,
-      }));
-      setIncludeSecondHalf(false);
-      setSecondHalfMode('work');
-      setSecondHalfLeaveType('employee_paid');
-      setSecondHalfHours('4');
-      setSecondHalfServiceId('');
-      setSecondHalfSessionsCount('1');
-      setSecondHalfStudentsCount('');
-      resetFallbackDialog();
+      await handleSuccessfulSave(result);
     } catch (error) {
-      if (createdWorkSessionIds.length > 0) {
-        for (const id of createdWorkSessionIds) {
-          try {
-            await deleteWorkSession({ session, orgId: activeOrgId, sessionId: id });
-          } catch (rollbackError) {
-            console.error('Failed to roll back work session after fallback confirmation', rollbackError);
-          }
-        }
-      }
       console.error('Error saving leave entry after confirmation', error);
       toast.error(error?.message || 'שמירת הרישום נכשלה');
     } finally {
@@ -957,7 +679,6 @@ export default function LeaveOverview({
       setIsSubmitting(false);
     }
   };
-
   const lockedUsageTypes = new Set(['half_day', 'system_paid', 'unpaid']);
   const isUsageLocked = lockedUsageTypes.has(formState.holidayType);
 
@@ -967,18 +688,14 @@ export default function LeaveOverview({
   }, [employees, overrideEmployeeId]);
 
   const parsedFallbackAmount = Number(fallbackAmount);
-  const fallbackEntriesForDialog = fallbackDialogState?.fallbackEntries || [];
-  const fallbackIsPayable = fallbackEntriesForDialog.some(entry => entry?.payable !== false);
-  const fallbackFractionSum = fallbackEntriesForDialog
-    .filter(entry => entry?.payable !== false)
-    .reduce((sum, entry) => {
-      const fractionValue = Number.isFinite(entry?.fraction) && entry.fraction > 0 ? entry.fraction : 0;
-      return sum + fractionValue;
-    }, 0);
-  const fallbackFraction = fallbackIsPayable
-    ? (fallbackFractionSum > 0 ? fallbackFractionSum : 1)
+  const fallbackFraction = fallbackDialogState && fallbackDialogState.payable !== false
+    ? (Number.isFinite(fallbackDialogState.fraction) && fallbackDialogState.fraction > 0
+      ? fallbackDialogState.fraction
+      : 1)
     : 1;
-  const fallbackTotalPreview = fallbackDialogState && fallbackIsPayable && Number.isFinite(parsedFallbackAmount)
+  const fallbackTotalPreview = fallbackDialogState
+    && fallbackDialogState.payable !== false
+    && Number.isFinite(parsedFallbackAmount)
     ? parsedFallbackAmount * fallbackFraction
     : null;
   const fallbackDisplayAmount = typeof fallbackAmount === 'string' && fallbackAmount.trim().length > 0
