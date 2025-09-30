@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -28,11 +28,15 @@ import {
   normalizeMixedSubtype,
 } from '@/lib/leave.js';
 import { selectLeaveDayValue } from '@/selectors.js';
+
+const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+
 function TimeEntryTableInner({
   employees,
   workSessions,
   allWorkSessions = null,
   services,
+  rateHistories = [],
   getRateForDate,
   onTableSubmit,
   onImported,
@@ -72,6 +76,58 @@ function TimeEntryTableInner({
     }),
     [contextSessions, employees, services, leavePayPolicy],
   );
+  const resolveRateForDate = useCallback((employeeId, date, serviceId = null) => {
+    if (!employeeId || !date) {
+      return { rate: 0, reason: 'חסרים פרטי עובד או תאריך' };
+    }
+
+    const baseResult = typeof getRateForDate === 'function'
+      ? getRateForDate(employeeId, date, serviceId)
+      : null;
+
+    const parsedRate = Number(baseResult?.rate);
+    if (Number.isFinite(parsedRate) && parsedRate > 0) {
+      return { ...baseResult, rate: parsedRate };
+    }
+
+    const employee = employees.find(item => item?.id === employeeId);
+    if (!employee) {
+      return baseResult || { rate: 0, reason: 'אין עובד כזה' };
+    }
+
+    const dateValue = date instanceof Date ? date : new Date(date);
+    const normalizedDate = Number.isNaN(dateValue.getTime())
+      ? null
+      : format(dateValue, 'yyyy-MM-dd');
+    if (!normalizedDate) {
+      return baseResult || { rate: 0, reason: 'תאריך לא תקין' };
+    }
+
+    const effectiveServiceId = (employee.employee_type === 'hourly' || employee.employee_type === 'global')
+      ? GENERIC_RATE_SERVICE_ID
+      : (serviceId || null);
+
+    const relevantRates = rateHistories
+      .filter(rate => rate
+        && rate.employee_id === employeeId
+        && rate.service_id === effectiveServiceId
+        && rate.effective_date <= normalizedDate)
+      .sort((a, b) => new Date(b.effective_date) - new Date(a.effective_date));
+
+    if (relevantRates.length > 0) {
+      const latest = relevantRates[0];
+      const fallbackRate = Number(latest?.rate) || 0;
+      if (fallbackRate > 0) {
+        return { rate: fallbackRate, effectiveDate: latest.effective_date };
+      }
+    }
+
+    if (baseResult && typeof baseResult === 'object') {
+      return baseResult;
+    }
+
+    return { rate: 0, reason: 'לא הוגדר תעריף' };
+  }, [employees, getRateForDate, rateHistories]);
   const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees]);
   const [importOpen, setImportOpen] = useState(false);
   const [multiModalOpen, setMultiModalOpen] = useState(false);
@@ -401,7 +457,7 @@ function TimeEntryTableInner({
                             {/* Headers display each employee with current rate info */}
                             {employees.map(emp => {
                             const headerRateInfo = (emp.employee_type === 'hourly' || emp.employee_type === 'global')
-                              ? getRateForDate(emp.id, currentMonth)
+                              ? resolveRateForDate(emp.id, currentMonth)
                               : null;
                             return (
                               <TableHead key={emp.id} className="top-0 text-center z-20 min-w-[140px] p-2 bg-slate-50 shadow-sm">
@@ -462,7 +518,7 @@ function TimeEntryTableInner({
         let summaryText = '-';
         let summaryPayment = 0;
         let extraInfo = '';
-        const rateInfo = getRateForDate(emp.id, day);
+        const rateInfo = resolveRateForDate(emp.id, day);
         const showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
         let leaveKind = null;
         let leaveLabel = null;
@@ -551,6 +607,23 @@ function TimeEntryTableInner({
                                                 payload.mixedPaid = isPaid;
                                                 payload.mixedSubtype = resolvedSubtype;
                                                 payload.mixedHalfDay = isPaid && mixedDetails.halfDay === true;
+                                              }
+                                              if ((payload.leaveType || leaveKind) === 'half_day') {
+                                                if (regularSessions.length > 0) {
+                                                  payload.halfDaySecondHalfMode = 'work';
+                                                } else {
+                                                  const otherLeaveSessions = dailySessions.filter(session => (
+                                                    isLeaveEntryType(session.entry_type)
+                                                    && session.id !== paidLeave.id
+                                                  ));
+                                                  if (otherLeaveSessions.length > 0) {
+                                                    payload.halfDaySecondHalfMode = 'leave';
+                                                    const inferredSecondary = inferLeaveType(otherLeaveSessions[0]);
+                                                    payload.halfDaySecondLeaveType = inferredSecondary
+                                                      || getLeaveKindFromEntryType(otherLeaveSessions[0].entry_type)
+                                                      || 'employee_paid';
+                                                  }
+                                                }
                                               }
                                             } else if (activeTab === 'adjustments') {
                                               payload.dayType = 'adjustment';
@@ -738,35 +811,47 @@ function TimeEntryTableInner({
               paidLeaveNotes={editingCell.paidLeaveNotes}
               initialLeaveType={editingCell.leaveType}
               selectedDate={format(editingCell.day, 'yyyy-MM-dd')}
-              getRateForDate={getRateForDate}
+              getRateForDate={resolveRateForDate}
               allowDayTypeSelection
               allowHalfDay={leavePolicy?.allow_half_day}
               initialMixedPaid={editingCell.mixedPaid}
               initialMixedSubtype={editingCell.mixedSubtype}
               initialMixedHalfDay={editingCell.mixedHalfDay}
+              initialHalfDaySecondHalfMode={editingCell.halfDaySecondHalfMode}
+              initialHalfDaySecondLeaveType={editingCell.halfDaySecondLeaveType}
               leavePayPolicy={leavePayPolicy}
               onSubmit={async (result) => {
                 if (!result) {
                   setEditingCell(null);
-                  return;
+                  return { cancelled: true };
                 }
                 try {
-                  await onTableSubmit({
-                    employee: editingCell.employee,
-                    day: editingCell.day,
-                    dayType: result.dayType,
-                    updatedRows: result.rows,
-                    paidLeaveId: result.paidLeaveId,
-                    paidLeaveNotes: result.paidLeaveNotes,
-                    leaveType: result.leaveType,
-                    mixedPaid: result.mixedPaid,
-                    mixedSubtype: result.mixedSubtype,
-                    mixedHalfDay: result.mixedHalfDay,
-                    adjustments: result.adjustments,
-                  });
-                  setEditingCell(null);
+                    const submissionResponse = await onTableSubmit({
+                      employee: editingCell.employee,
+                      day: editingCell.day,
+                      dayType: result.dayType,
+                      updatedRows: result.rows,
+                      paidLeaveId: result.paidLeaveId,
+                      paidLeaveNotes: result.paidLeaveNotes,
+                      leaveType: result.leaveType,
+                      mixedPaid: result.mixedPaid,
+                      mixedSubtype: result.mixedSubtype,
+                      mixedHalfDay: result.mixedHalfDay,
+                      halfDaySecondHalfMode: result.halfDaySecondHalfMode,
+                      halfDayWorkSegments: result.halfDayWorkSegments,
+                      halfDaySecondLeaveType: result.halfDaySecondLeaveType,
+                      includeHalfDaySecondHalf: result.includeHalfDaySecondHalf,
+                      halfDayRemovedWorkIds: result.halfDayRemovedWorkIds,
+                      adjustments: result.adjustments,
+                      overrideDailyValue: result.overrideDailyValue,
+                    });
+                  if (!submissionResponse?.needsConfirmation) {
+                    setEditingCell(null);
+                  }
+                  return submissionResponse;
                 } catch {
                   // keep modal open on error
+                  return null;
                 }
               }}
               onDeleted={(ids, rows = []) => {
@@ -796,7 +881,7 @@ function TimeEntryTableInner({
           onOpenChange={setImportOpen}
           employees={employees}
           services={services}
-          getRateForDate={getRateForDate}
+          getRateForDate={resolveRateForDate}
           workSessions={contextSessions}
           onImported={onImported}
         />
@@ -807,7 +892,7 @@ function TimeEntryTableInner({
           services={services}
           selectedEmployees={selectedEmployees}
           selectedDates={selectedDates}
-          getRateForDate={getRateForDate}
+          getRateForDate={resolveRateForDate}
           workSessions={contextSessions}
           leavePayPolicy={leavePayPolicy}
           allowHalfDay={leavePolicy?.allow_half_day}

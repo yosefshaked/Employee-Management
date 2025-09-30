@@ -9,6 +9,10 @@ import { he } from 'date-fns/locale';
 import { Undo2, Trash2 } from 'lucide-react';
 import { HOLIDAY_TYPE_LABELS, getLeaveKindFromEntryType, inferLeaveType, isLeaveEntryType } from '@/lib/leave.js';
 import { Label } from '@/components/ui/label';
+import { toast } from 'sonner';
+import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
+import { deleteWorkSession, restoreWorkSession } from '@/api/work-sessions.js';
 
 function resolveEmployeeName(employeesById, id) {
   const record = employeesById.get(id);
@@ -112,6 +116,9 @@ export default function TrashTab({
   const [pendingPermanent, setPendingPermanent] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const { session } = useSupabase();
+  const { activeOrgId } = useOrg();
+
   const employeesById = useMemo(() => new Map(employees.map(emp => [emp.id, emp])), [employees]);
   const servicesById = useMemo(() => new Map(services.map(service => [service.id, service])), [services]);
 
@@ -142,31 +149,89 @@ export default function TrashTab({
   const closeRestoreDialog = () => setPendingRestore(null);
   const closePermanentDialog = () => setPendingPermanent(null);
 
+  const ensureSessionAndOrg = () => {
+    if (!session) {
+      const error = new Error('נדרשת התחברות כדי לבצע פעולה זו.');
+      error.code = 'AUTH_REQUIRED';
+      throw error;
+    }
+    if (!activeOrgId) {
+      const error = new Error('יש לבחור ארגון פעיל לפני ביצוע הפעולה.');
+      error.code = 'ORG_REQUIRED';
+      throw error;
+    }
+  };
+
   const handleConfirmRestore = async () => {
-    if (!pendingRestore || typeof onRestore !== 'function') {
+    if (!pendingRestore) {
       closeRestoreDialog();
       return;
     }
-    try {
-      setSubmitting(true);
-      await onRestore(pendingRestore.ids);
-      setSelectedIds(prev => prev.filter(id => !pendingRestore.ids.includes(id)));
+
+    const normalizedIds = toIdArray(pendingRestore.ids);
+    if (!normalizedIds.length) {
       closeRestoreDialog();
+      return;
+    }
+
+    try {
+      ensureSessionAndOrg();
+      setSubmitting(true);
+      const relatedSessions = sessions.filter(item => normalizedIds.includes(String(item.id)));
+      await Promise.all(
+        normalizedIds.map(sessionId => restoreWorkSession({
+          session,
+          orgId: activeOrgId,
+          sessionId,
+        })),
+      );
+      toast.success(normalizedIds.length === 1 ? 'הרישום שוחזר.' : 'הרישומים שוחזרו.');
+      setSelectedIds(prev => prev.filter(id => !normalizedIds.includes(id)));
+      if (typeof onRestore === 'function') {
+        await onRestore(normalizedIds, { restoredSessions: relatedSessions });
+      }
+      closeRestoreDialog();
+    } catch (error) {
+      console.error('Failed to restore work sessions', error);
+      const message = error?.message || 'שחזור נכשל, נסו שוב.';
+      toast.error(message);
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleConfirmPermanent = async () => {
-    if (!pendingPermanent || typeof onPermanentDelete !== 'function') {
+    if (!pendingPermanent) {
       closePermanentDialog();
       return;
     }
-    try {
-      setSubmitting(true);
-      await onPermanentDelete(pendingPermanent.ids);
-      setSelectedIds(prev => prev.filter(id => !pendingPermanent.ids.includes(id)));
+
+    const normalizedIds = toIdArray(pendingPermanent.ids);
+    if (!normalizedIds.length) {
       closePermanentDialog();
+      return;
+    }
+
+    try {
+      ensureSessionAndOrg();
+      setSubmitting(true);
+      await Promise.all(
+        normalizedIds.map(sessionId => deleteWorkSession({
+          session,
+          orgId: activeOrgId,
+          sessionId,
+        })),
+      );
+      toast.success(normalizedIds.length === 1 ? 'הרישום נמחק לצמיתות.' : 'הרישומים נמחקו לצמיתות.');
+      setSelectedIds(prev => prev.filter(id => !normalizedIds.includes(id)));
+      if (typeof onPermanentDelete === 'function') {
+        await onPermanentDelete(normalizedIds);
+      }
+      closePermanentDialog();
+    } catch (error) {
+      console.error('Failed to delete work sessions permanently', error);
+      const message = error?.message || 'מחיקה נכשלה, נסו שוב.';
+      toast.error(message);
     } finally {
       setSubmitting(false);
     }

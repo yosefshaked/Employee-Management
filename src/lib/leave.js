@@ -55,6 +55,25 @@ const LEAVE_PAY_METHOD_VALUES = new Set(LEAVE_PAY_METHOD_OPTIONS.map(option => o
 const UNPAID_SUBTYPE_SET = new Set(['holiday_unpaid', 'vacation_unpaid']);
 const MIXED_SUBTYPE_SET = new Set(['holiday', 'vacation']);
 
+export const SYSTEM_PAID_LABEL_SUFFIX = ' (מערכת)';
+
+export function formatLeaveTypeLabel(value, label) {
+  if (value !== 'system_paid') {
+    return label;
+  }
+
+  const safeLabel = typeof label === 'string' ? label.trim() : '';
+  if (!safeLabel) {
+    return `חג משולם${SYSTEM_PAID_LABEL_SUFFIX}`;
+  }
+
+  if (safeLabel.includes('מערכת')) {
+    return safeLabel;
+  }
+
+  return `${safeLabel}${SYSTEM_PAID_LABEL_SUFFIX}`;
+}
+
 function coerceBoolean(value) {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') {
@@ -85,12 +104,15 @@ function normalizeLeaveToken(value) {
 
 export const LEAVE_TYPE_OPTIONS = [
   { value: 'employee_paid', label: 'חופשה מהמכסה' },
-  { value: 'system_paid', label: 'חג משולם (מערכת)' },
+  { value: 'system_paid', label: formatLeaveTypeLabel('system_paid', 'חג משולם') },
   { value: 'holiday_unpaid', label: 'חג ללא תשלום' },
   { value: 'vacation_unpaid', label: 'חופשה ללא תשלום' },
   { value: 'mixed', label: 'מעורב' },
   { value: 'half_day', label: 'חצי יום' },
 ];
+
+export const SYSTEM_PAID_ALERT_TEXT =
+  'שימו לב: יום חופשה זה יירשם כחג ולא ינוכה ממכסת החופשה של העובד.';
 
 export const HOLIDAY_TYPE_LABELS = LEAVE_TYPE_OPTIONS.reduce((acc, option) => {
   acc[option.value] = option.label;
@@ -98,7 +120,7 @@ export const HOLIDAY_TYPE_LABELS = LEAVE_TYPE_OPTIONS.reduce((acc, option) => {
 }, {});
 
 export const MIXED_SUBTYPE_OPTIONS = [
-  { value: 'holiday', label: 'חג' },
+  { value: 'holiday', label: formatLeaveTypeLabel('system_paid', 'חג') },
   { value: 'vacation', label: 'חופשה' },
 ];
 
@@ -135,9 +157,8 @@ export function getLeaveBaseKind(value) {
 export const LEAVE_ENTRY_TYPES = {
   system_paid: 'leave_system_paid',
   employee_paid: 'leave_employee_paid',
-  unpaid: 'leave',
+  unpaid: 'leave_unpaid',
   half_day: 'leave_half_day',
-  mixed: 'leave_mixed',
 };
 
 const ENTRY_TYPE_TO_KIND = {
@@ -147,7 +168,6 @@ const ENTRY_TYPE_TO_KIND = {
   leave_unpaid: 'unpaid',
   leave: 'unpaid',
   leave_half_day: 'half_day',
-  leave_mixed: 'mixed',
 };
 
 export function getLeaveKindFromEntryType(entryType) {

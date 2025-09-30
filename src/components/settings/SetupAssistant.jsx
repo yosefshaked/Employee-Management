@@ -498,6 +498,7 @@ export default function SetupAssistant() {
     user,
     loading,
     activeOrg: supabaseActiveOrg,
+    session,
   } = useSupabase();
   const activeOrg = orgActiveOrg ?? supabaseActiveOrg ?? null;
   const supabaseReady = !loading && Boolean(authClient) && Boolean(user);
@@ -691,7 +692,7 @@ export default function SetupAssistant() {
   useEffect(() => {
     let cancelled = false;
 
-    if (!activeOrgId || !dataClient) {
+    if (!activeOrgId || !session) {
       setLeavePolicyStatus(INITIAL_LEAVE_POLICY_STATUS);
       return () => {
         cancelled = true;
@@ -707,7 +708,7 @@ export default function SetupAssistant() {
 
     const loadLeavePolicyStatus = async () => {
       try {
-        const { value } = await fetchLeavePolicySettings(dataClient);
+        const { value } = await fetchLeavePolicySettings({ session, orgId: activeOrgId });
         if (cancelled) {
           return;
         }
@@ -735,7 +736,7 @@ export default function SetupAssistant() {
     return () => {
       cancelled = true;
     };
-  }, [activeOrgId, dataClient]);
+  }, [activeOrgId, session]);
 
   const hasConnectionValues = Boolean(connection.supabase_url.trim() && connection.anon_key.trim());
   const hasSavedConnection = Boolean(
@@ -954,8 +955,8 @@ export default function SetupAssistant() {
 
   const handleTestConnection = async () => {
     if (!activeOrg || isTestingConnection) return;
-    if (!dataClient) {
-      toast.error('חיבור Supabase עדיין נטען. נסו שוב בעוד רגע.');
+    if (!session) {
+      toast.error('התחברו מחדש לפני בדיקת החיבור.');
       return;
     }
     if (hasUnsavedChanges) {
@@ -973,7 +974,7 @@ export default function SetupAssistant() {
     });
 
     try {
-      const verification = await verifyOrgConnection(dataClient);
+      const verification = await verifyOrgConnection({ session, orgId: activeOrgId });
       const leavePolicyValue = verification?.settingsValue ?? null;
       const policyState = leavePolicyValue ? 'configured' : 'missing';
       const now = new Date().toISOString();

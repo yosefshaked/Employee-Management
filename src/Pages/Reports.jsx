@@ -22,6 +22,7 @@ import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, n
 import { useOrg } from '@/org/OrgContext.jsx';
 import { fetchLeavePolicySettings, fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
 import { fetchEmployeesList } from '@/api/employees.js';
+import { fetchWorkSessions } from '@/api/work-sessions.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -42,7 +43,13 @@ export default function Reports() {
   const [workSessions, setWorkSessions] = useState([]);
   const [services, setServices] = useState([]);
   const [filteredSessions, setFilteredSessions] = useState([]);
-  const [totals, setTotals] = useState({ totalPay: 0, totalHours: 0, totalSessions: 0, totalsByEmployee: [] });
+  const [totals, setTotals] = useState({
+    totalPay: 0,
+    totalHours: 0,
+    totalSessions: 0,
+    totalsByEmployee: [],
+    diagnostics: { uniquePaidDays: 0, paidLeaveDays: 0, adjustmentsSum: 0 }
+  });
   const [isLoading, setIsLoading] = useState(true);
   const location = useLocation(); // מאפשר לנו לגשת למידע על הכתובת הנוכחית
   const [activeTab, setActiveTab] = useState(location.state?.openTab || "overview");
@@ -51,7 +58,7 @@ export default function Reports() {
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
   const { tenantClientReady, activeOrgHasConnection, activeOrgId } = useOrg();
-  const { dataClient, authClient, user, loading, session } = useSupabase();
+  const { authClient, user, loading, session } = useSupabase();
 
   const getRateForDate = (employeeId, date, serviceId = null) => {
     const employee = employees.find(e => e.id === employeeId);
@@ -109,13 +116,25 @@ export default function Reports() {
     const toRes = parseDateStrict(filters.dateTo);
     if (!fromRes.ok || !toRes.ok) {
       setFilteredSessions([]);
-      setTotals({ totalPay: 0, totalHours: 0, totalSessions: 0, totalsByEmployee: [] });
+      setTotals({
+        totalPay: 0,
+        totalHours: 0,
+        totalSessions: 0,
+        totalsByEmployee: [],
+        diagnostics: { uniquePaidDays: 0, paidLeaveDays: 0, adjustmentsSum: 0 }
+      });
       return;
     }
     if (!isValidRange(fromRes.date, toRes.date)) {
       toast("טווח תאריכים לא תקין (תאריך 'עד' לפני 'מ')");
       setFilteredSessions([]);
-      setTotals({ totalPay: 0, totalHours: 0, totalSessions: 0, totalsByEmployee: [] });
+      setTotals({
+        totalPay: 0,
+        totalHours: 0,
+        totalSessions: 0,
+        totalsByEmployee: [],
+        diagnostics: { uniquePaidDays: 0, paidLeaveDays: 0, adjustmentsSum: 0 }
+      });
       return;
     }
     const res = computePeriodTotals({
@@ -150,12 +169,64 @@ export default function Reports() {
       if (typeof amount !== 'number' || !Number.isFinite(amount)) return session;
       return { ...session, total_payment: amount };
     });
+    const toNumber = (value) => {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : 0;
+    };
+
+    const adjustmentsAccumulator = adjustedSessions.reduce((acc, session) => {
+      if (!session || session.entry_type !== 'adjustment') return acc;
+      const value = toNumber(session.total_payment);
+      acc.total += value;
+      const previous = acc.byEmployee.get(session.employee_id) || 0;
+      acc.byEmployee.set(session.employee_id, previous + value);
+      return acc;
+    }, { total: 0, byEmployee: new Map() });
+
+    const adjustmentsTotal = adjustmentsAccumulator.total;
+    const adjustmentsByEmployee = adjustmentsAccumulator.byEmployee;
+
+    const correctedTotalPay = adjustedSessions.reduce((sum, session) => {
+      if (!session) return sum;
+      return sum + toNumber(session.total_payment);
+    }, 0);
+
+    const updatedTotalsByEmployee = Array.isArray(res.totalsByEmployee)
+      ? res.totalsByEmployee.map(entry => {
+        if (!entry) return entry;
+        const safePay = toNumber(entry.pay);
+        const previousAdjustment = toNumber(entry.adjustments);
+        if (!adjustmentsByEmployee.has(entry.employee_id)) {
+          if (safePay === entry.pay && previousAdjustment === entry.adjustments) {
+            return entry;
+          }
+          return {
+            ...entry,
+            pay: safePay,
+            adjustments: previousAdjustment
+          };
+        }
+        const nextAdjustment = adjustmentsByEmployee.get(entry.employee_id);
+        return {
+          ...entry,
+          pay: safePay - previousAdjustment + nextAdjustment,
+          adjustments: nextAdjustment
+        };
+      })
+      : [];
+
+    const updatedDiagnostics = {
+      ...(res.diagnostics || {}),
+      adjustmentsSum: adjustmentsTotal
+    };
+
     setFilteredSessions(adjustedSessions);
     setTotals({
-      totalPay: res.totalPay,
-      totalHours: res.totalHours,
-      totalSessions: res.totalSessions,
-      totalsByEmployee: res.totalsByEmployee
+      totalPay: correctedTotalPay,
+      totalHours: toNumber(res.totalHours),
+      totalSessions: toNumber(res.totalSessions),
+      totalsByEmployee: updatedTotalsByEmployee,
+      diagnostics: updatedDiagnostics
     });
   }, [workSessions, employees, services, filters, leavePayPolicy]);
 
@@ -164,59 +235,57 @@ export default function Reports() {
   }, [applyFilters]);
 
   const loadInitialData = useCallback(async () => {
-    if (!tenantClientReady || !activeOrgHasConnection || !dataClient || !session || !activeOrgId) {
+    if (!tenantClientReady || !activeOrgHasConnection || !session || !activeOrgId) {
       setIsLoading(false);
       return;
     }
 
     setIsLoading(true);
     try {
-      const bundle = await fetchEmployeesList({ session, orgId: activeOrgId });
-      setEmployees(Array.isArray(bundle?.employees) ? bundle.employees : []);
-
-      const [
-        sessionsData,
-        servicesData,
-        ratesData,
-        leavePolicySettings,
-        leavePayPolicySettings,
-        leaveData,
-      ] = await Promise.all([
-        dataClient.from('WorkSessions').select('*').eq('deleted', false),
-        dataClient.from('Services').select('*'),
-        dataClient.from('RateHistory').select('*'),
-        fetchLeavePolicySettings(dataClient),
-        fetchLeavePayPolicySettings(dataClient),
-        dataClient.from('LeaveBalances').select('*')
+      const [bundle, sessionsResponse, leavePolicySettings, leavePayPolicySettings] = await Promise.all([
+        fetchEmployeesList({ session, orgId: activeOrgId }),
+        fetchWorkSessions({ session, orgId: activeOrgId }),
+        fetchLeavePolicySettings({ session, orgId: activeOrgId }),
+        fetchLeavePayPolicySettings({ session, orgId: activeOrgId }),
       ]);
 
-      if (sessionsData.error) throw sessionsData.error;
-      if (servicesData.error) throw servicesData.error;
-      if (ratesData.error) throw ratesData.error;
-      if (leaveData.error) throw leaveData.error;
+      const employeeList = Array.isArray(bundle?.employees) ? bundle.employees : [];
+      setEmployees(employeeList);
 
-      const safeSessions = (sessionsData.data || []).filter(session => !session?.deleted);
-      setWorkSessions(safeSessions);
-      const filteredServices = (servicesData.data || []).filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
+      const rateHistoryList = Array.isArray(bundle?.rateHistory) ? bundle.rateHistory : [];
+      setRateHistories(rateHistoryList);
+
+      const serviceList = Array.isArray(bundle?.services) ? bundle.services : [];
+      const filteredServices = serviceList.filter(service => service.id !== GENERIC_RATE_SERVICE_ID);
       setServices(filteredServices);
-      setRateHistories(ratesData.data || []);
-      setLeaveBalances(sortLeaveLedger(leaveData.data || []));
+
+      const ledgerEntries = Array.isArray(bundle?.leaveBalances) ? bundle.leaveBalances : [];
+      setLeaveBalances(sortLeaveLedger(ledgerEntries));
+
+      const safeSessions = Array.isArray(sessionsResponse?.sessions)
+        ? sessionsResponse.sessions.filter(session => !session?.deleted)
+        : [];
+      setWorkSessions(safeSessions);
+
+      const resolvedLeavePolicy = leavePolicySettings?.value ?? bundle?.leavePolicy ?? null;
       setLeavePolicy(
-        leavePolicySettings.value
-          ? normalizeLeavePolicy(leavePolicySettings.value)
+        resolvedLeavePolicy
+          ? normalizeLeavePolicy(resolvedLeavePolicy)
           : DEFAULT_LEAVE_POLICY,
       );
 
+      const resolvedLeavePayPolicy = leavePayPolicySettings?.value ?? bundle?.leavePayPolicy ?? null;
       setLeavePayPolicy(
-        leavePayPolicySettings.value
-          ? normalizeLeavePayPolicy(leavePayPolicySettings.value)
+        resolvedLeavePayPolicy
+          ? normalizeLeavePayPolicy(resolvedLeavePayPolicy)
           : DEFAULT_LEAVE_PAY_POLICY,
       );
     } catch (error) {
       console.error("Error loading data:", error);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
-  }, [tenantClientReady, activeOrgHasConnection, dataClient, session, activeOrgId]);
+  }, [tenantClientReady, activeOrgHasConnection, session, activeOrgId]);
 
   useEffect(() => {
     loadInitialData();
@@ -296,7 +365,7 @@ export default function Reports() {
     );
   }
 
-  if (!dataClient) {
+  if (!activeOrgHasConnection) {
     return (
       <div className="p-6 text-center text-slate-500">
         בחרו ארגון עם חיבור פעיל כדי להפיק דוחות.
@@ -336,7 +405,7 @@ export default function Reports() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
             <CardContent className="p-6 flex items-center gap-4 relative">
-              <div className="absolute left-4 top-4"><InfoTooltip text={"סה\"כ תשלום הוא הסכום הכולל ששולם לכל העובדים בתקופת הדוח.\nהסכום מחושב לפי תעריף העובד וסוג העבודה (שעות או מפגשים)."} /></div>
+              <div className="absolute left-4 top-4"><InfoTooltip text={"סה\"כ תשלום הוא הסכום הכולל שישולם לכל העובדים בתקופת הדוח.\nהסכום כולל תשלומים עבור שעות עבודה, מפגשים, וגם התאמות (זיכויים או ניכויים)."} /></div>
               <div className="p-3 bg-green-100 rounded-lg"><BarChart3 className="w-6 h-6 text-green-600" /></div>
               <div><p className="text-sm text-slate-600">סה״כ תשלום</p><p className="text-2xl font-bold text-slate-900">₪{totals.totalPay.toLocaleString()}</p></div>
             </CardContent>

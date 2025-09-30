@@ -122,35 +122,28 @@ export function createMetadataEnvelope({ source, leave, calc, extra = {}, versio
 
 export function buildLeaveMetadata({
   source = null,
-  leaveType = null,
-  leaveKind = null,
-  fraction = null,
-  payable = null,
+  leaveType: _leaveType = null,
+  leaveKind: _leaveKind = null,
+  fraction: _fraction = null,
+  payable: _payable = null,
   halfDay = false,
   mixedPaid = null,
   subtype = null,
   method = null,
   lookbackMonths = null,
   legalAllow12mIfBetter = null,
-  dailyValueSnapshot = null,
+  dailyValueSnapshot: _dailyValueSnapshot = null,
   overrideApplied = null,
   noteInternal = null,
   extra = {},
   version = 1,
 } = {}) {
-  const resolvedKind = leaveKind || leaveType || null;
-  const resolvedType = leaveType || leaveKind || null;
-  const numericFraction = typeof fraction === 'number' && Number.isFinite(fraction) ? fraction : null;
   const resolvedSubtype = typeof subtype === 'string' && subtype.trim().length > 0
     ? subtype.trim().slice(0, 120)
     : null;
   const leaveSection = {
-    kind: resolvedKind || undefined,
-    type: resolvedType || undefined,
-    payable: typeof payable === 'boolean' ? payable : undefined,
     mixed_paid: typeof mixedPaid === 'boolean' ? mixedPaid : undefined,
     half_day: halfDay ? true : undefined,
-    fraction: numericFraction !== null ? numericFraction : undefined,
     subtype: resolvedSubtype || undefined,
   };
   const calcSection = {
@@ -160,25 +153,9 @@ export function buildLeaveMetadata({
         ? Math.round(lookbackMonths)
         : undefined,
     legal_allow_12m_if_better: typeof legalAllow12mIfBetter === 'boolean' ? legalAllow12mIfBetter : undefined,
-    daily_value_snapshot:
-      typeof dailyValueSnapshot === 'number' && Number.isFinite(dailyValueSnapshot)
-        ? Number(dailyValueSnapshot)
-        : undefined,
     override_applied: typeof overrideApplied === 'boolean' ? overrideApplied : undefined,
   };
   const topLevel = { ...extra };
-  if (resolvedKind) {
-    topLevel.leave_kind = resolvedKind;
-  }
-  if (resolvedType) {
-    topLevel.leave_type = resolvedType;
-  }
-  if (resolvedSubtype) {
-    topLevel.leave_subtype = resolvedSubtype;
-  }
-  if (numericFraction !== null) {
-    topLevel.leave_fraction = numericFraction;
-  }
   if (typeof noteInternal === 'string') {
     const trimmed = noteInternal.trim();
     if (trimmed) {
@@ -196,6 +173,38 @@ export function buildLeaveMetadata({
 
 export function buildSourceMetadata(source, extra = {}, version = 1) {
   return createMetadataEnvelope({ source, extra, version });
+}
+
+export function stripLeaveBusinessFields(metadata) {
+  if (!metadata || typeof metadata !== 'object') {
+    return undefined;
+  }
+
+  const clone = JSON.parse(JSON.stringify(metadata));
+
+  delete clone.leave_kind;
+  delete clone.leave_type;
+  delete clone.leave_fraction;
+
+  if (clone.leave && typeof clone.leave === 'object') {
+    delete clone.leave.kind;
+    delete clone.leave.type;
+    delete clone.leave.payable;
+    delete clone.leave.fraction;
+    if (Object.keys(clone.leave).length === 0) {
+      delete clone.leave;
+    }
+  }
+
+  if (clone.calc && typeof clone.calc === 'object') {
+    delete clone.calc.daily_value_snapshot;
+    if (Object.keys(clone.calc).length === 0) {
+      delete clone.calc;
+    }
+  }
+
+  const pruned = prune(clone);
+  return pruned;
 }
 
 export function __setWorkSessionMetadataSupportForTests(value) {

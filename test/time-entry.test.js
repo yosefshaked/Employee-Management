@@ -190,7 +190,7 @@ describe('mixed leave persistence', () => {
     const result = await saveMixedLeave([{ employee_id: 'g1', date: '2024-02-01', paid: true }], { leaveType: 'mixed' });
     assert.equal(result.inserted.length, 1);
     assert.equal(result.conflicts.length, 0);
-    assert.equal(inserted[0].entry_type, 'leave_mixed');
+    assert.equal(inserted[0].entry_type, 'leave_system_paid');
     assert.equal(inserted[0].payable, true);
     assert(inserted[0].total_payment > 0);
   });
@@ -205,6 +205,7 @@ describe('mixed leave persistence', () => {
     const result = await saveMixedLeave([{ employee_id: 'g1', date: '2024-02-02', paid: false }], { leaveType: 'mixed' });
     assert.equal(result.inserted.length, 1);
     assert.equal(result.conflicts.length, 0);
+    assert.equal(inserted[0].entry_type, 'leave_unpaid');
     assert.equal(inserted[0].payable, false);
     assert.equal(inserted[0].total_payment, 0);
     assert.equal(inserted[0].rate_used, null);
