@@ -382,11 +382,11 @@ export default function LeaveOverview({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="text-right">עובד</TableHead>
-                <TableHead className="text-right">שיטת חישוב</TableHead>
-                <TableHead className="text-right">מכסה שנתית</TableHead>
-                <TableHead className="text-right">
-                  <div className="flex flex-row-reverse items-center justify-end gap-1">
+                <TableHead className="text-center">עובד</TableHead>
+                <TableHead className="text-center">שיטת חישוב</TableHead>
+                <TableHead className="text-center">מכסה שנתית</TableHead>
+                <TableHead className="text-center">
+                  <div className="flex flex-row-reverse items-center justify-center gap-1">
                     <span>יתרת צבירה משנה קודמת</span>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -405,9 +405,9 @@ export default function LeaveOverview({
                     </Tooltip>
                   </div>
                 </TableHead>
-                <TableHead className="text-right">נוצל</TableHead>
-                <TableHead className="text-right">יתרה נוכחית</TableHead>
-                <TableHead className="text-right">סטטוס</TableHead>
+                <TableHead className="text-center">נוצל</TableHead>
+                <TableHead className="text-center">יתרה נוכחית</TableHead>
+                <TableHead className="text-center">סטטוס</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -439,13 +439,13 @@ export default function LeaveOverview({
                       <TableRow
                         className={`transition-colors hover:bg-slate-50 ${isOpen ? 'bg-slate-50' : ''}`}
                       >
-                        <TableCell className="font-medium">
+                        <TableCell className="font-medium text-center">
                           <button
                             type="button"
                             onClick={() => toggleRow(employee.id)}
                             aria-expanded={isOpen}
                             aria-controls={drawerRowId}
-                            className="flex w-full flex-row-reverse items-center justify-start gap-2 rounded-md px-2 py-1 text-right text-slate-900 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2"
+                            className="flex w-full flex-row-reverse items-center justify-center gap-2 rounded-md px-2 py-1 text-center text-slate-900 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2"
                           >
                             <span className="flex-1">{employee.name}</span>
                             <ChevronDown
@@ -454,9 +454,9 @@ export default function LeaveOverview({
                             />
                           </button>
                         </TableCell>
-                        <TableCell>
-                          <div className="flex flex-col items-end gap-2" onClick={(event) => event.stopPropagation()}>
-                            <div className="flex flex-row-reverse items-center gap-2">
+                        <TableCell className="text-center">
+                          <div className="flex flex-col items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                            <div className="flex flex-row-reverse items-center justify-center gap-2">
                               <span className="text-sm font-medium text-slate-700">{methodLabel}</span>
                               <div className="flex flex-row-reverse items-center gap-1">
                                 <Button
@@ -494,13 +494,13 @@ export default function LeaveOverview({
                             )}
                           </div>
                         </TableCell>
-                        <TableCell>{Number(employee.annual_leave_days || 0).toFixed(1)}</TableCell>
-                        <TableCell>{summary.carryIn.toFixed(1)}</TableCell>
-                        <TableCell>{summary.used.toFixed(1)}</TableCell>
-                        <TableCell className={remaining < 0 ? 'text-red-600 font-semibold' : 'font-semibold text-green-700'}>
+                        <TableCell className="text-center">{Number(employee.annual_leave_days || 0).toFixed(1)}</TableCell>
+                        <TableCell className="text-center">{summary.carryIn.toFixed(1)}</TableCell>
+                        <TableCell className="text-center">{summary.used.toFixed(1)}</TableCell>
+                        <TableCell className={`text-center ${remaining < 0 ? 'text-red-600 font-semibold' : 'font-semibold text-green-700'}`}>
                           {remaining.toFixed(1)}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="text-center">
                           <Badge variant={statusVariant}>
                             {remaining < 0 ? 'במינוס' : 'תקין'}
                           </Badge>
@@ -508,11 +508,11 @@ export default function LeaveOverview({
                       </TableRow>
                       {isOpen && (
                         <TableRow id={drawerRowId} className="bg-slate-50">
-                          <TableCell colSpan={7} className="p-6 align-top">
+                          <TableCell colSpan={7} className="p-6 align-top text-center">
                             <div className="space-y-4">
-                              <div className="flex flex-row-reverse items-center justify-between">
-                                <h4 className="text-sm font-semibold text-slate-800">פירוט היסטוריית חופשות</h4>
+                              <div className="flex flex-row-reverse items-center justify-between gap-2 text-right">
                                 <span className="text-xs text-slate-500">סך רשומות: {history.length}</span>
+                                <h4 className="text-sm font-semibold text-slate-800">פירוט היסטוריית חופשות</h4>
                               </div>
                               {history.length === 0 ? (
                                 <p className="text-sm text-slate-500 text-right">לא נמצאו רשומות חופשה עבור העובד.</p>
@@ -522,11 +522,11 @@ export default function LeaveOverview({
                                     <table className="min-w-full divide-y divide-slate-200">
                                       <thead className="bg-slate-100">
                                         <tr>
-                                          <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 text-right">תאריך</th>
-                                          <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 text-right">סוג חופשה</th>
-                                          <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 text-right">שינוי במאזן</th>
-                                          <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 text-right">שיטת חישוב</th>
-                                          <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 text-right">הערות</th>
+                                          <th scope="col" className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">תאריך</th>
+                                          <th scope="col" className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">סוג חופשה</th>
+                                          <th scope="col" className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">שינוי במאזן</th>
+                                          <th scope="col" className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">שיטת חישוב</th>
+                                          <th scope="col" className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide text-slate-600">הערות</th>
                                         </tr>
                                       </thead>
                                       <tbody className="divide-y divide-slate-100 bg-white">
@@ -536,18 +536,18 @@ export default function LeaveOverview({
                                           const calculationMethodLabel = calculationMethod || '—';
                                           const notes = resolveEntryNotes(entry, metadata) || '—';
                                           const typeLabel = formatLeaveHistoryEntryType(entry);
-                                          const rawChange = Number(entry?.balance_change ?? entry?.change ?? entry?.amount ?? 0);
+                                          const rawChange = Number(entry?.balance ?? entry?.balance_change ?? entry?.change ?? entry?.amount ?? 0);
                                           const changeDisplay = Number.isFinite(rawChange) ? rawChange.toFixed(1) : '0.0';
                                           const changeToneClass = rawChange < 0 ? 'text-red-600' : rawChange > 0 ? 'text-green-700' : 'text-slate-500';
                                           const dateValue = entry?.effective_date || entry?.date || entry?.entry_date || entry?.created_at;
 
                                           return (
                                             <tr key={`${entry.id || entry.effective_date || entry.created_at}-${entry.leave_type || entry.entry_type || 'history'}`}>
-                                              <td className="px-4 py-3 align-middle text-right whitespace-nowrap">{formatLedgerDate(dateValue)}</td>
-                                              <td className="px-4 py-3 align-middle text-right whitespace-nowrap">{typeLabel}</td>
-                                              <td className={`px-4 py-3 align-middle text-right font-mono ${changeToneClass}`}>{changeDisplay}</td>
-                                              <td className="px-4 py-3 align-middle text-right whitespace-nowrap">{calculationMethodLabel}</td>
-                                              <td className="px-4 py-3 align-middle text-right whitespace-pre-line">{notes}</td>
+                                              <td className="px-4 py-3 align-middle text-center whitespace-nowrap">{formatLedgerDate(dateValue)}</td>
+                                              <td className="px-4 py-3 align-middle text-center whitespace-nowrap">{typeLabel}</td>
+                                              <td className={`px-4 py-3 align-middle text-center font-mono ${changeToneClass}`}>{changeDisplay}</td>
+                                              <td className="px-4 py-3 align-middle text-center whitespace-nowrap">{calculationMethodLabel}</td>
+                                              <td className="px-4 py-3 align-middle whitespace-pre-line text-center">{notes}</td>
                                             </tr>
                                           );
                                         })}
