@@ -54,10 +54,18 @@ create table if not exists public."RateHistory" (
   constraint "RateHistory_service_id_fkey" foreign key ("service_id") references public."Services"("id")
 );
 
--- Add a unique constraint to support upsert operations on rate history.
-ALTER TABLE public."RateHistory"
-ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
-UNIQUE (employee_id, service_id, effective_date);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'RateHistory_employee_service_effective_date_key'
+  ) THEN
+    ALTER TABLE public."RateHistory"
+    ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
+    UNIQUE (employee_id, service_id, effective_date);
+  END IF;
+END;
+$$;
 
 create table if not exists public."WorkSessions" (
   "id" uuid not null default gen_random_uuid(),
@@ -96,9 +104,20 @@ create table if not exists public."LeaveBalances" (
 
 -- Add the foreign key link from LeaveBalances to WorkSessions
 ALTER TABLE public."LeaveBalances"
-ADD COLUMN IF NOT EXISTS work_session_id UUID,
-ADD CONSTRAINT "LeaveBalances_work_session_id_fkey"
-FOREIGN KEY (work_session_id) REFERENCES public."WorkSessions"(id) ON DELETE SET NULL;
+ADD COLUMN IF NOT EXISTS work_session_id UUID;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'LeaveBalances_work_session_id_fkey'
+  ) THEN
+    ALTER TABLE public."LeaveBalances"
+    ADD CONSTRAINT "LeaveBalances_work_session_id_fkey"
+    FOREIGN KEY (work_session_id) REFERENCES public."WorkSessions"(id) ON DELETE SET NULL;
+  END IF;
+END;
+$$;
 
 create table if not exists public."Settings" (
   "id" uuid not null default gen_random_uuid(),
@@ -279,7 +298,18 @@ declare
   required_default_service_id constant uuid := '00000000-0000-0000-0000-000000000000';
   required_default_service_insert constant text := 'INSERT INTO "public"."Services" ("id", "name", "duration_minutes", "payment_model", "color", "metadata") VALUES (''00000000-0000-0000-0000-000000000000'', ''תעריף כללי *לא למחוק או לשנות*'', null, ''fixed_rate'', ''#84CC16'', null);';
   required_rate_history_constraint constant text := 'RateHistory_employee_service_effective_date_key';
-  required_rate_history_constraint_sql constant text := 'ALTER TABLE public."RateHistory" ADD CONSTRAINT "RateHistory_employee_service_effective_date_key" UNIQUE (employee_id, service_id, effective_date);';
+  required_rate_history_constraint_sql constant text := 'DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = ''RateHistory_employee_service_effective_date_key''
+  ) THEN
+    ALTER TABLE public."RateHistory"
+    ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
+    UNIQUE (employee_id, service_id, effective_date);
+  END IF;
+END;
+$$;';
   role_oid oid;
   role_exists boolean;
   missing_role_grants text[];
