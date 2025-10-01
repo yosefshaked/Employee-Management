@@ -5,7 +5,7 @@ import { createHash, createDecipheriv } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { json, resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
-import { buildLedgerEntryFromSession } from '../../src/lib/leave-ledger.js';
+import { buildLedgerEntryFromSession } from '../_shared/leave-ledger.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
