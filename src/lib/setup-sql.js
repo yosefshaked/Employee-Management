@@ -275,6 +275,40 @@ CREATE POLICY "Authenticated delete Settings" ON public."Settings"
   FOR DELETE TO authenticated, app_user
   USING (true);
 
+-- שלב 3: יצירת תפקיד מאובטח ומוגבל הרשאות עבור האפליקציה
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'app_user') THEN
+    CREATE ROLE app_user;
+  END IF;
+END
+$$;
+
+GRANT USAGE ON SCHEMA public TO app_user;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO app_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO app_user;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_user;
+-- Allow the anonymous and postgres roles to impersonate the app_user role.
+GRANT app_user TO postgres, anon;
+
+-- שלב 4: יצירת מפתח גישה ייעודי (JWT) עבור התפקיד החדש
+-- IMPORTANT: This script assumes you have a JWT secret configured in your Supabase project's settings.
+-- You can find this under Project Settings -> API -> JWT Settings -> JWT Secret.
+-- We are using a placeholder here. In a real scenario, the secret should be managed securely.
+-- For the purpose of this script, we will use the function correctly,
+-- but acknowledge the secret needs to be known.
+
+SELECT extensions.sign(
+  json_build_object(
+    'role', 'app_user',
+    'exp', (EXTRACT(epoch FROM (NOW() + INTERVAL '1 year')))::integer,
+    'iat', (EXTRACT(epoch FROM NOW()))::integer
+  ),
+  'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE' -- This needs to be replaced by the user with their actual JWT secret.
+) AS "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)";
+
+-- פונקציה אבחונית לבדיקת סטטוס ההתקנה
 create or replace function public.setup_assistant_diagnostics()
 returns table (
   table_name text,
@@ -309,13 +343,7 @@ declare
   rate_history_constraint_exists boolean;
 begin
   required_default_service_insert := 'INSERT INTO "public"."Services" ("id", "name", "duration_minutes", "payment_model", "color", "metadata") VALUES (''00000000-0000-0000-0000-000000000000'', ''תעריף כללי *לא למחוק או לשנות*'', null, ''fixed_rate'', ''#84CC16'', null);';
-  required_rate_history_constraint_sql := 'DO $$
-BEGIN
-  ALTER TABLE public."RateHistory"
-    ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
-    UNIQUE (employee_id, service_id, effective_date);
-END;
-$$;';
+  required_rate_history_constraint_sql := 'ALTER TABLE public."RateHistory"\n  ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"\n  UNIQUE (employee_id, service_id, effective_date);';
   foreach table_name in array required_tables loop
     required_policy_names := array[
       format('Authenticated select %s', table_name),
@@ -564,37 +592,4 @@ end;
 $$;
 
 grant execute on function public.setup_assistant_diagnostics() to authenticated;
-
--- שלב 3: יצירת תפקיד מאובטח ומוגבל הרשאות עבור האפליקציה
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'app_user') THEN
-    CREATE ROLE app_user;
-  END IF;
-END
-$$;
-
-GRANT USAGE ON SCHEMA public TO app_user;
-GRANT ALL ON ALL TABLES IN SCHEMA public TO app_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO app_user;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_user;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO app_user;
--- Allow the anonymous and postgres roles to impersonate the app_user role.
-GRANT app_user TO postgres, anon;
-
--- שלב 4: יצירת מפתח גישה ייעודי (JWT) עבור התפקיד החדש
--- IMPORTANT: This script assumes you have a JWT secret configured in your Supabase project's settings.
--- You can find this under Project Settings -> API -> JWT Settings -> JWT Secret.
--- We are using a placeholder here. In a real scenario, the secret should be managed securely.
--- For the purpose of this script, we will use the function correctly,
--- but acknowledge the secret needs to be known.
-
-SELECT extensions.sign(
-  json_build_object(
-    'role', 'app_user',
-    'exp', (EXTRACT(epoch FROM (NOW() + INTERVAL '1 year')))::integer,
-    'iat', (EXTRACT(epoch FROM NOW()))::integer
-  ),
-  'YOUR_SUPER_SECRET_AND_LONG_JWT_SECRET_HERE' -- This needs to be replaced by the user with their actual JWT secret.
-) AS "APP_DEDICATED_KEY (COPY THIS BACK TO THE APP)";
 `;
