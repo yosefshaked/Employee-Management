@@ -94,6 +94,12 @@ create table if not exists public."LeaveBalances" (
   constraint "LeaveBalances_employee_id_fkey" foreign key ("employee_id") references public."Employees"("id")
 );
 
+-- Add the foreign key link from LeaveBalances to WorkSessions
+ALTER TABLE public."LeaveBalances"
+ADD COLUMN IF NOT EXISTS work_session_id UUID,
+ADD CONSTRAINT "LeaveBalances_work_session_id_fkey"
+FOREIGN KEY (work_session_id) REFERENCES public."WorkSessions"(id) ON DELETE SET NULL;
+
 create table if not exists public."Settings" (
   "id" uuid not null default gen_random_uuid(),
   "created_at" timestamptz not null default now(),
