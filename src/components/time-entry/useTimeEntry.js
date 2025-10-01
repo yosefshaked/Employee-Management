@@ -1158,43 +1158,61 @@ export function useTimeEntry({
     }
 
     const insertedSessions = [];
+    const pendingSessionInserts = [];
 
     if (leaveSessionInserts.length) {
-      const leaveInsertResponse = await createWorkSessions({
-        session,
-        orgId,
-        sessions: leaveSessionInserts.map(item => item.payload),
-      });
-      const createdSessions = Array.isArray(leaveInsertResponse?.created) ? leaveInsertResponse.created : [];
-      if (createdSessions.length !== leaveSessionInserts.length) {
-        throw new Error('שמירת רישום החופשה נכשלה.');
-      }
-      createdSessions.forEach((createdSession, index) => {
-        insertedSessions.push(createdSession);
-        const sourceKey = leaveSessionInserts[index]?.key || null;
-        const ledgerEntry = ledgerEntries.find(entry => entry.key === sourceKey);
-        if (ledgerEntry) {
-          ledgerEntry.payload.work_session_id = createdSession.id || null;
-          if (createdSession.employee_id) {
-            ledgerEntry.payload.employee_id = createdSession.employee_id;
-          }
-          if (createdSession.date) {
-            ledgerEntry.payload.effective_date = createdSession.date;
-          }
-        }
+      leaveSessionInserts.forEach(item => {
+        if (!item || !item.payload) return;
+        pendingSessionInserts.push({
+          type: 'leave',
+          key: item.key || null,
+          payload: item.payload,
+        });
       });
     }
 
     if (workInserts.length) {
-      const workInsertResponse = await createWorkSessions({
+      workInserts.forEach(payload => {
+        if (!payload) return;
+        pendingSessionInserts.push({
+          type: 'work',
+          key: null,
+          payload,
+        });
+      });
+    }
+
+    if (pendingSessionInserts.length) {
+      const insertResponse = await createWorkSessions({
         session,
         orgId,
-        sessions: workInserts,
+        sessions: pendingSessionInserts.map(item => item.payload),
       });
-      const createdWorkSessions = Array.isArray(workInsertResponse?.created) ? workInsertResponse.created : [];
-      if (createdWorkSessions.length) {
-        insertedSessions.push(...createdWorkSessions);
+      const createdSessions = Array.isArray(insertResponse?.created) ? insertResponse.created : [];
+      if (createdSessions.length !== pendingSessionInserts.length) {
+        const error = new Error(
+          leaveSessionInserts.length > 0
+            ? 'שמירת רישום החופשה נכשלה.'
+            : 'שמירת רישומי העבודה נכשלה.',
+        );
+        throw error;
       }
+      createdSessions.forEach((createdSession, index) => {
+        insertedSessions.push(createdSession);
+        const descriptor = pendingSessionInserts[index];
+        if (descriptor.type === 'leave') {
+          const ledgerEntry = ledgerEntries.find(entry => entry.key === descriptor.key);
+          if (ledgerEntry) {
+            ledgerEntry.payload.work_session_id = createdSession.id || null;
+            if (createdSession.employee_id) {
+              ledgerEntry.payload.employee_id = createdSession.employee_id;
+            }
+            if (createdSession.date) {
+              ledgerEntry.payload.effective_date = createdSession.date;
+            }
+          }
+        }
+      });
     }
 
     const sessionUpdates = [...leaveSessionUpdates, ...workUpdates];
