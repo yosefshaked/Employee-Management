@@ -297,15 +297,9 @@ declare
   required_role constant text := 'app_user';
   required_role_members constant text[] := array['postgres', 'anon'];
   required_default_service_id constant uuid := '00000000-0000-0000-0000-000000000000';
-  required_default_service_insert constant text := 'INSERT INTO "public"."Services" ("id", "name", "duration_minutes", "payment_model", "color", "metadata") VALUES (''00000000-0000-0000-0000-000000000000'', ''תעריף כללי *לא למחוק או לשנות*'', null, ''fixed_rate'', ''#84CC16'', null);';
+  required_default_service_insert text;
   required_rate_history_constraint constant text := 'RateHistory_employee_service_effective_date_key';
-  required_rate_history_constraint_sql constant text := 'DO $$
-BEGIN
-  ALTER TABLE public."RateHistory"
-    ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
-    UNIQUE (employee_id, service_id, effective_date);
-END;
-$$;';
+  required_rate_history_constraint_sql text;
   role_oid oid;
   role_exists boolean;
   missing_role_grants text[];
@@ -314,6 +308,14 @@ $$;';
   rate_history_table_exists boolean;
   rate_history_constraint_exists boolean;
 begin
+  required_default_service_insert := 'INSERT INTO "public"."Services" ("id", "name", "duration_minutes", "payment_model", "color", "metadata") VALUES (''00000000-0000-0000-0000-000000000000'', ''תעריף כללי *לא למחוק או לשנות*'', null, ''fixed_rate'', ''#84CC16'', null);';
+  required_rate_history_constraint_sql := 'DO $$
+BEGIN
+  ALTER TABLE public."RateHistory"
+    ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
+    UNIQUE (employee_id, service_id, effective_date);
+END;
+$$;';
   foreach table_name in array required_tables loop
     required_policy_names := array[
       format('Authenticated select %s', table_name),
