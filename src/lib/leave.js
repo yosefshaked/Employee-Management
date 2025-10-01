@@ -57,6 +57,45 @@ const MIXED_SUBTYPE_SET = new Set(['holiday', 'vacation']);
 
 export const SYSTEM_PAID_LABEL_SUFFIX = ' (מערכת)';
 
+const LEAVE_HISTORY_TYPE_LABELS = {
+  allocation: 'הקצאה',
+  policy_allocation: 'הקצאה',
+  manual_allocation: 'הקצאה',
+  carryover: 'יתרת פתיחה',
+  carry_in: 'יתרת פתיחה',
+  carryforward: 'יתרת פתיחה',
+  carry_forward: 'יתרת פתיחה',
+  rollover: 'יתרת פתיחה',
+  reinstatement: 'החזרת יתרה',
+  accrual: 'צבירה',
+  accrual_manual: 'צבירה',
+  grant: 'הטבה',
+  adjustment: 'התאמה ידנית',
+  manual_adjustment: 'התאמה ידנית',
+  adjustment_positive: 'התאמה ידנית',
+  adjustment_negative: 'התאמה ידנית',
+  correction: 'תיקון',
+  correction_positive: 'תיקון',
+  correction_negative: 'תיקון',
+  deduction: 'ניכוי חופשה',
+  usage: 'ניצול חופשה',
+  usage_manual: 'ניצול חופשה',
+  leave: 'ניצול חופשה',
+  payout: 'פדיון חופשה',
+  redemption: 'פדיון חופשה',
+  cashout: 'פדיון חופשה',
+  employee_paid: 'חופשה מהמכסה',
+  system_paid: `חג${SYSTEM_PAID_LABEL_SUFFIX}`,
+  holiday: 'חג',
+  holiday_unpaid: 'חג ללא תשלום',
+  vacation_unpaid: 'חופשה ללא תשלום',
+  unpaid: 'חופשה ללא תשלום',
+  mixed: 'חופשה מעורבת',
+  half_day: 'חצי יום חופשה',
+};
+
+const LEAVE_HISTORY_FALLBACK_LABEL = 'רישום לא מסווג';
+
 export function formatLeaveTypeLabel(value, label) {
   if (value !== 'system_paid') {
     return label;
@@ -724,4 +763,79 @@ export function getLeaveLedgerEntryDate(entry = {}) {
 export function getLeaveLedgerEntryType(entry = {}) {
   const raw = entry.leave_type || entry.source || entry.type || entry.reason || null;
   return typeof raw === 'string' ? raw : null;
+}
+
+export function formatLeaveHistoryEntryType(entry = {}) {
+  const rawType = getLeaveLedgerEntryType(entry);
+  if (!rawType) {
+    return LEAVE_HISTORY_FALLBACK_LABEL;
+  }
+
+  const normalizedToken = normalizeLeaveToken(rawType);
+  const lookupToken = typeof normalizedToken === 'string' ? normalizedToken.toLowerCase() : null;
+
+  if (lookupToken && LEAVE_HISTORY_TYPE_LABELS[lookupToken]) {
+    return LEAVE_HISTORY_TYPE_LABELS[lookupToken];
+  }
+
+  if (lookupToken) {
+    if (lookupToken.includes('half_day')) {
+      return LEAVE_HISTORY_TYPE_LABELS.half_day;
+    }
+    if (lookupToken.includes('system_paid')) {
+      return LEAVE_HISTORY_TYPE_LABELS.system_paid;
+    }
+    if (lookupToken.includes('employee_paid')) {
+      return LEAVE_HISTORY_TYPE_LABELS.employee_paid;
+    }
+    if (lookupToken.includes('holiday_unpaid')) {
+      return LEAVE_HISTORY_TYPE_LABELS.holiday_unpaid;
+    }
+    if (lookupToken.includes('holiday')) {
+      return LEAVE_HISTORY_TYPE_LABELS.holiday;
+    }
+    if (lookupToken.includes('vacation_unpaid')) {
+      return LEAVE_HISTORY_TYPE_LABELS.vacation_unpaid;
+    }
+    if (lookupToken.includes('vacation') || lookupToken.includes('unpaid')) {
+      return LEAVE_HISTORY_TYPE_LABELS.vacation_unpaid;
+    }
+    if (lookupToken.startsWith('carry')) {
+      return LEAVE_HISTORY_TYPE_LABELS.carryover;
+    }
+    if (lookupToken.includes('allocation')) {
+      return LEAVE_HISTORY_TYPE_LABELS.allocation;
+    }
+    if (lookupToken.includes('adjustment') || lookupToken.includes('correction')) {
+      return LEAVE_HISTORY_TYPE_LABELS.adjustment;
+    }
+    if (lookupToken.includes('payout') || lookupToken.includes('redemption') || lookupToken.includes('cashout')) {
+      return LEAVE_HISTORY_TYPE_LABELS.payout;
+    }
+    if (lookupToken.includes('usage') || lookupToken.includes('deduction') || lookupToken === 'leave') {
+      return LEAVE_HISTORY_TYPE_LABELS.usage;
+    }
+    if (lookupToken.includes('mixed')) {
+      return LEAVE_HISTORY_TYPE_LABELS.mixed;
+    }
+  }
+
+  const baseKind = getLeaveBaseKind(lookupToken || rawType);
+  if (baseKind) {
+    const normalizedBase = baseKind.toLowerCase();
+    if (LEAVE_HISTORY_TYPE_LABELS[normalizedBase]) {
+      return LEAVE_HISTORY_TYPE_LABELS[normalizedBase];
+    }
+    if (normalizedBase.includes('half_day')) {
+      return LEAVE_HISTORY_TYPE_LABELS.half_day;
+    }
+    if (normalizedBase.includes('system_paid')) {
+      return LEAVE_HISTORY_TYPE_LABELS.system_paid;
+    }
+    if (normalizedBase.includes('employee_paid')) {
+      return LEAVE_HISTORY_TYPE_LABELS.employee_paid;
+    }
+  }
+
+  return typeof rawType === 'string' ? rawType : LEAVE_HISTORY_FALLBACK_LABEL;
 }

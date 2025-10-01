@@ -2,6 +2,10 @@
 
 This project is a Vite + React application for managing employees, work sessions and payroll records. Supabase provides persistence and authentication.
 
+## Key UI behavior
+
+- The **Vacations & Holidays** tab on the Employees page is an informational overview with collapsible history rows. All leave entries must be created or updated from the dedicated **Time Entry** screen.
+
 ## Local development
 
 1. Install dependencies:
