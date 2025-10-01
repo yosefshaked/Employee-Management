@@ -12,9 +12,6 @@ import { format } from "date-fns";
 import {
   fetchWorkSessions,
 } from '@/api/work-sessions.js';
-import {
-  createLeaveBalanceEntry,
-} from '@/api/leave-balances.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import {
   DEFAULT_LEAVE_POLICY,
@@ -22,9 +19,6 @@ import {
   normalizeLeavePolicy,
   normalizeLeavePayPolicy,
   isLeaveEntryType,
-  getLeaveLedgerDelta,
-  getLeaveBaseKind,
-  inferLeaveType,
   TIME_ENTRY_LEAVE_PREFIX,
 } from '@/lib/leave.js';
 import { useTimeEntry } from '@/components/time-entry/useTimeEntry.js';
@@ -62,31 +56,6 @@ const getLedgerTimestamp = (entry = {}) => {
 
 const sortLeaveLedger = (entries = []) => {
   return [...entries].sort((a, b) => getLedgerTimestamp(a) - getLedgerTimestamp(b));
-};
-
-const buildLedgerEntryFromSession = (session) => {
-  if (!session || !isLeaveEntryType(session.entry_type)) {
-    return null;
-  }
-  if (!session.employee_id || !session.date) {
-    return null;
-  }
-  const inferredType = inferLeaveType(session);
-  const baseKind = getLeaveBaseKind(inferredType);
-  if (!baseKind) {
-    return null;
-  }
-  const delta = getLeaveLedgerDelta(baseKind);
-  if (!delta) {
-    return null;
-  }
-  return {
-    employee_id: session.employee_id,
-    effective_date: session.date,
-    balance: delta,
-    leave_type: `${TIME_ENTRY_LEAVE_PREFIX}_${baseKind}`,
-    notes: session.notes || null,
-  };
 };
 
 export default function TimeEntry() {
@@ -385,26 +354,13 @@ export default function TimeEntry() {
     [],
   );
 
-  const handleTrashRestore = async (ids, { restoredSessions = [] } = {}) => {
+  const handleTrashRestore = async (ids) => {
     const idsArray = Array.isArray(ids) ? ids : [ids];
     const normalized = Array.from(new Set(idsArray.map(String)));
     if (!normalized.length) return;
 
     try {
       ensureSessionAndOrg();
-
-      if (restoredSessions.length) {
-        const ledgerEntries = restoredSessions
-          .map(buildLedgerEntryFromSession)
-          .filter(Boolean);
-        if (ledgerEntries.length) {
-          await createLeaveBalanceEntry({
-            session,
-            orgId: activeOrgId,
-            entries: ledgerEntries,
-          });
-        }
-      }
 
       setTrashSessions(prev => prev.filter(item => !normalized.includes(String(item.id))));
       await loadInitialData({ silent: true });

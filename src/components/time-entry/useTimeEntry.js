@@ -869,8 +869,26 @@ export function useTimeEntry({
 
     const workInserts = [];
     const workUpdates = [];
-    const inserts = [];
-    const updates = [];
+    const leaveSessionInserts = [];
+    const leaveSessionUpdates = [];
+    const ledgerEntries = [];
+
+    const addLedgerEntry = ({ key, balance, leaveTypeValue, workSessionId = null }) => {
+      const normalizedBalance = typeof balance === 'number' && Number.isFinite(balance)
+        ? balance
+        : (Number(balance) || 0);
+      ledgerEntries.push({
+        key: key || null,
+        payload: {
+          employee_id: employee.id,
+          effective_date: normalizedDate,
+          balance: normalizedBalance,
+          leave_type: `${TIME_ENTRY_LEAVE_PREFIX}_${leaveTypeValue}`,
+          notes: paidLeaveNotes ? paidLeaveNotes : null,
+          work_session_id: workSessionId,
+        },
+      });
+    };
 
     if (shouldSaveWorkHalf) {
       if (!workSegmentsInput.length) {
@@ -1094,35 +1112,95 @@ export function useTimeEntry({
       }
     }
 
-    workInserts.forEach(payload => inserts.push(payload));
-    workUpdates.forEach(item => updates.push(item));
-
     if (paidLeaveId) {
-      updates.push({ id: paidLeaveId, updates: { ...leaveRow } });
+      leaveSessionUpdates.push({ id: paidLeaveId, updates: { ...leaveRow } });
+      addLedgerEntry({
+        key: 'primary',
+        balance: ledgerDelta,
+        leaveTypeValue: leaveType,
+        workSessionId: paidLeaveId,
+      });
     } else {
-      inserts.push({ ...leaveRow });
-    }
-
-    if (secondLeaveRow) {
-      if (secondLeaveRow.id) {
-        const { id, ...rest } = secondLeaveRow;
-        updates.push({ id, updates: rest });
-      } else {
-        inserts.push({ ...secondLeaveRow });
-      }
-    }
-
-    if (inserts.length) {
-      await createWorkSessions({
-        session,
-        orgId,
-        sessions: inserts,
+      leaveSessionInserts.push({ key: 'primary', payload: { ...leaveRow } });
+      addLedgerEntry({
+        key: 'primary',
+        balance: ledgerDelta,
+        leaveTypeValue: leaveType,
       });
     }
 
-    if (updates.length) {
+    if (secondLeaveRow) {
+      const { id: secondId, ...secondRest } = secondLeaveRow;
+      const secondKey = 'secondary';
+      if (secondId) {
+        leaveSessionUpdates.push({ id: secondId, updates: secondRest });
+        addLedgerEntry({
+          key: secondKey,
+          balance: secondLedgerDelta,
+          leaveTypeValue: normalizedSecondLeaveType || leaveType,
+          workSessionId: secondId,
+        });
+      } else {
+        leaveSessionInserts.push({ key: secondKey, payload: { ...secondLeaveRow } });
+        addLedgerEntry({
+          key: secondKey,
+          balance: secondLedgerDelta,
+          leaveTypeValue: normalizedSecondLeaveType || leaveType,
+        });
+      }
+    }
+
+    const totalPlannedInserts = leaveSessionInserts.length + workInserts.length;
+    const totalPlannedUpdates = leaveSessionUpdates.length + workUpdates.length;
+
+    if (totalPlannedInserts === 0 && totalPlannedUpdates === 0 && !workRemovalSet.size && !secondaryLeaveRemovalSet.size && !ledgerDeleteIds.length) {
+      throw new Error('אין שינויים לשמירה.');
+    }
+
+    const insertedSessions = [];
+
+    if (leaveSessionInserts.length) {
+      const leaveInsertResponse = await createWorkSessions({
+        session,
+        orgId,
+        sessions: leaveSessionInserts.map(item => item.payload),
+      });
+      const createdSessions = Array.isArray(leaveInsertResponse?.created) ? leaveInsertResponse.created : [];
+      if (createdSessions.length !== leaveSessionInserts.length) {
+        throw new Error('שמירת רישום החופשה נכשלה.');
+      }
+      createdSessions.forEach((createdSession, index) => {
+        insertedSessions.push(createdSession);
+        const sourceKey = leaveSessionInserts[index]?.key || null;
+        const ledgerEntry = ledgerEntries.find(entry => entry.key === sourceKey);
+        if (ledgerEntry) {
+          ledgerEntry.payload.work_session_id = createdSession.id || null;
+          if (createdSession.employee_id) {
+            ledgerEntry.payload.employee_id = createdSession.employee_id;
+          }
+          if (createdSession.date) {
+            ledgerEntry.payload.effective_date = createdSession.date;
+          }
+        }
+      });
+    }
+
+    if (workInserts.length) {
+      const workInsertResponse = await createWorkSessions({
+        session,
+        orgId,
+        sessions: workInserts,
+      });
+      const createdWorkSessions = Array.isArray(workInsertResponse?.created) ? workInsertResponse.created : [];
+      if (createdWorkSessions.length) {
+        insertedSessions.push(...createdWorkSessions);
+      }
+    }
+
+    const sessionUpdates = [...leaveSessionUpdates, ...workUpdates];
+    if (sessionUpdates.length) {
       await Promise.all(
-        updates.map(({ id, updates: payload }) => updateWorkSession({
+        sessionUpdates.map(({ id, updates: payload }) => updateWorkSession({
           session,
           orgId,
           sessionId: id,
@@ -1157,40 +1235,27 @@ export function useTimeEntry({
       });
     }
 
-    const ledgerInsertPayloads = [];
-    if (ledgerDelta !== 0) {
-      ledgerInsertPayloads.push({
-        employee_id: employee.id,
-        effective_date: normalizedDate,
-        balance: ledgerDelta,
-        leave_type: `${TIME_ENTRY_LEAVE_PREFIX}_${leaveType}`,
-        notes: paidLeaveNotes ? paidLeaveNotes : null,
-      });
+    const ledgerInsertPayloads = ledgerEntries
+      .map(entry => entry?.payload)
+      .filter(payload => payload && payload.leave_type);
+
+    if (ledgerInsertPayloads.some(payload => !payload.work_session_id)) {
+      throw new Error('שגיאה בקישור רישום החופשה ליתרה.');
     }
-    if (secondLedgerDelta !== 0 && normalizedSecondLeaveType) {
-      ledgerInsertPayloads.push({
-        employee_id: employee.id,
-        effective_date: normalizedDate,
-        balance: secondLedgerDelta,
-        leave_type: `${TIME_ENTRY_LEAVE_PREFIX}_${normalizedSecondLeaveType}`,
-        notes: paidLeaveNotes ? paidLeaveNotes : null,
-      });
-    }
+
     if (ledgerInsertPayloads.length) {
-      for (const payload of ledgerInsertPayloads) {
-        await createLeaveBalanceEntry({
-          session,
-          orgId,
-          body: payload,
-        });
-      }
+      await createLeaveBalanceEntry({
+        session,
+        orgId,
+        entries: ledgerInsertPayloads,
+      });
     }
 
     const usedFallbackRate = isPayable && fallbackWasRequired && !hasOverrideDailyValue;
 
     return {
-      inserted: inserts,
-      updated: updates,
+      inserted: insertedSessions,
+      updated: sessionUpdates,
       ledgerDeletedIds: ledgerDeleteIds,
       ledgerInserted: ledgerInsertPayloads,
       usedFallbackRate,

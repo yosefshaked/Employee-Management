@@ -5,6 +5,7 @@ This project is a Vite + React application for managing employees, work sessions
 ## Key UI behavior
 
 - The **Vacations & Holidays** tab on the Employees page is an informational overview with collapsible history rows. All leave entries must be created or updated from the dedicated **Time Entry** screen.
+- Creating leave from Time Entry always writes both a `WorkSessions` row and a linked `LeaveBalances` ledger entry (`work_session_id`), and the secure API keeps the two tables synchronized on delete/restore actions.
 
 ## Local development
 

@@ -177,7 +177,6 @@ export default function TrashTab({
     try {
       ensureSessionAndOrg();
       setSubmitting(true);
-      const relatedSessions = sessions.filter(item => normalizedIds.includes(String(item.id)));
       await Promise.all(
         normalizedIds.map(sessionId => restoreWorkSession({
           session,
@@ -188,7 +187,7 @@ export default function TrashTab({
       toast.success(normalizedIds.length === 1 ? 'הרישום שוחזר.' : 'הרישומים שוחזרו.');
       setSelectedIds(prev => prev.filter(id => !normalizedIds.includes(id)));
       if (typeof onRestore === 'function') {
-        await onRestore(normalizedIds, { restoredSessions: relatedSessions });
+        await onRestore(normalizedIds);
       }
       closeRestoreDialog();
     } catch (error) {

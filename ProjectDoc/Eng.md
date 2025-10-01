@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.6.3**
-**Last Updated: 2025-09-30**
+**Version: 1.6.4**
+**Last Updated: 2025-10-15**
 
 ## 1. Vision & Purpose
 
@@ -132,11 +132,14 @@ The work log. Each row represents a completed work session.
   - Unpaid absence = no row. Paid leave is explicitly recorded with an `entry_type='paid_leave'` row.
   - Each row may include optional `notes` (free text, max 300 chars).
 
+All `POST /api/work-sessions` calls now return the full inserted records (not just identifiers) so the client can immediately link newly created leave rows to their ledger entries.
+
 #### WorkSessions Deletion Workflow
 
 - **Soft delete is the default:** Any removal initiated outside the Trash tab issues a soft delete (`deleted=true`, `deleted_at=NOW()`). The record remains recoverable and surfaces in the Trash view.
 - **Permanent delete is restricted:** Only the Trash tab can trigger a permanent delete. The UI requires the administrator to type "מחק" to confirm and the API must receive `DELETE /api/work-sessions/{id}?permanent=true`.
 - **API contract:** The Azure Function interprets `permanent=true` as an irreversible delete (`DELETE`). Calls without the flag always perform the soft-delete update.
+- **Ledger synchronization:** When the target row is a leave session, the API permanently removes the linked `LeaveBalances` entry on soft delete and recreates it automatically on restore. Permanent deletes clear both records together.
 - **UI confirmations:** Standard delete flows (forms, inline rows) show an informational dialog clarifying that the row will move to the Trash. The Trash tab exclusively presents the high-friction confirmation before final deletion.
 
 ### 3.5. `Settings` Table
@@ -167,13 +170,14 @@ Acts as the immutable ledger for employee leave allocations and usage.
 | :--- | :--- | :--- | :--- |
 | `id` | `bigint` | Auto-incrementing identifier | **Primary Key** |
 | `employee_id` | `uuid` | References the `Employees` table | **Foreign Key** |
+| `work_session_id` | `uuid` | Links to the originating `WorkSessions` row (time-entry generated) | **Foreign Key**, Nullable |
 | `leave_type` | `text` | Context for the entry (e.g., `allocation`, `usage_employee_paid`, `time_entry_leave_employee_paid`) | Not NULL |
 | `balance` | `numeric` | Positive values add quota, negative values deduct usage | Not NULL, Default `0` |
 | `effective_date` | `date` | Effective date of the leave event | Not NULL |
 | `notes` | `text` | Optional free-form details | |
 | `created_at` | `timestamptz` | Insert timestamp | Default: `now()` |
 
-Ledger entries support fractional values (e.g., `-0.5` for half-day usage when policy allows it). Negative entries representing usage are validated against the configured floor before insert; attempts to exceed the overdraft surface the toast "חריגה ממכסה ימי החופשה המותרים" and are rejected.
+Ledger entries support fractional values (e.g., `-0.5` for half-day usage when policy allows it). Negative entries representing usage are validated against the configured floor before insert; attempts to exceed the overdraft surface the toast "חריגה ממכסה ימי החופשה המותרים" and are rejected. Every leave saved through the Time Entry flow now creates a matching `LeaveBalances` row linked via `work_session_id`, even for unpaid or system-paid leave (balance `0`).
 
 ### Multi-date Quick Entry UX
 

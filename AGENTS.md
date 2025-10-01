@@ -22,6 +22,7 @@
 
 ## Notes
 - WorkSessions inserts should omit `id` so the database can generate it; include `id` only when updating existing records.
+- `/api/work-sessions` now returns full inserted rows (not just IDs) so leave flows can capture the generated `id` for `LeaveBalances.work_session_id`.
 - Payroll calculations now rely solely on `WorkSessions.rate_used` and `total_payment`; avoid adding external salary adjustments in reports.
 - Global employees use `working_days` for daily rate proration and `paid_leave` rows for paid days off.
 - `paid_leave` days are saved without `hours` and the table editor opens them with no hour segments.

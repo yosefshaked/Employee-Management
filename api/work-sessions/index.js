@@ -5,6 +5,7 @@ import { createHash, createDecipheriv } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { json, resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import { buildLedgerEntryFromSession } from '../../src/lib/leave-ledger.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -297,6 +298,39 @@ async function fetchWorkSessions(tenantClient, filters = {}) {
   return { data: data || [] };
 }
 
+async function deleteLedgerForSession(tenantClient, sessionId) {
+  if (!sessionId) {
+    return { count: 0 };
+  }
+  const result = await tenantClient
+    .from('LeaveBalances')
+    .delete({ count: 'exact' })
+    .eq('work_session_id', sessionId);
+  if (result.error) {
+    return { error: result.error };
+  }
+  return { count: result.count || 0 };
+}
+
+async function insertLedgerForSession(tenantClient, session) {
+  const ledgerEntry = buildLedgerEntryFromSession(session);
+  if (!ledgerEntry) {
+    return { inserted: null };
+  }
+  if (!ledgerEntry.work_session_id && session?.id) {
+    ledgerEntry.work_session_id = session.id;
+  }
+  const insertResult = await tenantClient
+    .from('LeaveBalances')
+    .insert(ledgerEntry)
+    .select('*')
+    .maybeSingle();
+  if (insertResult.error) {
+    return { error: insertResult.error };
+  }
+  return { inserted: insertResult.data || ledgerEntry };
+}
+
 export default async function (context, req) {
   context.log?.info?.('work-sessions API invoked');
 
@@ -433,14 +467,14 @@ export default async function (context, req) {
     const { data, error } = await tenantClient
       .from('WorkSessions')
       .insert(payload)
-      .select('id');
+      .select('*');
 
     if (error) {
       context.log?.error?.('work-sessions insert failed', { message: error.message });
       return respond(context, 500, { message: 'failed_to_create_sessions' });
     }
 
-    return respond(context, 201, { created: data?.map((row) => row.id) ?? [] });
+    return respond(context, 201, { created: data ?? [] });
   }
 
   if (method === 'PATCH' || method === 'PUT') {
@@ -452,22 +486,59 @@ export default async function (context, req) {
     const isRestore = body && typeof body === 'object' && body.restore === true;
 
     if (isRestore) {
-      const { error, data } = await tenantClient
+      const { data: existingSession, error: fetchError } = await tenantClient
         .from('WorkSessions')
-        .update({ deleted: false, deleted_at: null })
+        .select('*')
         .eq('id', sessionId)
-        .select('id');
+        .maybeSingle();
 
-      if (error) {
-        context.log?.error?.('work-sessions restore failed', { message: error.message, sessionId });
+      if (fetchError) {
+        context.log?.error?.('work-sessions restore lookup failed', { message: fetchError.message, sessionId });
         return respond(context, 500, { message: 'failed_to_restore_session' });
       }
 
-      if (!data || data.length === 0) {
+      if (!existingSession) {
         return respond(context, 404, { message: 'session_not_found' });
       }
 
-      return respond(context, 200, { restored: true });
+      const { error: updateError, data: updatedRows } = await tenantClient
+        .from('WorkSessions')
+        .update({ deleted: false, deleted_at: null })
+        .eq('id', sessionId)
+        .select('*');
+
+      if (updateError) {
+        context.log?.error?.('work-sessions restore failed', { message: updateError.message, sessionId });
+        return respond(context, 500, { message: 'failed_to_restore_session' });
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        return respond(context, 404, { message: 'session_not_found' });
+      }
+
+      const restoredSession = updatedRows[0];
+
+      const cleanupResult = await deleteLedgerForSession(tenantClient, sessionId);
+      if (cleanupResult.error) {
+        await tenantClient
+          .from('WorkSessions')
+          .update({ deleted: existingSession.deleted, deleted_at: existingSession.deleted_at })
+          .eq('id', sessionId);
+        context.log?.error?.('work-sessions restore ledger cleanup failed', { message: cleanupResult.error.message, sessionId });
+        return respond(context, 500, { message: 'failed_to_restore_session' });
+      }
+
+      const ledgerResult = await insertLedgerForSession(tenantClient, restoredSession);
+      if (ledgerResult.error) {
+        await tenantClient
+          .from('WorkSessions')
+          .update({ deleted: true, deleted_at: existingSession.deleted_at || new Date().toISOString() })
+          .eq('id', sessionId);
+        context.log?.error?.('work-sessions restore ledger insert failed', { message: ledgerResult.error.message, sessionId });
+        return respond(context, 500, { message: 'failed_to_restore_session' });
+      }
+
+      return respond(context, 200, { restored: true, session: restoredSession, ledger: ledgerResult.inserted || null });
     }
 
     const updates = normalizeSessionUpdates(body.updates || body.session || body.workSession || body.data);
@@ -504,19 +575,48 @@ export default async function (context, req) {
 
     const wantsPermanent = permanentFlag === 'true' || permanentFlag === '1';
 
+    const { data: sessionRow, error: fetchError } = await tenantClient
+      .from('WorkSessions')
+      .select('*')
+      .eq('id', sessionId)
+      .maybeSingle();
+
+    if (fetchError) {
+      context.log?.error?.('work-sessions delete lookup failed', { message: fetchError.message, sessionId });
+      return respond(context, 500, { message: 'failed_to_delete_session' });
+    }
+
+    if (!sessionRow) {
+      return respond(context, 404, { message: 'session_not_found' });
+    }
+
     if (wantsPermanent) {
-      const { error, data } = await tenantClient
+      const cleanupResult = await deleteLedgerForSession(tenantClient, sessionId);
+      if (cleanupResult.error) {
+        context.log?.error?.('work-sessions permanent delete ledger cleanup failed', { message: cleanupResult.error.message, sessionId });
+        return respond(context, 500, { message: 'failed_to_permanently_delete_session' });
+      }
+
+      const { error: deleteError, data } = await tenantClient
         .from('WorkSessions')
         .delete()
         .eq('id', sessionId)
         .select('id');
 
-      if (error) {
-        context.log?.error?.('work-sessions permanent delete failed', { message: error.message, sessionId });
+      if (deleteError) {
+        const rollbackLedger = await insertLedgerForSession(tenantClient, sessionRow);
+        if (rollbackLedger.error) {
+          context.log?.error?.('work-sessions permanent delete rollback ledger failed', { message: rollbackLedger.error.message, sessionId });
+        }
+        context.log?.error?.('work-sessions permanent delete failed', { message: deleteError.message, sessionId });
         return respond(context, 500, { message: 'failed_to_permanently_delete_session' });
       }
 
       if (!data || data.length === 0) {
+        const rollbackLedger = await insertLedgerForSession(tenantClient, sessionRow);
+        if (rollbackLedger.error) {
+          context.log?.error?.('work-sessions permanent delete rollback ledger failed', { message: rollbackLedger.error.message, sessionId });
+        }
         return respond(context, 404, { message: 'session_not_found' });
       }
 
@@ -524,19 +624,29 @@ export default async function (context, req) {
     }
 
     const timestamp = new Date().toISOString();
-    const { error, data } = await tenantClient
+    const { error: softDeleteError, data: updatedRows } = await tenantClient
       .from('WorkSessions')
       .update({ deleted: true, deleted_at: timestamp })
       .eq('id', sessionId)
-      .select('id');
+      .select('*');
 
-    if (error) {
-      context.log?.error?.('work-sessions soft delete failed', { message: error.message, sessionId });
+    if (softDeleteError) {
+      context.log?.error?.('work-sessions soft delete failed', { message: softDeleteError.message, sessionId });
       return respond(context, 500, { message: 'failed_to_delete_session' });
     }
 
-    if (!data || data.length === 0) {
+    if (!updatedRows || updatedRows.length === 0) {
       return respond(context, 404, { message: 'session_not_found' });
+    }
+
+    const ledgerDeleteResult = await deleteLedgerForSession(tenantClient, sessionId);
+    if (ledgerDeleteResult.error) {
+      await tenantClient
+        .from('WorkSessions')
+        .update({ deleted: sessionRow.deleted, deleted_at: sessionRow.deleted_at })
+        .eq('id', sessionId);
+      context.log?.error?.('work-sessions soft delete ledger cleanup failed', { message: ledgerDeleteResult.error.message, sessionId });
+      return respond(context, 500, { message: 'failed_to_delete_session' });
     }
 
     return respond(context, 200, { deleted: true, permanent: false });
