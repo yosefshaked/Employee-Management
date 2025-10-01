@@ -301,14 +301,9 @@ declare
   required_rate_history_constraint constant text := 'RateHistory_employee_service_effective_date_key';
   required_rate_history_constraint_sql constant text := 'DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = ''RateHistory_employee_service_effective_date_key''
-  ) THEN
-    ALTER TABLE public."RateHistory"
+  ALTER TABLE public."RateHistory"
     ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
     UNIQUE (employee_id, service_id, effective_date);
-  END IF;
 END;
 $$;';
   role_oid oid;
