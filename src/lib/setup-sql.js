@@ -54,14 +54,18 @@ create table if not exists public."RateHistory" (
   constraint "RateHistory_service_id_fkey" foreign key ("service_id") references public."Services"("id")
 );
 
-IF NOT EXISTS (
-  SELECT 1 FROM pg_constraint
-  WHERE conname = 'RateHistory_employee_service_effective_date_key'
-) THEN
-  ALTER TABLE public."RateHistory"
-  ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
-  UNIQUE (employee_id, service_id, effective_date);
-END IF;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'RateHistory_employee_service_effective_date_key'
+  ) THEN
+    ALTER TABLE public."RateHistory"
+    ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
+    UNIQUE (employee_id, service_id, effective_date);
+  END IF;
+END;
+$$;
 
 create table if not exists public."WorkSessions" (
   "id" uuid not null default gen_random_uuid(),
@@ -102,14 +106,18 @@ create table if not exists public."LeaveBalances" (
 ALTER TABLE public."LeaveBalances"
 ADD COLUMN IF NOT EXISTS work_session_id UUID;
 
-IF NOT EXISTS (
-  SELECT 1 FROM pg_constraint
-  WHERE conname = 'LeaveBalances_work_session_id_fkey'
-) THEN
-  ALTER TABLE public."LeaveBalances"
-  ADD CONSTRAINT "LeaveBalances_work_session_id_fkey"
-  FOREIGN KEY (work_session_id) REFERENCES public."WorkSessions"(id) ON DELETE SET NULL;
-END IF;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'LeaveBalances_work_session_id_fkey'
+  ) THEN
+    ALTER TABLE public."LeaveBalances"
+    ADD CONSTRAINT "LeaveBalances_work_session_id_fkey"
+    FOREIGN KEY (work_session_id) REFERENCES public."WorkSessions"(id) ON DELETE SET NULL;
+  END IF;
+END;
+$$;
 
 create table if not exists public."Settings" (
   "id" uuid not null default gen_random_uuid(),
