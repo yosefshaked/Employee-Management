@@ -1,6 +1,6 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.6.2**
+**Version: 1.6.3**
 **Last Updated: 2025-09-30**
 
 ## 1. Vision & Purpose
@@ -241,6 +241,10 @@ Several key decisions were made during development that shaped the system:
 
 5.  **Centralized rate history management:** A dedicated `RateHistoryManager` component lets admins add or edit historical rates directly from an employee's form; deletion is intentionally disabled to preserve audit history.
     *   **Lesson:** Consolidating rate edits in one place keeps payroll data consistent and transparent.
+
+6.  **Manual collapsible rows for leave history:** Drill-down sections inside tables now rely on `useState` toggles that append a second `<tr>` with a spanning drawer cell instead of wrapping rows with headless collapsible primitives.
+    *   **Reasoning:** Keeping the DOM as sibling `<tr>` elements preserves accessible table semantics, prevents column misalignment, and avoids layout breakage when browsers auto-correct invalid table markup.
+    *   **Lesson:** When enhancing tables with expandable drawers, prefer explicit conditional rendering over generic disclosure components to maintain structural integrity.
 
 ---
 

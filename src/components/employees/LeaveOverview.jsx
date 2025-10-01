@@ -18,7 +18,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { toast } from 'sonner';
 import { ChevronDown, Info, Loader2, ShieldCheck } from 'lucide-react';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
@@ -146,6 +145,9 @@ export default function LeaveOverview({
   const [evaluationDate, setEvaluationDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [showInactive, setShowInactive] = useState(false);
   const [openRows, setOpenRows] = useState({});
+  const toggleRow = useCallback((employeeId) => {
+    setOpenRows(prev => ({ ...prev, [employeeId]: !prev[employeeId] }));
+  }, []);
   const [overrideEmployeeId, setOverrideEmployeeId] = useState(null);
   const [overrideMethod, setOverrideMethod] = useState(OVERRIDE_METHOD_PLACEHOLDER_VALUE);
   const [overrideRate, setOverrideRate] = useState('');
@@ -192,10 +194,6 @@ export default function LeaveOverview({
       }))
       .sort((a, b) => (b.summary.remaining || 0) - (a.summary.remaining || 0));
   }, [employees, evaluationDate, leaveBalances, leavePayPolicy, leavePolicy, showInactive]);
-
-  const handleRowOpenChange = useCallback((employeeId, nextOpen) => {
-    setOpenRows(prev => ({ ...prev, [employeeId]: nextOpen }));
-  }, []);
 
   useEffect(() => {
     if (!isOverrideDialogOpen) return;
@@ -434,81 +432,82 @@ export default function LeaveOverview({
                   const hasOverride = Boolean(payContext?.override_applied);
                   const history = leaveHistoryByEmployee.get(employee.id) || [];
                   const isOpen = Boolean(openRows[employee.id]);
+                  const drawerRowId = `leave-history-${employee.id}`;
 
                   return (
-                    <Collapsible
-                      key={employee.id}
-                      open={isOpen}
-                      onOpenChange={(value) => handleRowOpenChange(employee.id, value)}
-                    >
-                      <CollapsibleTrigger asChild>
-                        <TableRow
-                          className={`cursor-pointer transition-colors hover:bg-slate-50 ${isOpen ? 'bg-slate-50' : ''}`}
-                        >
-                          <TableCell className="font-medium">
-                            <div className="flex flex-row-reverse items-center justify-start gap-2">
-                              <span>{employee.name}</span>
-                              <ChevronDown
-                                className={`w-4 h-4 text-slate-400 transition-transform ${isOpen ? 'rotate-180 text-slate-600' : ''}`}
-                                aria-hidden="true"
-                              />
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex flex-col items-end gap-2" onClick={(event) => event.stopPropagation()}>
-                              <div className="flex flex-row-reverse items-center gap-2">
-                                <span className="text-sm font-medium text-slate-700">{methodLabel}</span>
-                                <div className="flex flex-row-reverse items-center gap-1">
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={(event) => handleOpenOverrideDialog(employee, event)}
-                                    disabled={isLoading}
-                                  >
-                                    עקיפת שיטת חישוב
-                                  </Button>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <button
-                                        type="button"
-                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
-                                        aria-label="מידע על עקיפת שיטת החישוב"
-                                        onClick={handleTooltipButtonClick}
-                                      >
-                                        <Info className="h-4 w-4" />
-                                      </button>
-                                    </TooltipTrigger>
-                                    <TooltipContent side="top" align="end" className="max-w-xs text-right leading-relaxed">
-                                      שינוי השיטה משפיע על חישוב חופשות חדשות או עריכות שתשמרו מהיום והלאה. רישומים קיימים שומרים את הסכום שנקבע בזמן הקליטה, ולכן אם צריך לעדכן אותם יש לערוך אותם ידנית.
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </div>
-                              </div>
-                              {hasOverride ? (
-                                <Badge variant="outline" className="text-xs text-amber-700 border-amber-200 bg-amber-50">
+                    <React.Fragment key={employee.id}>
+                      <TableRow
+                        className={`transition-colors hover:bg-slate-50 ${isOpen ? 'bg-slate-50' : ''}`}
+                      >
+                        <TableCell className="font-medium">
+                          <button
+                            type="button"
+                            onClick={() => toggleRow(employee.id)}
+                            aria-expanded={isOpen}
+                            aria-controls={drawerRowId}
+                            className="flex w-full flex-row-reverse items-center justify-start gap-2 rounded-md px-2 py-1 text-right text-slate-900 transition-colors hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-2"
+                          >
+                            <span className="flex-1">{employee.name}</span>
+                            <ChevronDown
+                              className={`h-4 w-4 text-slate-400 transition-transform ${isOpen ? 'rotate-180 text-slate-600' : ''}`}
+                              aria-hidden="true"
+                            />
+                          </button>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col items-end gap-2" onClick={(event) => event.stopPropagation()}>
+                            <div className="flex flex-row-reverse items-center gap-2">
+                              <span className="text-sm font-medium text-slate-700">{methodLabel}</span>
+                              <div className="flex flex-row-reverse items-center gap-1">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(event) => handleOpenOverrideDialog(employee, event)}
+                                  disabled={isLoading}
+                                >
                                   עקיפת שיטת חישוב
-                                </Badge>
-                              ) : (
-                                <span className="text-xs text-slate-400">ברירת מחדל ארגונית</span>
-                              )}
+                                </Button>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <button
+                                      type="button"
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+                                      aria-label="מידע על עקיפת שיטת החישוב"
+                                      onClick={handleTooltipButtonClick}
+                                    >
+                                      <Info className="h-4 w-4" />
+                                    </button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" align="end" className="max-w-xs text-right leading-relaxed">
+                                    שינוי השיטה משפיע על חישוב חופשות חדשות או עריכות שתשמרו מהיום והלאה. רישומים קיימים שומרים את הסכום שנקבע בזמן הקליטה, ולכן אם צריך לעדכן אותם יש לערוך אותם ידנית.
+                                  </TooltipContent>
+                                </Tooltip>
+                              </div>
                             </div>
-                          </TableCell>
-                          <TableCell>{Number(employee.annual_leave_days || 0).toFixed(1)}</TableCell>
-                          <TableCell>{summary.carryIn.toFixed(1)}</TableCell>
-                          <TableCell>{summary.used.toFixed(1)}</TableCell>
-                          <TableCell className={remaining < 0 ? 'text-red-600 font-semibold' : 'font-semibold text-green-700'}>
-                            {remaining.toFixed(1)}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={statusVariant}>
-                              {remaining < 0 ? 'במינוס' : 'תקין'}
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent asChild>
-                        <TableRow className="bg-slate-50">
+                            {hasOverride ? (
+                              <Badge variant="outline" className="text-xs text-amber-700 border-amber-200 bg-amber-50">
+                                עקיפת שיטת חישוב
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-slate-400">ברירת מחדל ארגונית</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>{Number(employee.annual_leave_days || 0).toFixed(1)}</TableCell>
+                        <TableCell>{summary.carryIn.toFixed(1)}</TableCell>
+                        <TableCell>{summary.used.toFixed(1)}</TableCell>
+                        <TableCell className={remaining < 0 ? 'text-red-600 font-semibold' : 'font-semibold text-green-700'}>
+                          {remaining.toFixed(1)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={statusVariant}>
+                            {remaining < 0 ? 'במינוס' : 'תקין'}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                      {isOpen && (
+                        <TableRow id={drawerRowId} className="bg-slate-50">
                           <TableCell colSpan={7} className="p-6 align-top">
                             <div className="space-y-4">
                               <div className="flex flex-row-reverse items-center justify-between">
@@ -518,49 +517,32 @@ export default function LeaveOverview({
                               {history.length === 0 ? (
                                 <p className="text-sm text-slate-500 text-right">לא נמצאו רשומות חופשה עבור העובד.</p>
                               ) : (
-                                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-                                  <div className="overflow-x-auto">
-                                    <table className="min-w-full text-sm text-slate-700">
-                                      <thead className="bg-slate-100 text-slate-600">
-                                        <tr className="text-right text-xs font-semibold uppercase tracking-tight">
-                                          <th scope="col" className="px-4 py-3 whitespace-nowrap">תאריך</th>
-                                          <th scope="col" className="px-4 py-3 whitespace-nowrap">סוג חופשה</th>
-                                          <th scope="col" className="px-4 py-3 whitespace-nowrap">שינוי במאזן</th>
-                                          <th scope="col" className="px-4 py-3 whitespace-nowrap">שיטת חישוב</th>
-                                          <th scope="col" className="px-4 py-3 whitespace-nowrap">הערות</th>
+                                <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                                  <div className="max-h-96 overflow-auto">
+                                    <table className="min-w-full divide-y divide-slate-200">
+                                      <thead className="bg-slate-100">
+                                        <tr>
+                                          <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 text-right">תאריך</th>
+                                          <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 text-right">סוג חופשה</th>
+                                          <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 text-right">שינוי במאזן</th>
+                                          <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 text-right">שיטת חישוב</th>
+                                          <th scope="col" className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-600 text-right">הערות</th>
                                         </tr>
                                       </thead>
-                                      <tbody className="divide-y divide-slate-100">
-                                        {history.map((entry) => {
-                                          const rawDelta = Number(entry.balance ?? entry.amount ?? entry.delta ?? entry.days_delta ?? entry.days ?? 0);
-                                          let changeDisplay = '—';
-                                          if (Number.isFinite(rawDelta)) {
-                                            if (rawDelta > 0) {
-                                              changeDisplay = `+${Math.abs(rawDelta).toFixed(2)}`;
-                                            } else if (rawDelta < 0) {
-                                              changeDisplay = `-${Math.abs(rawDelta).toFixed(2)}`;
-                                            } else {
-                                              changeDisplay = '0.00';
-                                            }
-                                          }
-                                          const changeToneClass = rawDelta > 0
-                                            ? 'text-emerald-600'
-                                            : rawDelta < 0
-                                              ? 'text-rose-600'
-                                              : 'text-slate-600';
-                                          const metadata = parseEntryMetadata(entry.metadata);
-                                          const calculationMethodKey = extractCalculationMethod(metadata);
-                                          const calculationMethodLabel = calculationMethodKey
-                                            ? (LEAVE_PAY_METHOD_LABELS[calculationMethodKey] || calculationMethodKey)
-                                            : '—';
+                                      <tbody className="divide-y divide-slate-100 bg-white">
+                                        {history.map(entry => {
+                                          const metadata = parseEntryMetadata(entry?.metadata);
+                                          const calculationMethod = extractCalculationMethod(metadata);
+                                          const calculationMethodLabel = calculationMethod || '—';
                                           const notes = resolveEntryNotes(entry, metadata) || '—';
-                                          const dateValue = entry.effective_date || entry.date || entry.entry_date || entry.change_date;
                                           const typeLabel = formatLeaveHistoryEntryType(entry);
+                                          const rawChange = Number(entry?.balance_change ?? entry?.change ?? entry?.amount ?? 0);
+                                          const changeDisplay = Number.isFinite(rawChange) ? rawChange.toFixed(1) : '0.0';
+                                          const changeToneClass = rawChange < 0 ? 'text-red-600' : rawChange > 0 ? 'text-green-700' : 'text-slate-500';
+                                          const dateValue = entry?.effective_date || entry?.date || entry?.entry_date || entry?.created_at;
+
                                           return (
-                                            <tr
-                                              key={entry.id || `${entry.employee_id}-${entry.effective_date}-${entry.leave_type}`}
-                                              className="bg-white"
-                                            >
+                                            <tr key={`${entry.id || entry.effective_date || entry.created_at}-${entry.leave_type || entry.entry_type || 'history'}`}>
                                               <td className="px-4 py-3 align-middle text-right whitespace-nowrap">{formatLedgerDate(dateValue)}</td>
                                               <td className="px-4 py-3 align-middle text-right whitespace-nowrap">{typeLabel}</td>
                                               <td className={`px-4 py-3 align-middle text-right font-mono ${changeToneClass}`}>{changeDisplay}</td>
@@ -577,8 +559,8 @@ export default function LeaveOverview({
                             </div>
                           </TableCell>
                         </TableRow>
-                      </CollapsibleContent>
-                    </Collapsible>
+                      )}
+                    </React.Fragment>
                   );
                 })
               )}

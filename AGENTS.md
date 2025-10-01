@@ -12,6 +12,11 @@
 - Add any important information learned into this AGENTS.md file.
 - Use ProjectDoc/Eng.md to understand the overall project.
 
+### Collapsible Table Rows Pattern
+- When a table needs drill-down details, manage expansion manually with `useState` keyed by row id.
+- Render the summary information in the base `<TableRow>` and immediately follow it with a conditional second `<TableRow>` that holds the drawer content inside a single spanning `<TableCell>` (e.g., `colSpan={totalColumns}`).
+- Place the toggle affordance (e.g., a chevron button) inside the summary row; avoid wrapping table semantics in `<Collapsible>` primitives so the DOM remains a valid `<table>` composed of sibling `<tr>` elements.
+
 ## Documentation
 - When editing files in `ProjectDoc/`, keep `Eng.md` and `Heb.md` in sync and update their version and last-updated fields.
 
