@@ -230,11 +230,9 @@ export function useTimeEntry({
         payload.hours = 0;
         leaveOccupied.add(key);
         if (canWriteMetadata) {
-          const leaveKind = getLeaveKindFromEntryType(entryType) || 'system_paid';
           const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
           const metadata = buildLeaveMetadata({
             source: 'multi_date',
-            halfDay: leaveKind === 'half_day',
             method: payContext.method,
             lookbackMonths: payContext.lookback_months,
             legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
@@ -256,7 +254,6 @@ export function useTimeEntry({
           const metadata = buildLeaveMetadata({
             source: 'multi_date',
             subtype,
-            halfDay: false,
           });
           if (metadata) {
             payload.metadata = metadata;
@@ -850,7 +847,6 @@ export function useTimeEntry({
       const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
       const metadata = buildLeaveMetadata({
         source,
-        halfDay: baseLeaveKind === 'half_day' || mixedHalfDayEnabled,
         mixedPaid: isMixed ? mixedIsPaid : null,
         subtype: isMixed ? resolvedMixedSubtype : leaveSubtype,
         method: payContext.method,
@@ -1072,7 +1068,6 @@ export function useTimeEntry({
           leaveKind: secondLeaveKind,
           payable: secondLeavePayable,
           fraction: secondFraction,
-          halfDay: true,
           method: payContext.method,
           lookbackMonths: payContext.lookback_months,
           legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
@@ -1408,7 +1403,6 @@ export function useTimeEntry({
         const metadata = buildLeaveMetadata({
           source: 'multi_date_leave',
           subtype: bulkMode ? mixedSubtype : getLeaveSubtypeFromValue(resolvedKind),
-          halfDay,
           mixedPaid: bulkMode ? Boolean(isPaid) : null,
           method: payContext.method,
           lookbackMonths: payContext.lookback_months,

@@ -283,6 +283,10 @@ export function inferLeaveSubtype(details = {}) {
 }
 
 export function inferLeaveKind(details = {}) {
+  const directEntryKind = getLeaveKindFromEntryType(details.entry_type || details.entryType);
+  if (directEntryKind) {
+    return directEntryKind;
+  }
   const subtype = inferLeaveSubtype(details);
   if (subtype) return 'unpaid';
   const metadata = parseLeaveMetadata(details.metadata);
@@ -301,7 +305,7 @@ export function inferLeaveKind(details = {}) {
     const base = getLeaveBaseKind(candidate);
     if (base) return base;
   }
-  return getLeaveKindFromEntryType(details.entry_type || details.entryType) || null;
+  return null;
 }
 
 export function inferLeaveType(details = {}) {
@@ -316,6 +320,7 @@ export function inferLeaveType(details = {}) {
 
 export function parseMixedLeaveDetails(details = {}) {
   const metadata = parseLeaveMetadata(details.metadata);
+  const entryKind = getLeaveKindFromEntryType(details.entry_type || details.entryType);
   const subtypeCandidates = [
     details.mixed_subtype,
     details.mixedSubtype,
@@ -359,7 +364,7 @@ export function parseMixedLeaveDetails(details = {}) {
     metadata?.leave_half_day,
     metadata?.leaveHalfDay,
   ];
-  let halfDay = null;
+  let halfDay = entryKind === 'half_day' ? true : null;
   for (const candidate of halfDayCandidates) {
     const coerced = coerceBoolean(candidate);
     if (coerced !== null) {

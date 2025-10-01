@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.6.4**
-**Last Updated: 2025-10-15**
+**Version: 1.6.5**
+**Last Updated: 2025-10-16**
 
 ## 1. Vision & Purpose
 
@@ -111,7 +111,7 @@ The work log. Each row represents a completed work session.
 | `employee_id` | `uuid` | References the `Employees` table | **Foreign Key** |
 | `service_id` | `uuid` | References the `Services` table (for instructors) | **Foreign Key** |
 | `date` | `date` | The date the work was performed | Not NULL |
-| `entry_type` | `text` | 'session', 'hours', 'adjustment', or 'paid_leave' | Not NULL |
+| `entry_type` | `text` | 'session', 'hours', 'adjustment', 'leave_employee_paid', 'leave_system_paid', 'leave_unpaid', or 'leave_half_day' | Not NULL |
 | `hours` | `numeric` | Number of hours (display-only for globals) | |
 | `sessions_count`| `int8` | Number of sessions (for instructors) | |
 | `students_count`| `int8` | Number of students (for `per_student` model) | |
@@ -127,10 +127,11 @@ The work log. Each row represents a completed work session.
   - Instructors: `sessions_count * students_count * rate_used` (or without students when not per-student).
   - Hourly employees: `hours * rate_used`.
   - Global hours: `monthly_rate / effectiveWorkingDays(employee, month)` (each row represents one day; hours field is ignored and multiple rows on the same date count once).
-  - Paid leave: same daily rate as global hours, stored with `entry_type='paid_leave'`.
+  - Leave rows: quota deductions use `entry_type='leave_employee_paid'`, system-paid holidays use `entry_type='leave_system_paid'`, unpaid leave records use `entry_type='leave_unpaid'` with `total_payment=0`, and half-day deductions use `entry_type='leave_half_day'` with `total_payment` equal to half of the resolved daily value.
   - Monthly totals and reports sum `total_payment` from `WorkSessions` rows only, deduplicating global rows by day; no external base salary is added.
-  - Unpaid absence = no row. Paid leave is explicitly recorded with an `entry_type='paid_leave'` row.
   - Each row may include optional `notes` (free text, max 300 chars).
+
+Half-day usage is now driven entirely by the `entry_type='leave_half_day'` flag; metadata no longer stores a `leave.half_day` boolean.
 
 All `POST /api/work-sessions` calls now return the full inserted records (not just identifiers) so the client can immediately link newly created leave rows to their ledger entries.
 
@@ -194,7 +195,7 @@ The import modal supports either pasting text or uploading a `.csv` file. Lines 
 | Hebrew             | Internal field |
 |-------------------|----------------|
 | תאריך            | `date` (DD/MM/YYYY → YYYY-MM-DD) |
-| סוג רישום        | `entry_type` (`שיעור`=`session`, `שעות`=`hours`, `התאמה`=`adjustment`, `חופשה בתשלום`=`paid_leave`) |
+| סוג רישום        | `entry_type` (`שיעור`=`session`, `שעות`=`hours`, `התאמה`=`adjustment`, `חופשה בתשלום`=`leave_employee_paid`, `חופשה מערכת`=`leave_system_paid`, `חופשה ללא תשלום`=`leave_unpaid`, `חצי יום`=`leave_half_day`) |
 | שירות            | `service_name` |
 | שעות             | `hours` |
 | מספר שיעורים     | `sessions_count` |
@@ -213,7 +214,7 @@ Buttons in the modal allow downloading a CSV template (UTF‑8 with BOM) and a b
 - `date` must parse to ISO format.
 - `session` rows require `service_name`, `sessions_count` ≥1, `students_count` ≥1 and a rate snapshot.
 - `hours` rows require a rate snapshot; hourly employees must supply `hours`, while global employees ignore it and use a daily rate.
-- `paid_leave` rows are allowed only for global employees and use the global daily rate.
+- Leave entry types (`leave_employee_paid`, `leave_system_paid`, `leave_half_day`) require a rate snapshot for the selected employee and date; `leave_unpaid` rows insert with zero payment but still require the basic identifying fields.
 - `adjustment` rows require an `adjustment_amount` and ignore other fields.
 
 Only valid rows are inserted into `WorkSessions`; the summary dialog lists inserted, failed and skipped rows.

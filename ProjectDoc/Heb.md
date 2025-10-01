@@ -1,7 +1,7 @@
 # תיק פרויקט: מערכת ניהול שכר ועובדים
 
-**גרסה: 1.6.4**
-**תאריך עדכון אחרון: 2025-10-15**
+**גרסה: 1.6.5**
+**תאריך עדכון אחרון: 2025-10-16**
 
 ## 1. חזון ומטרה
 
@@ -111,7 +111,7 @@
 | `employee_id` | `uuid` | מצביע לטבלת `Employees` | **Foreign Key** |
 | `service_id` | `uuid` | מצביע לטבלת `Services` (למדריכים) | **Foreign Key** |
 | `date` | `date` | תאריך ביצוע העבודה | Not NULL |
-| `entry_type` | `text` | 'session', 'hours', 'adjustment', 'paid_leave' | Not NULL |
+| `entry_type` | `text` | 'session', 'hours', 'adjustment', 'leave_employee_paid', 'leave_system_paid', 'leave_unpaid', 'leave_half_day' | Not NULL |
 | `hours` | `numeric` | מספר שעות (שדה תצוגה בלבד בגלובלי) | |
 | `sessions_count`| `int8` | מספר מפגשים (למדריכים) | |
 | `students_count`| `int8` | מספר תלמידים (למודל `per_student`) | |
@@ -127,10 +127,11 @@
   - מדריכים: `sessions_count * students_count * rate_used` (או ללא תלמידים כאשר התשלום אינו פר תלמיד).
   - עובדים שעתיים: `hours * rate_used`.
   - עובדים גלובליים: `rate_used / effectiveWorkingDays(employee, month)` (כל שורה מייצגת יום אחד; שדה השעות אינו משפיע וריבוי רישומים באותו יום לא מכפיל שכר).
-  - חופשה בתשלום: אותו תעריף יומי כמו לעובד גלובלי, נשמר עם `entry_type='paid_leave'`.
+  - חופשות: חופשה מהמכסה נשמרת כ-`entry_type='leave_employee_paid'`, חג משולם מערכתית כ-`entry_type='leave_system_paid'`, חופשה ללא תשלום כ-`entry_type='leave_unpaid'` עם `total_payment=0`, וחצי יום נשמר כ-`entry_type='leave_half_day'` עם חצי מתעריף היום המלא.
 - סיכומי חודש ודוחות מתבססים אך ורק על סכימת `total_payment` משורות `WorkSessions`, תוך סיכום רישומי גלובלי לפי יום אחד.
-- היעדרות ללא תשלום = אין שורה. חופשה בתשלום נרשמת כשורה נפרדת מסוג `paid_leave`.
 - כל רישום יכול לכלול שדה הערות חופשי (עד 300 תווים).
+
+סיווג חצי יום מתבסס על `entry_type='leave_half_day'`; המטא-דאטה כבר אינו מכיל דגל `leave.half_day` חדש.
 
 קריאות `POST /api/work-sessions` מחזירות כעת את הרשומות שנוצרו במלואן (לא רק מזהים) כדי שניתן יהיה לשייך מיד חופשות חדשות ל-`LeaveBalances`.
 
@@ -194,7 +195,7 @@
 | עברית            | שדה פנימי |
 |------------------|-----------|
 | תאריך           | `date` (DD/MM/YYYY → YYYY-MM-DD) |
-| סוג רישום       | `entry_type` (`שיעור`=`session`, `שעות`=`hours`, `התאמה`=`adjustment`, `חופשה בתשלום`=`paid_leave`) |
+| סוג רישום       | `entry_type` (`שיעור`=`session`, `שעות`=`hours`, `התאמה`=`adjustment`, `חופשה בתשלום`=`leave_employee_paid`, `חופשה מערכת`=`leave_system_paid`, `חופשה ללא תשלום`=`leave_unpaid`, `חצי יום`=`leave_half_day`) |
 | שירות           | `service_name` |
 | שעות            | `hours` |
 | מספר שיעורים    | `sessions_count` |
@@ -213,7 +214,7 @@
 - `date` חייב להיות תקין.
 - `session` דורש `service_name`, `sessions_count` ≥1, `students_count` ≥1 ותעריף תקף.
 - `hours` דורש תעריף; עובד שעתי חייב שעות, עובד גלובלי משתמש בתעריף יומי ללא קשר לשעות.
-- `paid_leave` מותר רק לעובד גלובלי ומשתמש בתעריף היומי הגלובלי.
+- סוגי חופשה (`leave_employee_paid`, `leave_system_paid`, `leave_half_day`) דורשים תעריף יומי תקף לעובד ולתאריך; `leave_unpaid` נשמרת עם סכום 0 אך עדיין מחייבת פרטי זיהוי מלאים.
 - `adjustment` דורש `adjustment_amount` ומתעלם משדות אחרים.
 
 רק שורות תקינות נשלחות לטבלת `WorkSessions`; בסיום מוצג סיכום של שורות שהוזנו, שגויות ומדולגות.

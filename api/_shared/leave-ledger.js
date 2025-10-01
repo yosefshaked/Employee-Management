@@ -112,6 +112,10 @@ export function inferLeaveSubtype(details = {}) {
 }
 
 export function inferLeaveKind(details = {}) {
+  const directEntryKind = getLeaveKindFromEntryType(details.entry_type || details.entryType);
+  if (directEntryKind) {
+    return directEntryKind;
+  }
   const subtype = inferLeaveSubtype(details);
   if (subtype) return 'unpaid';
   const metadata = parseLeaveMetadata(details.metadata);
@@ -130,7 +134,7 @@ export function inferLeaveKind(details = {}) {
     const base = getLeaveBaseKind(candidate);
     if (base) return base;
   }
-  return getLeaveKindFromEntryType(details.entry_type || details.entryType) || null;
+  return null;
 }
 
 export function inferLeaveType(details = {}) {
