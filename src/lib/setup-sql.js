@@ -54,6 +54,7 @@ create table if not exists public."RateHistory" (
   constraint "RateHistory_service_id_fkey" foreign key ("service_id") references public."Services"("id")
 );
 
+-- Add the unique constraint that prevents duplicate rate history rows per employee/service/effective date
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -61,8 +62,8 @@ BEGIN
     WHERE conname = 'RateHistory_employee_service_effective_date_key'
   ) THEN
     ALTER TABLE public."RateHistory"
-    ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
-    UNIQUE (employee_id, service_id, effective_date);
+      ADD CONSTRAINT "RateHistory_employee_service_effective_date_key"
+      UNIQUE (employee_id, service_id, effective_date);
   END IF;
 END;
 $$;
@@ -113,8 +114,8 @@ BEGIN
     WHERE conname = 'LeaveBalances_work_session_id_fkey'
   ) THEN
     ALTER TABLE public."LeaveBalances"
-    ADD CONSTRAINT "LeaveBalances_work_session_id_fkey"
-    FOREIGN KEY (work_session_id) REFERENCES public."WorkSessions"(id) ON DELETE SET NULL;
+      ADD CONSTRAINT "LeaveBalances_work_session_id_fkey"
+      FOREIGN KEY (work_session_id) REFERENCES public."WorkSessions"(id) ON DELETE SET NULL;
   END IF;
 END;
 $$;
