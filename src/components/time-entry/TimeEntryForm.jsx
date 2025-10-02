@@ -238,6 +238,19 @@ export default function TimeEntryForm({
     return 'employee_paid';
   }, [secondHalfLastNonSystemLeaveType, secondaryLeaveTypeOptions]);
 
+  const isLeaveDay = dayType === 'paid_leave';
+
+  const isHalfDaySelection = leaveType === 'half_day'
+    || (leaveType === 'system_paid' && lastNonSystemLeaveType === 'half_day');
+  const isSystemPaidSelection = isHalfDaySelection
+    ? halfDayPrimaryLeaveType === 'system_paid'
+    : leaveType === 'system_paid';
+  const secondHalfKind = getLeaveBaseKind(secondHalfLeaveType) || secondHalfLeaveType;
+  const secondHalfEnabled = isLeaveDay && isHalfDaySelection && includeSecondHalf;
+  const shouldIncludeWorkSegments = secondHalfEnabled && secondHalfMode === 'work';
+  const shouldIncludeLeaveSecondHalf = secondHalfEnabled && secondHalfMode === 'leave';
+  const firstHalfSystemPaid = isHalfDaySelection ? halfDayPrimaryLeaveType === 'system_paid' : isSystemPaidSelection;
+
   const visibleLeaveTypeValue = isHalfDaySelection
     ? 'half_day'
     : (isSystemPaidSelection ? resolvedNonSystemLeaveType : (leaveType || ''));
@@ -314,8 +327,6 @@ export default function TimeEntryForm({
     try { return calculateGlobalDailyRate(employee, selectedDate, rate); } catch { return 0; }
   }, [employee, selectedDate, getRateForDate, isGlobal]);
 
-  const isLeaveDay = dayType === 'paid_leave';
-
   const normalizedLeavePay = useMemo(
     () => normalizeLeavePayPolicy(leavePayPolicy),
     [leavePayPolicy],
@@ -381,17 +392,6 @@ export default function TimeEntryForm({
   const leaveDayValue = leaveDayValueInfo.value;
   const showInsufficientHistoryHint = leaveDayValueInfo.insufficientData;
   const showPreStartWarning = leaveDayValueInfo.preStartDate;
-
-  const isHalfDaySelection = leaveType === 'half_day'
-    || (leaveType === 'system_paid' && lastNonSystemLeaveType === 'half_day');
-  const isSystemPaidSelection = isHalfDaySelection
-    ? halfDayPrimaryLeaveType === 'system_paid'
-    : leaveType === 'system_paid';
-  const secondHalfKind = getLeaveBaseKind(secondHalfLeaveType) || secondHalfLeaveType;
-  const secondHalfEnabled = isLeaveDay && isHalfDaySelection && includeSecondHalf;
-  const shouldIncludeWorkSegments = secondHalfEnabled && secondHalfMode === 'work';
-  const shouldIncludeLeaveSecondHalf = secondHalfEnabled && secondHalfMode === 'leave';
-  const firstHalfSystemPaid = isHalfDaySelection ? halfDayPrimaryLeaveType === 'system_paid' : isSystemPaidSelection;
 
   useEffect(() => {
     if (!shouldIncludeLeaveSecondHalf) return;
