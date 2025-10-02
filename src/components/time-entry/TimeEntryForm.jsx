@@ -32,6 +32,8 @@ import {
   LEAVE_PAY_METHOD_DESCRIPTIONS,
   LEAVE_PAY_METHOD_LABELS,
   LEAVE_TYPE_OPTIONS,
+  PAID_LEAVE_LABEL,
+  HALF_DAY_LEAVE_LABEL,
   SYSTEM_PAID_ALERT_TEXT,
   getLeaveBaseKind,
   isPayableLeaveKind,
@@ -43,6 +45,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Trash2 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 
@@ -70,6 +73,7 @@ export default function TimeEntryForm({
   initialMixedHalfDay = false,
   initialHalfDaySecondHalfMode = null,
   initialHalfDaySecondLeaveType = 'employee_paid',
+  initialHalfDayPrimaryLeaveType = 'employee_paid',
   leavePayPolicy = DEFAULT_LEAVE_PAY_POLICY,
 }) {
   const isGlobal = employee.employee_type === 'global';
@@ -180,6 +184,10 @@ export default function TimeEntryForm({
   const [includeSecondHalf, setIncludeSecondHalf] = useState(false);
   const [secondHalfMode, setSecondHalfMode] = useState('work');
   const [secondHalfLeaveType, setSecondHalfLeaveType] = useState('employee_paid');
+  const [secondHalfLastNonSystemLeaveType, setSecondHalfLastNonSystemLeaveType] = useState('employee_paid');
+  const [halfDayPrimaryLeaveType, setHalfDayPrimaryLeaveType] = useState(
+    initialHalfDayPrimaryLeaveType === 'system_paid' ? 'system_paid' : 'employee_paid',
+  );
 
   useEffect(() => {
     setCurrentPaidLeaveId(paidLeaveId);
@@ -191,21 +199,70 @@ export default function TimeEntryForm({
     }
   }, [leaveType]);
 
+  useEffect(() => {
+    if (secondHalfLeaveType && secondHalfLeaveType !== 'system_paid') {
+      setSecondHalfLastNonSystemLeaveType(secondHalfLeaveType);
+    }
+  }, [secondHalfLeaveType]);
+
+  useEffect(() => {
+    setHalfDayPrimaryLeaveType(
+      initialHalfDayPrimaryLeaveType === 'system_paid' ? 'system_paid' : 'employee_paid',
+    );
+  }, [initialHalfDayPrimaryLeaveType]);
+
   const leaveTypeOptions = useMemo(() => {
     return LEAVE_TYPE_OPTIONS
-      .filter(option => option.value !== 'mixed')
+      .filter(option => option.value !== 'mixed' && option.value !== 'system_paid' && option.value !== 'holiday_unpaid')
       .filter(option => allowHalfDay || option.value !== 'half_day')
       .map(option => [option.value, formatLeaveTypeLabel(option.value, option.label)]);
   }, [allowHalfDay]);
   const defaultNonSystemLeaveType = useMemo(() => {
-    const candidate = leaveTypeOptions.find(([value]) => value !== 'system_paid');
-    return candidate ? candidate[0] : 'employee_paid';
+    return leaveTypeOptions[0]?.[0] || 'employee_paid';
   }, [leaveTypeOptions]);
+  const resolvedNonSystemLeaveType = useMemo(() => {
+    if (lastNonSystemLeaveType && leaveTypeOptions.some(([value]) => value === lastNonSystemLeaveType)) {
+      return lastNonSystemLeaveType;
+    }
+    return defaultNonSystemLeaveType;
+  }, [defaultNonSystemLeaveType, lastNonSystemLeaveType, leaveTypeOptions]);
   const secondaryLeaveTypeOptions = useMemo(() => (
     LEAVE_TYPE_OPTIONS
-      .filter(option => option.value !== 'mixed' && option.value !== 'half_day')
+      .filter(option => option.value !== 'mixed' && option.value !== 'half_day' && option.value !== 'system_paid' && option.value !== 'holiday_unpaid')
       .map(option => [option.value, formatLeaveTypeLabel(option.value, option.label)])
   ), []);
+  const resolvedSecondHalfNonSystemType = useMemo(() => {
+    if (secondHalfLastNonSystemLeaveType && secondaryLeaveTypeOptions.some(([value]) => value === secondHalfLastNonSystemLeaveType)) {
+      return secondHalfLastNonSystemLeaveType;
+    }
+    return 'employee_paid';
+  }, [secondHalfLastNonSystemLeaveType, secondaryLeaveTypeOptions]);
+
+  const isLeaveDay = dayType === 'paid_leave';
+
+  const isHalfDaySelection = leaveType === 'half_day'
+    || (leaveType === 'system_paid' && lastNonSystemLeaveType === 'half_day');
+  const isSystemPaidSelection = isHalfDaySelection
+    ? halfDayPrimaryLeaveType === 'system_paid'
+    : leaveType === 'system_paid';
+  const secondHalfKind = getLeaveBaseKind(secondHalfLeaveType) || secondHalfLeaveType;
+  const secondHalfEnabled = isLeaveDay && isHalfDaySelection && includeSecondHalf;
+  const shouldIncludeWorkSegments = secondHalfEnabled && secondHalfMode === 'work';
+  const shouldIncludeLeaveSecondHalf = secondHalfEnabled && secondHalfMode === 'leave';
+  const firstHalfSystemPaid = isHalfDaySelection ? halfDayPrimaryLeaveType === 'system_paid' : isSystemPaidSelection;
+
+  const visibleLeaveTypeValue = isHalfDaySelection
+    ? 'half_day'
+    : (isSystemPaidSelection ? resolvedNonSystemLeaveType : (leaveType || ''));
+
+  const disableSystemPaidSwitch = !isHalfDaySelection
+    && getLeaveBaseKind(visibleLeaveTypeValue) === 'unpaid';
+
+  useEffect(() => {
+    if (disableSystemPaidSwitch && leaveType === 'system_paid') {
+      setLeaveType(resolvedNonSystemLeaveType);
+    }
+  }, [disableSystemPaidSwitch, leaveType, resolvedNonSystemLeaveType]);
 
   useEffect(() => {
     if (initialLeaveType !== 'mixed') return;
@@ -254,7 +311,7 @@ export default function TimeEntryForm({
   }, [allowHalfDay, leaveType, leaveTypeOptions]);
 
   useEffect(() => {
-    if (leaveType !== 'half_day') {
+    if (!isHalfDaySelection) {
       if (includeSecondHalf) setIncludeSecondHalf(false);
       if (secondHalfMode !== 'work') setSecondHalfMode('work');
       return;
@@ -262,15 +319,13 @@ export default function TimeEntryForm({
     if (includeSecondHalf && secondHalfMode === 'work') {
       setSegments(prev => (prev && prev.length > 0 ? prev : [createSeg()]));
     }
-  }, [leaveType, includeSecondHalf, secondHalfMode, createSeg]);
+  }, [isHalfDaySelection, includeSecondHalf, secondHalfMode, createSeg]);
 
   const dailyRate = useMemo(() => {
     if (!isGlobal) return 0;
     const { rate } = getRateForDate(employee.id, selectedDate, null);
     try { return calculateGlobalDailyRate(employee, selectedDate, rate); } catch { return 0; }
   }, [employee, selectedDate, getRateForDate, isGlobal]);
-
-  const isLeaveDay = dayType === 'paid_leave';
 
   const normalizedLeavePay = useMemo(
     () => normalizeLeavePayPolicy(leavePayPolicy),
@@ -338,23 +393,38 @@ export default function TimeEntryForm({
   const showInsufficientHistoryHint = leaveDayValueInfo.insufficientData;
   const showPreStartWarning = leaveDayValueInfo.preStartDate;
 
-  const isHalfDaySelection = leaveType === 'half_day';
-  const isSystemPaidSelection = leaveType === 'system_paid';
-  const secondHalfEnabled = isLeaveDay && isHalfDaySelection && includeSecondHalf;
-  const shouldIncludeWorkSegments = secondHalfEnabled && secondHalfMode === 'work';
-  const shouldIncludeLeaveSecondHalf = secondHalfEnabled && secondHalfMode === 'leave';
+  useEffect(() => {
+    if (!shouldIncludeLeaveSecondHalf) return;
+    const desiredKind = firstHalfSystemPaid ? resolvedSecondHalfNonSystemType : 'system_paid';
+    const currentKind = getLeaveBaseKind(secondHalfLeaveType) || secondHalfLeaveType;
+    if (currentKind === 'employee_paid' || currentKind === 'system_paid' || !secondHalfLeaveType) {
+      if (secondHalfLeaveType !== desiredKind) {
+        setSecondHalfLeaveType(desiredKind);
+      }
+    }
+  }, [shouldIncludeLeaveSecondHalf, firstHalfSystemPaid, resolvedSecondHalfNonSystemType, secondHalfLeaveType]);
 
   const addSeg = () => setSegments(prev => [...prev, createSeg()]);
+  useEffect(() => {
+    if (!isHalfDaySelection && halfDayPrimaryLeaveType !== 'employee_paid') {
+      setHalfDayPrimaryLeaveType('employee_paid');
+    }
+  }, [isHalfDaySelection, halfDayPrimaryLeaveType]);
+
   const handleSystemPaidToggle = useCallback((checked) => {
+    if (isHalfDaySelection) {
+      setHalfDayPrimaryLeaveType(checked ? 'system_paid' : 'employee_paid');
+      if (leaveType !== 'half_day') {
+        setLeaveType('half_day');
+      }
+      return;
+    }
     if (checked) {
       setLeaveType('system_paid');
       return;
     }
-    const fallbackType = (lastNonSystemLeaveType && leaveTypeOptions.some(([value]) => value === lastNonSystemLeaveType))
-      ? lastNonSystemLeaveType
-      : defaultNonSystemLeaveType;
-    setLeaveType(fallbackType);
-  }, [defaultNonSystemLeaveType, lastNonSystemLeaveType, leaveTypeOptions]);
+    setLeaveType(resolvedNonSystemLeaveType);
+  }, [isHalfDaySelection, leaveType, resolvedNonSystemLeaveType]);
   const duplicateSeg = (index) => {
     setSegments(prev => {
       if (index < 0 || index >= prev.length) return prev;
@@ -668,6 +738,17 @@ export default function TimeEntryForm({
         toast.error('יש לבחור סוג חופשה לחצי היום השני.', { duration: 15000 });
         return;
       }
+      if (shouldIncludeLeaveSecondHalf) {
+        const primarySource = firstHalfSystemPaid ? 'system_paid' : 'employee_paid';
+        const secondarySource = getLeaveBaseKind(secondHalfLeaveType) || secondHalfLeaveType;
+        if (
+          (secondarySource === 'system_paid' && primarySource === 'system_paid')
+          || (secondarySource === 'employee_paid' && primarySource === 'employee_paid')
+        ) {
+          toast.error('לא ניתן לשמור שני חצאי יום חופשה זהים. אנא הזן יום חופשה מלא.', { duration: 15000 });
+          return;
+        }
+      }
       const sanitizedWorkIds = new Set(
         sanitizedWorkRows
           .filter(row => row && row.id)
@@ -682,17 +763,23 @@ export default function TimeEntryForm({
           ))
           .map(segment => segment.id),
       ));
+      const submissionLeaveType = isHalfDaySelection ? 'half_day' : leaveType;
+      const primaryHalfLeaveTypeValue = isHalfDaySelection
+        ? (firstHalfSystemPaid ? 'system_paid' : 'employee_paid')
+        : null;
+
       const submissionPayload = {
         rows: sanitizedWorkRows,
         dayType,
         paidLeaveId: currentPaidLeaveId,
         paidLeaveNotes,
-        leaveType,
+        leaveType: submissionLeaveType,
         halfDaySecondHalfMode: secondHalfEnabled ? secondHalfMode : null,
         halfDayWorkSegments: sanitizedWorkRows,
         halfDaySecondLeaveType: shouldIncludeLeaveSecondHalf ? secondHalfLeaveType : null,
         includeHalfDaySecondHalf: secondHalfEnabled,
         halfDayRemovedWorkIds: removedWorkIds,
+        halfDayPrimaryLeaveType: primaryHalfLeaveTypeValue,
       };
 
       const response = await onSubmit(submissionPayload);
@@ -827,9 +914,7 @@ export default function TimeEntryForm({
     const value = Number.isFinite(leaveDayValue) ? leaveDayValue : 0;
     const fraction = isHalfDaySelection ? 0.5 : 1;
     const amount = showPreStartWarning ? 0 : value * fraction;
-    const baseLabel = leaveType === 'half_day'
-      ? 'חופשה מהמכסה'
-      : (optionLabel || 'חופשה');
+    const baseLabel = optionLabel || (leaveType === 'half_day' ? HALF_DAY_LEAVE_LABEL : PAID_LEAVE_LABEL);
     const timePrefix = isHalfDaySelection ? 'שווי חצי יום' : 'שווי יום';
     const secondHalfSummary = secondHalfEnabled
       ? (shouldIncludeWorkSegments
@@ -877,10 +962,16 @@ export default function TimeEntryForm({
     ? adjustmentSummary
     : (isLeaveDay ? leaveSummary : baseSummary);
 
-  const renderSegment = (seg, idx) => {
+  const visibleSecondHalfLeaveType = secondHalfKind === 'system_paid'
+    ? resolvedSecondHalfNonSystemType
+    : secondHalfLeaveType;
+
+  const renderSegment = (seg, idx, options = {}) => {
     if (!seg || seg._status === 'deleted') {
       return null;
     }
+    const isHalfDayWork = options.isHalfDayWork === true;
+    const disableSegment = isLeaveDay && !(isHalfDayWork && shouldIncludeWorkSegments);
     if (isGlobal) {
       return (
         <GlobalSegment
@@ -892,7 +983,7 @@ export default function TimeEntryForm({
           isFirst={idx === 0}
           dailyRate={dailyRate}
           error={errors[idx]}
-          disabled={isLeaveDay}
+          disabled={disableSegment}
         />
       );
     }
@@ -907,7 +998,7 @@ export default function TimeEntryForm({
           onDelete={deleteSeg}
           rate={rate}
           error={errors[idx]}
-          disabled={isLeaveDay}
+          disabled={disableSegment}
         />
       );
     }
@@ -927,7 +1018,7 @@ export default function TimeEntryForm({
           sessions_count: errorValue && seg.service_id ? errorValue : null,
           students_count: errorValue && seg.service_id ? errorValue : null,
         }}
-        disabled={isLeaveDay}
+        disabled={disableSegment}
       />
     );
   };
@@ -1033,8 +1124,8 @@ export default function TimeEntryForm({
       ) : null}
       <div className="space-y-1">
         <Label className="text-sm font-medium text-slate-700">סוג חופשה</Label>
-        <Select value={leaveType || ''} onValueChange={setLeaveType}>
-          <SelectTrigger className="bg-white h-10 text-base leading-6">
+        <Select value={visibleLeaveTypeValue} onValueChange={setLeaveType} disabled={isSystemPaidSelection}>
+          <SelectTrigger className="bg-white h-10 text-base leading-6" disabled={isSystemPaidSelection}>
             <SelectValue placeholder="בחר סוג חופשה" />
           </SelectTrigger>
           <SelectContent>
@@ -1056,6 +1147,7 @@ export default function TimeEntryForm({
             id="time-entry-system-paid-toggle"
             checked={isSystemPaidSelection}
             onCheckedChange={handleSystemPaidToggle}
+            disabled={disableSystemPaidSwitch}
             aria-label="על חשבון המערכת"
           />
         </div>
@@ -1101,25 +1193,38 @@ export default function TimeEntryForm({
             <div className="space-y-3 rounded-xl bg-slate-50 px-3 py-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <span className="text-sm font-medium text-slate-700">סוג הרישום הנוסף:</span>
-                <div className="flex items-center gap-2">
-                  <span className={`text-sm ${secondHalfMode === 'work' ? 'font-semibold text-slate-900' : 'text-slate-500'}`}>
-                    עבודה
-                  </span>
-                  <Switch
-                    checked={secondHalfMode === 'leave'}
-                    onCheckedChange={(checked) => setSecondHalfMode(checked ? 'leave' : 'work')}
-                    aria-label="סוג הרישום הנוסף"
-                  />
-                  <span className={`text-sm ${secondHalfMode === 'leave' ? 'font-semibold text-slate-900' : 'text-slate-500'}`}>
-                    חופשה
-                  </span>
-                </div>
+                <Tabs value={secondHalfMode} onValueChange={setSecondHalfMode} className="min-w-[160px]">
+                  <TabsList className="grid grid-cols-2 rounded-full bg-slate-200 p-1 h-9">
+                    <TabsTrigger
+                      value="work"
+                      className="rounded-full text-sm data-[state=active]:bg-white data-[state=active]:text-slate-900"
+                    >
+                      עבודה
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="leave"
+                      className="rounded-full text-sm data-[state=active]:bg-white data-[state=active]:text-slate-900"
+                    >
+                      חופשה
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
               </div>
               {shouldIncludeLeaveSecondHalf ? (
-                <div className="space-y-1">
-                  <Label className="text-sm font-medium text-slate-700">סוג חופשה נוסף</Label>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label className="text-sm font-medium text-slate-700">סוג חופשה נוסף</Label>
+                  </div>
+                  {(secondHalfKind === 'system_paid' || secondHalfKind === 'employee_paid') ? (
+                    <div
+                      role="status"
+                      className="rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-xs text-sky-900"
+                    >
+                      {`החצי השני הוגדר אוטומטית כ${firstHalfSystemPaid ? 'מהמכסה' : 'על חשבון המערכת'} להשלמת יום מפוצל.`}
+                    </div>
+                  ) : null}
                   <Select
-                    value={secondHalfLeaveType}
+                    value={visibleSecondHalfLeaveType}
                     onValueChange={value => setSecondHalfLeaveType(value)}
                   >
                     <SelectTrigger className="bg-white h-10 text-base leading-6">
@@ -1176,7 +1281,7 @@ export default function TimeEntryForm({
         return renderPaidLeaveSegment();
       }
       if (item.kind === 'work') {
-        return renderSegment(item.segment, item.originalIndex);
+        return renderSegment(item.segment, item.originalIndex, { isHalfDayWork: true });
       }
       return null;
     }

@@ -122,17 +122,11 @@ export function createMetadataEnvelope({ source, leave, calc, extra = {}, versio
 
 export function buildLeaveMetadata({
   source = null,
-  leaveType: _leaveType = null,
-  leaveKind: _leaveKind = null,
-  fraction: _fraction = null,
-  payable: _payable = null,
-  halfDay = false,
   mixedPaid = null,
   subtype = null,
   method = null,
   lookbackMonths = null,
   legalAllow12mIfBetter = null,
-  dailyValueSnapshot: _dailyValueSnapshot = null,
   overrideApplied = null,
   noteInternal = null,
   extra = {},
@@ -143,7 +137,6 @@ export function buildLeaveMetadata({
     : null;
   const leaveSection = {
     mixed_paid: typeof mixedPaid === 'boolean' ? mixedPaid : undefined,
-    half_day: halfDay ? true : undefined,
     subtype: resolvedSubtype || undefined,
   };
   const calcSection = {
