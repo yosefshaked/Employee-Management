@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.6.5**
-**Last Updated: 2025-10-16**
+**Version: 1.6.6**
+**Last Updated: 2025-10-17**
 
 ## 1. Vision & Purpose
 
@@ -667,11 +667,11 @@ The leave module centralizes all holiday rules, quotas, and ledger actions so em
 - The **"חגים וימי חופשה"** screen under Settings edits the `leave_policy` JSON described in Section 3.5.
 - Toggles use the following Hebrew microcopy: "אישור חצי יום", "היתרה יכולה לרדת למינוס", "כמות חריגה מימי החופש המוגדרים", "העברת יתרה לשנה הבאה", and "מקסימום להעברה".
 - Holiday rows capture a name, date range, and tag selected from:
-  - `system_paid` → "חג משולם (מערכת)" (no deduction, payroll marks the day as paid by the organization).
-  - `employee_paid` → "חופשה מהמכסה" (deducts from the employee quota).
-  - `unpaid` → "לא משולם".
+  - `system_paid` → "חופשה בתשלום (על חשבון המערכת)" (no deduction; payroll marks the day as system funded).
+  - `employee_paid` → "חופשה בתשלום" (deducts from the employee quota).
+  - `unpaid` → "חופשה ללא תשלום".
   - `mixed` → "מעורב".
-  - `half_day` → "חצי יום" (available only when half-day usage is enabled).
+  - `half_day` → "חצי יום חופשה" (available only when half-day usage is enabled).
 - All persistence is routed through the secure API, which performs Supabase `upsert` calls on the `Settings` table to avoid duplicate keys.
 
 ### 6.2. Employee quota and proration
@@ -684,6 +684,8 @@ The leave module centralizes all holiday rules, quotas, and ledger actions so em
 
 - The Leave tab now provides a read-only balance overview with collapsible drill-down rows. Detailed entries are viewed in-place,
   while all new allocations or usage adjustments must be captured through the dedicated Time Entry workflow.
+- Within the Time Entry form the "על חשבון המערכת" switch is the sole way to mark system-paid holidays; the leave dropdowns now
+  present only "חופשה בתשלום", "חופשה ללא תשלום", and "חצי יום חופשה" labels for clarity.
 - Usage inserts a negative `balance` into `LeaveBalances` with a `leave_type` like `usage_employee_paid` or `time_entry_leave_employee_paid`. Allocations insert a positive `balance` with `leave_type='allocation'`.
 - When `allow_half_day` is false the UI blocks non-integer deductions. When enabled, half-day holidays auto-fill `-0.5`.
 - Negative balances are blocked once the projected balance would drop below `negative_floor_days`; the blocking toast reads **"חריגה ממכסה ימי החופשה המותרים"**.

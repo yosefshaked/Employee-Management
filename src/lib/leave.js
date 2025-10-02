@@ -55,7 +55,10 @@ const LEAVE_PAY_METHOD_VALUES = new Set(LEAVE_PAY_METHOD_OPTIONS.map(option => o
 const UNPAID_SUBTYPE_SET = new Set(['holiday_unpaid', 'vacation_unpaid']);
 const MIXED_SUBTYPE_SET = new Set(['holiday', 'vacation']);
 
-export const SYSTEM_PAID_LABEL_SUFFIX = ' (מערכת)';
+export const PAID_LEAVE_LABEL = 'חופשה בתשלום';
+export const UNPAID_LEAVE_LABEL = 'חופשה ללא תשלום';
+export const HALF_DAY_LEAVE_LABEL = 'חצי יום חופשה';
+export const SYSTEM_PAID_LABEL_SUFFIX = ' (על חשבון המערכת)';
 
 const LEAVE_HISTORY_TYPE_LABELS = {
   allocation: 'הקצאה',
@@ -84,12 +87,12 @@ const LEAVE_HISTORY_TYPE_LABELS = {
   payout: 'פדיון חופשה',
   redemption: 'פדיון חופשה',
   cashout: 'פדיון חופשה',
-  employee_paid: 'חופשה מהמכסה',
-  system_paid: `חג${SYSTEM_PAID_LABEL_SUFFIX}`,
+  employee_paid: PAID_LEAVE_LABEL,
+  system_paid: `${PAID_LEAVE_LABEL}${SYSTEM_PAID_LABEL_SUFFIX}`,
   holiday: 'חג',
-  holiday_unpaid: 'חג ללא תשלום',
-  vacation_unpaid: 'חופשה ללא תשלום',
-  unpaid: 'חופשה ללא תשלום',
+  holiday_unpaid: UNPAID_LEAVE_LABEL,
+  vacation_unpaid: UNPAID_LEAVE_LABEL,
+  unpaid: UNPAID_LEAVE_LABEL,
   mixed: 'חופשה מעורבת',
   half_day: 'חצי יום חופשה',
 };
@@ -103,7 +106,7 @@ export function formatLeaveTypeLabel(value, label) {
 
   const safeLabel = typeof label === 'string' ? label.trim() : '';
   if (!safeLabel) {
-    return `חג משולם${SYSTEM_PAID_LABEL_SUFFIX}`;
+    return `${PAID_LEAVE_LABEL}${SYSTEM_PAID_LABEL_SUFFIX}`;
   }
 
   if (safeLabel.includes('מערכת')) {
@@ -142,12 +145,12 @@ function normalizeLeaveToken(value) {
 }
 
 export const LEAVE_TYPE_OPTIONS = [
-  { value: 'employee_paid', label: 'חופשה מהמכסה' },
-  { value: 'system_paid', label: formatLeaveTypeLabel('system_paid', 'חג משולם') },
-  { value: 'holiday_unpaid', label: 'חג ללא תשלום' },
-  { value: 'vacation_unpaid', label: 'חופשה ללא תשלום' },
+  { value: 'employee_paid', label: PAID_LEAVE_LABEL },
+  { value: 'system_paid', label: formatLeaveTypeLabel('system_paid', PAID_LEAVE_LABEL) },
+  { value: 'holiday_unpaid', label: UNPAID_LEAVE_LABEL },
+  { value: 'vacation_unpaid', label: UNPAID_LEAVE_LABEL },
   { value: 'mixed', label: 'מעורב' },
-  { value: 'half_day', label: 'חצי יום' },
+  { value: 'half_day', label: HALF_DAY_LEAVE_LABEL },
 ];
 
 export const SYSTEM_PAID_ALERT_TEXT =
@@ -159,8 +162,8 @@ export const HOLIDAY_TYPE_LABELS = LEAVE_TYPE_OPTIONS.reduce((acc, option) => {
 }, {});
 
 export const MIXED_SUBTYPE_OPTIONS = [
-  { value: 'holiday', label: formatLeaveTypeLabel('system_paid', 'חג') },
-  { value: 'vacation', label: 'חופשה' },
+  { value: 'holiday', label: formatLeaveTypeLabel('system_paid', PAID_LEAVE_LABEL) },
+  { value: 'vacation', label: PAID_LEAVE_LABEL },
 ];
 
 export const MIXED_SUBTYPE_LABELS = MIXED_SUBTYPE_OPTIONS.reduce((acc, option) => {
