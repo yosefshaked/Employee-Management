@@ -238,6 +238,10 @@ export default function TimeEntryForm({
     return 'employee_paid';
   }, [secondHalfLastNonSystemLeaveType, secondaryLeaveTypeOptions]);
 
+  const visibleLeaveTypeValue = isHalfDaySelection
+    ? 'half_day'
+    : (isSystemPaidSelection ? resolvedNonSystemLeaveType : (leaveType || ''));
+
   const disableSystemPaidSwitch = !isHalfDaySelection
     && getLeaveBaseKind(visibleLeaveTypeValue) === 'unpaid';
 
@@ -958,9 +962,6 @@ export default function TimeEntryForm({
     ? adjustmentSummary
     : (isLeaveDay ? leaveSummary : baseSummary);
 
-  const visibleLeaveTypeValue = isHalfDaySelection
-    ? 'half_day'
-    : (isSystemPaidSelection ? resolvedNonSystemLeaveType : (leaveType || ''));
   const visibleSecondHalfLeaveType = secondHalfKind === 'system_paid'
     ? resolvedSecondHalfNonSystemType
     : secondHalfLeaveType;
