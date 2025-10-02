@@ -11,17 +11,12 @@ import ImportModal from '@/components/import/ImportModal.jsx';
 import EmployeePicker from '../employees/EmployeePicker.jsx';
 import MultiDateEntryModal from './MultiDateEntryModal.jsx';
 import {
-  aggregateGlobalDays,
-  createLeaveDayValueResolver,
-  resolveLeaveSessionValue,
-} from '@/lib/payroll.js';
-import {
   HOLIDAY_TYPE_LABELS,
   getLeaveKindFromEntryType,
+  getLeaveValueMultiplier,
   inferLeaveType,
   isLeaveEntryType,
 } from '@/lib/leave.js';
-import { selectLeaveDayValue } from '@/selectors.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -59,16 +54,6 @@ function TimeEntryTableInner({
       return displaySessions;
     },
     [allWorkSessions, displaySessions],
-  );
-  const leaveValueResolver = useMemo(
-    () => createLeaveDayValueResolver({
-      employees,
-      workSessions: contextSessions,
-      services,
-      leavePayPolicy,
-      leaveDayValueSelector: selectLeaveDayValue,
-    }),
-    [contextSessions, employees, services, leavePayPolicy],
   );
   const resolveRateForDate = useCallback((employeeId, date, serviceId = null) => {
     if (!employeeId || !date) {
@@ -164,14 +149,7 @@ function TimeEntryTableInner({
         preStartLeaveDates: new Set(),
       };
     });
-    const processedLeave = new Map();
-    const globalAgg = aggregateGlobalDays(
-      displaySessions.filter(s => {
-        const d = parseISO(s.date);
-        return d >= start && d <= end;
-      }),
-      employeesById,
-    );
+    const processedLeaveCredit = new Map();
     displaySessions.forEach(s => {
       const sessionDate = parseISO(s.date);
       if (sessionDate < start || sessionDate > end) return;
@@ -191,32 +169,37 @@ function TimeEntryTableInner({
       }
       if (isLeaveEntryType(s.entry_type)) {
         const key = `${s.employee_id}|${s.date}`;
-        const already = processedLeave.get(key) || 0;
-        if (already >= 1) return;
-        const sessionValue = resolveLeaveSessionValue(s, leaveValueResolver, { employee: emp });
-        if (sessionValue.preStartDate) {
+        const startDate = emp?.start_date ? new Date(emp.start_date) : null;
+        if (startDate && !Number.isNaN(startDate.getTime()) && sessionDate < startDate) {
           empTotals.preStartLeaveDates.add(s.date);
-          processedLeave.set(key, 1);
+          processedLeaveCredit.set(key, 1);
           return;
         }
-        const multiplier = Number.isFinite(sessionValue.multiplier) && sessionValue.multiplier > 0
-          ? sessionValue.multiplier
-          : 1;
-        const remaining = Math.max(0, 1 - already);
-        if (remaining <= 0) return;
-        const credit = Math.min(multiplier, remaining);
-        const scale = multiplier ? credit / multiplier : 0;
-        const amount = sessionValue.amount * scale;
-        const countCredit = Number.isFinite(credit) && credit > 0 ? credit : 0;
-        if (s.payable === false || amount <= 0) {
-          empTotals.leaveUnpaidCount += countCredit;
+        const rawMultiplier = getLeaveValueMultiplier({
+          entry_type: s.entry_type,
+          metadata: s.metadata,
+          leave_type: s.leave_type,
+          leave_kind: s.leave_kind,
+        });
+        const multiplier = Number.isFinite(rawMultiplier) && rawMultiplier > 0 ? rawMultiplier : 1;
+        const priorCredit = processedLeaveCredit.get(key) || 0;
+        const remainingCredit = Math.max(0, 1 - priorCredit);
+        const creditApplied = Math.min(multiplier, remainingCredit);
+        const amount = Number(s.total_payment) || 0;
+        const isPayable = s.payable !== false && amount > 0;
+        if (!isPayable) {
+          if (creditApplied > 0) {
+            empTotals.leaveUnpaidCount += creditApplied;
+          }
           empTotals.leaveUnpaidAmount += Math.abs(amount);
-        } else if (emp.employee_type !== 'global') {
-          empTotals.leavePaidCount += countCredit;
+        } else {
+          if (creditApplied > 0) {
+            empTotals.leavePaidCount += creditApplied;
+          }
           empTotals.leavePaidAmount += amount;
           empTotals.payment += amount;
         }
-        processedLeave.set(key, already + credit);
+        processedLeaveCredit.set(key, priorCredit + creditApplied);
         return;
       }
       if (s.entry_type === 'session') {
@@ -229,37 +212,13 @@ function TimeEntryTableInner({
       if (s.entry_type === 'hours') {
         empTotals.hours += s.hours || 0;
         const amount = Number(s.total_payment) || 0;
-        if (emp.employee_type !== 'global') {
-          empTotals.workPayment += amount;
-          empTotals.payment += amount;
-        }
+        empTotals.workPayment += amount;
+        empTotals.payment += amount;
         return;
       }
     });
-    globalAgg.forEach((value, key) => {
-      const [empId] = key.split('|');
-      const empTotals = totals[empId];
-      if (!empTotals) return;
-      const amount = Number(value?.dailyAmount) || 0;
-      if (!amount) return;
-      empTotals.payment += amount;
-      if (isLeaveEntryType(value?.dayType)) {
-        const multiplier = Number.isFinite(value?.multiplier) && value.multiplier > 0
-          ? value.multiplier
-          : 1;
-        if (value?.payable === false) {
-          empTotals.leaveUnpaidAmount += Math.abs(amount);
-          empTotals.leaveUnpaidCount += multiplier;
-        } else {
-          empTotals.leavePaidAmount += amount;
-          empTotals.leavePaidCount += multiplier;
-        }
-      } else {
-        empTotals.workPayment += amount;
-      }
-    });
     return totals;
-  }, [displaySessions, employees, employeesById, currentMonth, leaveValueResolver]);
+  }, [displaySessions, employees, employeesById, currentMonth]);
 
   const toggleDateSelection = (day) => {
     setSelectedDates(prev => {
