@@ -609,6 +609,9 @@ function TimeEntryTableInner({
                                                 payload.mixedHalfDay = isPaid && mixedDetails.halfDay === true;
                                               }
                                               if ((payload.leaveType || leaveKind) === 'half_day') {
+                                                payload.halfDayPrimaryLeaveType = paidLeave?.payable === false
+                                                  ? 'system_paid'
+                                                  : 'employee_paid';
                                                 if (regularSessions.length > 0) {
                                                   payload.halfDaySecondHalfMode = 'work';
                                                 } else {
@@ -819,6 +822,7 @@ function TimeEntryTableInner({
               initialMixedHalfDay={editingCell.mixedHalfDay}
               initialHalfDaySecondHalfMode={editingCell.halfDaySecondHalfMode}
               initialHalfDaySecondLeaveType={editingCell.halfDaySecondLeaveType}
+              initialHalfDayPrimaryLeaveType={editingCell.halfDayPrimaryLeaveType}
               leavePayPolicy={leavePayPolicy}
               onSubmit={async (result) => {
                 if (!result) {

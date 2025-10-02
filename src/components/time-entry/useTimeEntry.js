@@ -540,6 +540,7 @@ export function useTimeEntry({
       halfDaySecondLeaveType = null,
       includeHalfDaySecondHalf = false,
       halfDayRemovedWorkIds = [],
+      halfDayPrimaryLeaveType = null,
     } = input || {};
 
     if (!employee || !employee.id) {
@@ -603,6 +604,28 @@ export function useTimeEntry({
     const shouldSaveWorkHalf = resolvedSecondHalfMode === 'work';
     const shouldSaveLeaveHalf = resolvedSecondHalfMode === 'leave';
     const workSegmentsInput = Array.isArray(halfDayWorkSegments) ? halfDayWorkSegments : [];
+
+    const baseHistoricalDailyValueRaw = resolveLeaveValue(employee.id, normalizedDate);
+    const baseHistoricalDailyValue = typeof baseHistoricalDailyValueRaw === 'number'
+      && Number.isFinite(baseHistoricalDailyValueRaw)
+      && baseHistoricalDailyValueRaw > 0
+      ? baseHistoricalDailyValueRaw
+      : 0;
+
+    const normalizedPrimaryHalfKind = baseLeaveKind === 'half_day'
+      ? (getLeaveBaseKind(halfDayPrimaryLeaveType) || halfDayPrimaryLeaveType || 'employee_paid')
+      : baseLeaveKind;
+
+    const normalizedSecondLeaveInput = typeof halfDaySecondLeaveType === 'string'
+      && halfDaySecondLeaveType
+      ? halfDaySecondLeaveType
+      : 'employee_paid';
+    const normalizedSecondaryHalfKind = shouldSaveLeaveHalf
+      ? (getLeaveBaseKind(normalizedSecondLeaveInput) || normalizedSecondLeaveInput)
+      : null;
+    const secondHalfPayableCandidate = normalizedSecondaryHalfKind
+      ? isPayableLeaveKind(normalizedSecondaryHalfKind)
+      : false;
 
     const removedWorkIdsInput = Array.isArray(halfDayRemovedWorkIds)
       ? halfDayRemovedWorkIds.filter(Boolean).map(id => String(id))
@@ -717,7 +740,11 @@ export function useTimeEntry({
       throw error;
     }
 
-    const isPayable = isMixed ? mixedIsPaid : isPayableLeaveKind(baseLeaveKind);
+    const isPayable = isMixed
+      ? mixedIsPaid
+      : (baseLeaveKind === 'half_day'
+        ? isPayableLeaveKind(normalizedPrimaryHalfKind)
+        : isPayableLeaveKind(baseLeaveKind));
     const leaveFraction = baseLeaveKind === 'half_day'
       ? 0.5
       : (isMixed ? (mixedHalfDayEnabled ? 0.5 : 1) : 1);
@@ -725,7 +752,9 @@ export function useTimeEntry({
       ? leaveFraction
       : 1;
 
-    const ledgerDelta = getLeaveLedgerDelta(baseLeaveKind) || 0;
+    const ledgerDelta = baseLeaveKind === 'half_day'
+      ? getLeaveLedgerDelta(normalizedPrimaryHalfKind)
+      : (getLeaveLedgerDelta(baseLeaveKind) || 0);
 
     const summary = selectLeaveRemaining(employee.id, normalizedDate, {
       employees,
@@ -757,46 +786,32 @@ export function useTimeEntry({
     let resolvedLeaveValue = 0;
     let fallbackWasRequired = false;
 
-    if (isPayable) {
-      const { rate, reason } = getRateForDate(
-        employee.id,
-        dayReference,
-        GENERIC_RATE_SERVICE_ID,
-      );
-      resolvedRateForDate = rate || 0;
-      if (!resolvedRateForDate) {
-        const fallbackRate = parseFloat(employee?.current_rate);
-        if (Number.isFinite(fallbackRate) && fallbackRate > 0) {
-          resolvedRateForDate = fallbackRate;
+    const needsDailyValue = isPayable || secondHalfPayableCandidate || shouldSaveWorkHalf;
+
+    if (needsDailyValue) {
+      if (hasOverrideDailyValue) {
+        resolvedLeaveValue = overrideDailyValueNumber;
+      } else if (baseHistoricalDailyValue > 0) {
+        resolvedLeaveValue = baseHistoricalDailyValue;
+      } else {
+        const { rate, reason } = getRateForDate(
+          employee.id,
+          dayReference,
+          GENERIC_RATE_SERVICE_ID,
+        );
+        resolvedRateForDate = rate || 0;
+        if (!resolvedRateForDate) {
+          const fallbackRate = parseFloat(employee?.current_rate);
+          if (Number.isFinite(fallbackRate) && fallbackRate > 0) {
+            resolvedRateForDate = fallbackRate;
+          }
         }
-      }
-      if (!resolvedRateForDate && employee.employee_type === 'global') {
-        const error = new Error(reason || 'לא הוגדר תעריף עבור תאריך זה.');
-        error.code = 'TIME_ENTRY_RATE_MISSING';
-        throw error;
-      }
+        if (!resolvedRateForDate && employee.employee_type === 'global') {
+          const error = new Error(reason || 'לא הוגדר תעריף עבור תאריך זה.');
+          error.code = 'TIME_ENTRY_RATE_MISSING';
+          throw error;
+        }
 
-      const selectorValue = resolveLeaveValue(employee.id, normalizedDate);
-      const baseDailyValue = typeof selectorValue === 'number' && Number.isFinite(selectorValue)
-        ? selectorValue
-        : 0;
-      if (!hasOverrideDailyValue && !(baseDailyValue > 0)) {
-        return {
-          needsConfirmation: true,
-          fallbackValue: 0,
-          fraction: normalizedLeaveFraction,
-          payable: true,
-        };
-      }
-      if (baseDailyValue > 0) {
-        resolvedLeaveValue = baseDailyValue;
-      }
-
-      const hasComputedValue = typeof resolvedLeaveValue === 'number'
-        && Number.isFinite(resolvedLeaveValue)
-        && resolvedLeaveValue > 0;
-
-      if (!hasComputedValue) {
         if (employee.employee_type === 'global') {
           try {
             resolvedLeaveValue = calculateGlobalDailyRate(employee, dayReference, resolvedRateForDate);
@@ -809,17 +824,24 @@ export function useTimeEntry({
           resolvedLeaveValue = resolvedRateForDate;
           fallbackWasRequired = true;
         }
-      }
 
-      if (hasOverrideDailyValue) {
-        resolvedLeaveValue = overrideDailyValueNumber;
+        if (!(resolvedLeaveValue > 0)) {
+          return {
+            needsConfirmation: true,
+            fallbackValue: 0,
+            fraction: normalizedLeaveFraction,
+            payable: true,
+          };
+        }
       }
     }
 
-    const fullDayValue = resolvedLeaveValue > 0 ? resolvedLeaveValue : 0;
-    const fallbackDailyValue = Number.isFinite(fullDayValue) && fullDayValue > 0 ? fullDayValue : 0;
+    const effectiveFullDayValue = resolvedLeaveValue > 0 ? resolvedLeaveValue : baseHistoricalDailyValue;
+    const fallbackDailyValue = Number.isFinite(effectiveFullDayValue) && effectiveFullDayValue > 0
+      ? effectiveFullDayValue
+      : 0;
 
-    if (isPayable && fallbackWasRequired && !hasOverrideDailyValue) {
+    if (fallbackWasRequired && !hasOverrideDailyValue) {
       if (!(fallbackDailyValue > 0)) {
         const error = new Error('לא ניתן לחשב שווי יום חופשה תקין.');
         error.code = 'TIME_ENTRY_LEAVE_FALLBACK_INVALID';
@@ -840,7 +862,7 @@ export function useTimeEntry({
       employee_id: employee.id,
       date: normalizedDate,
       notes: paidLeaveNotes ? paidLeaveNotes : null,
-      rate_used: isPayable && fullDayValue > 0 ? fullDayValue : null,
+      rate_used: isPayable && effectiveFullDayValue > 0 ? effectiveFullDayValue : null,
       total_payment: totalPaymentValue,
       entry_type: entryType,
       hours: 0,
@@ -866,8 +888,11 @@ export function useTimeEntry({
         lookbackMonths: payContext.lookback_months,
         legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
         overrideApplied: payContext.override_applied,
-        extra: baseLeaveKind === 'half_day' && resolvedSecondHalfMode
-          ? { half_day_second_half: resolvedSecondHalfMode }
+        extra: baseLeaveKind === 'half_day'
+          ? {
+            half_day_second_half: resolvedSecondHalfMode || undefined,
+            half_day_primary_kind: normalizedPrimaryHalfKind,
+          }
           : undefined,
       });
       if (metadata) {
@@ -899,6 +924,10 @@ export function useTimeEntry({
         },
       });
     };
+
+    const primaryLedgerType = baseLeaveKind === 'half_day'
+      ? (normalizedPrimaryHalfKind === 'system_paid' ? 'system_paid' : 'half_day')
+      : leaveType;
 
     if (shouldSaveWorkHalf) {
       if (!workSegmentsInput.length) {
@@ -1123,7 +1152,7 @@ export function useTimeEntry({
         employee_id: employee.id,
         date: normalizedDate,
         notes: paidLeaveNotes ? paidLeaveNotes : null,
-        rate_used: secondLeavePayable && fullDayValue > 0 ? fullDayValue : null,
+        rate_used: secondLeavePayable && effectiveFullDayValue > 0 ? effectiveFullDayValue : null,
         total_payment: secondTotalPayment,
         entry_type: secondEntryType,
         service_id: null,
@@ -1203,7 +1232,7 @@ export function useTimeEntry({
       addLedgerEntry({
         key: 'primary',
         balance: ledgerDelta,
-        leaveTypeValue: leaveType,
+        leaveTypeValue: primaryLedgerType,
         workSessionId: paidLeaveId,
       });
     } else {
@@ -1211,7 +1240,7 @@ export function useTimeEntry({
       addLedgerEntry({
         key: 'primary',
         balance: ledgerDelta,
-        leaveTypeValue: leaveType,
+        leaveTypeValue: primaryLedgerType,
       });
     }
 

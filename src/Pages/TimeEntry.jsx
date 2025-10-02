@@ -245,6 +245,7 @@ export default function TimeEntry() {
     halfDaySecondLeaveType = null,
     includeHalfDaySecondHalf = false,
     halfDayRemovedWorkIds = [],
+    halfDayPrimaryLeaveType = null,
   }) => {
     setIsLoading(true);
     try {
@@ -280,6 +281,7 @@ export default function TimeEntry() {
           halfDaySecondLeaveType,
           includeHalfDaySecondHalf,
           halfDayRemovedWorkIds: Array.isArray(halfDayRemovedWorkIds) ? halfDayRemovedWorkIds : [],
+          halfDayPrimaryLeaveType,
         });
         if (result?.needsConfirmation) {
           return result;
