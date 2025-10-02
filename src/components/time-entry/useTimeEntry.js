@@ -1072,6 +1072,9 @@ export function useTimeEntry({
       });
 
       if (workTargets.length > 0) {
+        const globalDailyRate = employee.employee_type === 'global' && fallbackDailyValue > 0
+          ? fallbackDailyValue
+          : null;
         const weights = workTargets.map(({ payload }) => {
           if (!payload) return 0;
           if (payload.entry_type === 'hours') {
@@ -1114,7 +1117,9 @@ export function useTimeEntry({
           }
           payload.total_payment = value;
 
-          if (payload.entry_type === 'hours') {
+          if (globalDailyRate) {
+            payload.rate_used = globalDailyRate;
+          } else if (payload.entry_type === 'hours') {
             const hoursValue = Number(payload.hours);
             if (Number.isFinite(hoursValue) && hoursValue > 0) {
               payload.rate_used = value / hoursValue;

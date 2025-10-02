@@ -12,20 +12,14 @@ import EmployeePicker from '../employees/EmployeePicker.jsx';
 import MultiDateEntryModal from './MultiDateEntryModal.jsx';
 import {
   aggregateGlobalDays,
-  aggregateGlobalDayForDate,
   createLeaveDayValueResolver,
   resolveLeaveSessionValue,
 } from '@/lib/payroll.js';
-import { Badge } from '@/components/ui/badge';
 import {
   HOLIDAY_TYPE_LABELS,
-  MIXED_SUBTYPE_LABELS,
-  DEFAULT_MIXED_SUBTYPE,
   getLeaveKindFromEntryType,
   inferLeaveType,
   isLeaveEntryType,
-  parseMixedLeaveDetails,
-  normalizeMixedSubtype,
 } from '@/lib/leave.js';
 import { selectLeaveDayValue } from '@/selectors.js';
 
@@ -502,186 +496,185 @@ function TimeEntryTableInner({
 
                             {/* For each day, loop through employees to create a cell */}
                             {employees.map(emp => {
-                                const dailySessions = displaySessions.filter(s =>
-                                s.employee_id === emp.id &&
-                                format(parseISO(s.date), 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd')
-                                );
-                                const adjustments = dailySessions.filter(s =>
-                                  s.entry_type === 'adjustment'
-                                );
-                                const paidLeave = dailySessions.find(s => isLeaveEntryType(s.entry_type));
-                                const regularSessions = dailySessions.filter(s =>
-                                  s.entry_type !== 'adjustment' && !isLeaveEntryType(s.entry_type)
-                                );
-                                const adjustmentTotal = adjustments.reduce((sum, s) => sum + (s.total_payment || 0), 0);
+                                const dailySessions = displaySessions.filter(session => (
+                                  session.employee_id === emp.id
+                                  && format(parseISO(session.date), 'yyyy-MM-dd') === format(day, 'yyyy-MM-dd')
+                                ));
+                                const adjustments = dailySessions.filter(session => session.entry_type === 'adjustment');
+                                const leaveSessions = dailySessions.filter(session => isLeaveEntryType(session.entry_type));
+                                const nonLeaveSessions = dailySessions.filter(session => (
+                                  session.entry_type !== 'adjustment' && !isLeaveEntryType(session.entry_type)
+                                ));
+                                const rateInfo = resolveRateForDate(emp.id, day);
+                                const showNoRateWarning = nonLeaveSessions.some(session => Number(session.rate_used) === 0);
+                                const isSelected = multiMode
+                                  && selectedDates.some(d => d.getTime() === day.getTime())
+                                  && selectedEmployees.includes(emp.id);
+                                const startDateStr = typeof emp.start_date === 'string' ? emp.start_date : null;
 
-        let summaryText = '-';
-        let summaryPayment = 0;
-        let extraInfo = '';
-        const rateInfo = resolveRateForDate(emp.id, day);
-        const showNoRateWarning = regularSessions.some(s => s.rate_used === 0);
-        let leaveKind = null;
-        let leaveLabel = null;
-        let leavePayment = null;
-        const startDateStr = typeof emp.start_date === 'string' ? emp.start_date : null;
-        const isPreStartLeave = Boolean(
-          paidLeave &&
-          startDateStr &&
-          paidLeave.date &&
-                                  paidLeave.date < startDateStr
-                                );
+                                const sortedSessions = dailySessions
+                                  .slice()
+                                  .sort((a, b) => {
+                                    const priority = (session) => {
+                                      if (isLeaveEntryType(session.entry_type)) return 0;
+                                      if (session.entry_type === 'hours' || session.entry_type === 'session') return 1;
+                                      if (session.entry_type === 'adjustment') return 2;
+                                      return 3;
+                                    };
+                                    const diff = priority(a) - priority(b);
+                                    if (diff !== 0) return diff;
+                                    if (a.entry_type !== b.entry_type) return a.entry_type.localeCompare(b.entry_type);
+                                    const amountDiff = Number(b.total_payment || 0) - Number(a.total_payment || 0);
+                                    if (amountDiff !== 0) return amountDiff;
+                                    return String(a.id || a._localId || '').localeCompare(String(b.id || b._localId || ''));
+                                  });
 
-                                if (paidLeave) {
-                                  const inferredType = inferLeaveType(paidLeave);
-                                  leaveKind = inferredType || getLeaveKindFromEntryType(paidLeave.entry_type) || null;
-                                  leaveLabel = inferredType
-                                    ? (HOLIDAY_TYPE_LABELS[inferredType] || inferredType)
-                                    : (leaveKind ? (HOLIDAY_TYPE_LABELS[leaveKind] || leaveKind) : null);
-                                  if (inferredType === 'mixed' || leaveKind === 'mixed') {
-                                    const mixedDetails = parseMixedLeaveDetails(paidLeave);
-                                    const resolvedSubtype = normalizeMixedSubtype(mixedDetails.subtype) || DEFAULT_MIXED_SUBTYPE;
-                                    const subtypeLabel = MIXED_SUBTYPE_LABELS[resolvedSubtype] || null;
-                                    const isPaid = mixedDetails.paid === null ? (paidLeave.payable !== false) : mixedDetails.paid;
-                                    const parts = [
-                                      'מעורב',
-                                      subtypeLabel,
-                                      isPaid ? 'בתשלום' : 'ללא תשלום',
-                                      isPaid && mixedDetails.halfDay ? 'חצי יום' : null,
-                                    ].filter(Boolean);
-                                    summaryText = parts.join(' · ') || 'מעורב';
-                                  leaveLabel = summaryText;
-                                } else {
-                                  summaryText = leaveLabel || 'חופשה';
-                                }
-                                const leaveValue = resolveLeaveSessionValue(paidLeave, leaveValueResolver, { employee: emp });
-                                if (!leaveValue.preStartDate) {
-                                  const calculatedAmount = paidLeave.payable === false
-                                    ? 0
-                                    : (Number.isFinite(leaveValue.amount) ? leaveValue.amount : 0);
-                                  leavePayment = Math.max(0, calculatedAmount || 0);
-                                }
-                              } else if (regularSessions.length > 0) {
-                                if (emp.employee_type === 'instructor') {
-                                  summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
-                                  const sessionCount = regularSessions.reduce((sum, s) => sum + (s.sessions_count || 0), 0);
-                                    summaryText = `${sessionCount} מפגשים`;
-                                  } else if (emp.employee_type === 'hourly') {
-                                    const hoursCount = regularSessions.reduce((sum, s) => sum + (s.hours || 0), 0);
-                                    summaryText = `${hoursCount.toFixed(1)} שעות`;
-                                    summaryPayment = regularSessions.reduce((sum, s) => sum + (s.total_payment || 0), 0);
+                                const renderSessionLine = (session) => {
+                                  const key = session.id
+                                    ? `session-${session.id}`
+                                    : `local-${session._localId || `${session.employee_id}-${session.date}-${session.entry_type}`}`;
+                                  const amountNumber = Number(session.total_payment) || 0;
+                                  const amountAbs = Math.abs(amountNumber);
+                                  const amountClass = amountNumber > 0
+                                    ? 'text-green-700'
+                                    : amountNumber < 0
+                                      ? 'text-red-700'
+                                      : 'text-slate-600';
+                                  const amountDisplay = `₪${amountAbs.toLocaleString(undefined, {
+                                    maximumFractionDigits: amountAbs % 1 ? 2 : 0,
+                                    minimumFractionDigits: amountAbs % 1 ? 2 : 0,
+                                  })}`;
+                                  const isLeave = isLeaveEntryType(session.entry_type);
+                                  const details = [];
+                                  let title = '';
+                                  if (isLeave) {
+                                    const inferredType = inferLeaveType(session);
+                                    const leaveKind = inferredType || getLeaveKindFromEntryType(session.entry_type) || null;
+                                    const baseLabel = leaveKind ? HOLIDAY_TYPE_LABELS[leaveKind] : null;
+                                    title = baseLabel || HOLIDAY_TYPE_LABELS.employee_paid || 'חופשה';
+                                    if (leaveKind === 'half_day' || session.entry_type === 'leave_half_day') {
+                                      details.push('חצי יום');
+                                    }
+                                    if (session.payable === false || leaveKind === 'system_paid') {
+                                      details.push('על חשבון המערכת');
+                                    } else if (leaveKind === 'unpaid') {
+                                      details.push('ללא תשלום');
+                                    }
+                                    if (session.notes) {
+                                      details.push(session.notes);
+                                    }
+                                    if (startDateStr && session.date && session.date < startDateStr) {
+                                      details.push('לפני תחילת עבודה');
+                                    }
+                                  } else if (session.entry_type === 'hours') {
+                                    const hoursValue = Number(session.hours) || 0;
+                                    title = hoursValue > 0 ? `${hoursValue.toFixed(1)} שעות` : 'שעות';
+                                    if (emp.employee_type === 'global') {
+                                      details.push('עובד גלובלי');
+                                    }
+                                    if (session.notes) {
+                                      details.push(session.notes);
+                                    }
+                                  } else if (session.entry_type === 'session') {
+                                    const sessionsCount = Number(session.sessions_count) || 0;
+                                    title = sessionsCount > 0 ? `${sessionsCount} מפגשים` : 'מפגש';
+                                    if (session.service_id) {
+                                      const service = services.find(item => item.id === session.service_id);
+                                      if (service?.name) {
+                                        details.push(service.name);
+                                      }
+                                    }
+                                    if (session.notes) {
+                                      details.push(session.notes);
+                                    }
+                                  } else if (session.entry_type === 'adjustment') {
+                                    title = 'התאמה';
+                                    if (session.notes) {
+                                      details.push(session.notes);
+                                    }
                                   } else {
-                                    const hoursCount = regularSessions.reduce((sum, s) => sum + (s.hours || 0), 0);
-                                    const agg = aggregateGlobalDayForDate(regularSessions, employeesById);
-                                    summaryPayment = agg.total;
-                                    summaryText = hoursCount > 0 ? `${hoursCount.toFixed(1)} שעות` : '-';
-                                    extraInfo = summaryPayment > 0 ? `₪${summaryPayment.toLocaleString()}` : '';
+                                    title = session.entry_type || 'רישום';
+                                    if (session.notes) {
+                                      details.push(session.notes);
+                                    }
                                   }
-                                }
 
-                                const isSelected = multiMode && selectedDates.some(d => d.getTime() === day.getTime()) && selectedEmployees.includes(emp.id);
+                                  const isPreStart = Boolean(
+                                    isLeave
+                                    && startDateStr
+                                    && session.date
+                                    && session.date < startDateStr,
+                                  );
+                                  const amountNode = isPreStart
+                                    ? (
+                                      <div className="text-xs text-amber-700">לא נכלל בתשלום</div>
+                                    )
+                                    : (
+                                      <div className={`text-xs ${amountClass}`}>{amountDisplay}</div>
+                                    );
+
+                                  return (
+                                    <div key={key} className="flex flex-col items-center gap-1 py-1">
+                                      <div className="text-sm font-medium">{title}</div>
+                                      {details.length > 0 && (
+                                        <div className="text-[11px] text-slate-500 text-center leading-tight">
+                                          {details.join(' · ')}
+                                        </div>
+                                      )}
+                                      {amountNode}
+                                    </div>
+                                  );
+                                };
 
                                 return (
-                                    <TableCell
-                                        key={emp.id}
-                                        className={`text-center transition-colors p-2 ${isSelected ? 'bg-blue-50' : ''} ${multiMode ? '' : 'cursor-pointer hover:bg-blue-50'}`}
-                                        onClick={() => {
-                                          if (!multiMode) {
-                                            const payload = {
-                                              day,
-                                              employee: emp,
-                                              existingSessions: regularSessions,
-                                              adjustments,
-                                            };
-                                            if (paidLeave) {
-                                              payload.dayType = 'paid_leave';
-                                              payload.paidLeaveId = paidLeave.id;
-                                              payload.paidLeaveNotes = paidLeave.notes || '';
-                                              const inferredType = inferLeaveType(paidLeave);
-                                              payload.leaveType = inferredType || leaveKind || null;
-                                              if (leaveKind === 'mixed') {
-                                                const mixedDetails = parseMixedLeaveDetails(paidLeave);
-                                                const resolvedSubtype = normalizeMixedSubtype(mixedDetails.subtype) || DEFAULT_MIXED_SUBTYPE;
-                                                const isPaid = mixedDetails.paid === null
-                                                  ? (paidLeave.payable !== false)
-                                                  : mixedDetails.paid;
-                                                payload.mixedPaid = isPaid;
-                                                payload.mixedSubtype = resolvedSubtype;
-                                                payload.mixedHalfDay = isPaid && mixedDetails.halfDay === true;
-                                              }
-                                              if ((payload.leaveType || leaveKind) === 'half_day') {
-                                                payload.halfDayPrimaryLeaveType = paidLeave?.payable === false
-                                                  ? 'system_paid'
-                                                  : 'employee_paid';
-                                                if (regularSessions.length > 0) {
-                                                  payload.halfDaySecondHalfMode = 'work';
-                                                } else {
-                                                  const otherLeaveSessions = dailySessions.filter(session => (
-                                                    isLeaveEntryType(session.entry_type)
-                                                    && session.id !== paidLeave.id
-                                                  ));
-                                                  if (otherLeaveSessions.length > 0) {
-                                                    payload.halfDaySecondHalfMode = 'leave';
-                                                    const inferredSecondary = inferLeaveType(otherLeaveSessions[0]);
-                                                    payload.halfDaySecondLeaveType = inferredSecondary
-                                                      || getLeaveKindFromEntryType(otherLeaveSessions[0].entry_type)
-                                                      || 'employee_paid';
-                                                  }
-                                                }
-                                              }
-                                            } else if (activeTab === 'adjustments') {
-                                              payload.dayType = 'adjustment';
-                                            } else if (activeTab === 'leave') {
-                                              payload.dayType = 'paid_leave';
-                                            }
-                                            if (!payload.dayType && !paidLeave && regularSessions.length === 0 && adjustments.length > 0) {
-                                              payload.dayType = 'adjustment';
-                                            }
-                                            setEditingCell(payload);
-                                          }
-                                        }}
-                                    >
-                                        <div className="font-semibold text-sm">{summaryText}</div>
-                                        {extraInfo && (
-                                          <div className="text-xs text-slate-500">{extraInfo}</div>
-                                        )}
-                                        {paidLeave && (
-                                          <div className="mt-1 flex justify-center">
-                                            <Badge variant="secondary">{leaveLabel || 'חופשה'}</Badge>
-                                          </div>
-                                        )}
+                                  <TableCell
+                                    key={emp.id}
+                                    className={`text-center transition-colors p-2 ${isSelected ? 'bg-blue-50' : ''} ${multiMode ? '' : 'cursor-pointer hover:bg-blue-50'}`}
+                                    onClick={() => {
+                                      if (!multiMode) {
+                                        const payload = {
+                                          day,
+                                          employee: emp,
+                                          existingSessions: dailySessions,
+                                          adjustments,
+                                        };
+                                        if (leaveSessions.length > 0) {
+                                          payload.dayType = 'paid_leave';
+                                          payload.paidLeaveId = leaveSessions[0]?.id;
+                                          payload.paidLeaveNotes = leaveSessions[0]?.notes || '';
+                                          const inferredType = inferLeaveType(leaveSessions[0]);
+                                          payload.leaveType = inferredType
+                                            || getLeaveKindFromEntryType(leaveSessions[0].entry_type)
+                                            || null;
+                                        } else if (activeTab === 'adjustments') {
+                                          payload.dayType = 'adjustment';
+                                        } else if (activeTab === 'leave') {
+                                          payload.dayType = 'paid_leave';
+                                        }
+                                        if (!payload.dayType && leaveSessions.length === 0 && nonLeaveSessions.length === 0 && adjustments.length > 0) {
+                                          payload.dayType = 'adjustment';
+                                        }
+                                        setEditingCell(payload);
+                                      }
+                                    }}
+                                  >
+                                    {sortedSessions.length === 0 ? (
+                                      <div className="text-sm text-slate-400">-</div>
+                                    ) : (
+                                      <div className="flex flex-col items-center divide-y divide-slate-200">
+                                        {sortedSessions.map(renderSessionLine)}
+                                      </div>
+                                    )}
 
-                {/* --- WARNINGS --- */}
-                                        {rateInfo?.reason === 'לא התחילו לעבוד עדיין' && (
-                                          <div className="text-xs text-red-700">טרם התחיל</div>
-                                        )}
+                                    {rateInfo?.reason === 'לא התחילו לעבוד עדיין' && (
+                                      <div className="mt-1 text-xs text-red-700">טרם התחיל</div>
+                                    )}
 
-                                        {showNoRateWarning && summaryText !== '-' && (
-                                          <div className="text-xs text-red-700">לא הוגדר תעריף</div>
-                                        )}
-
-                                        {leavePayment !== null && !isPreStartLeave && (
-                                          <div className={`text-xs ${leavePayment > 0 ? 'text-green-700' : 'text-slate-600'}`}>
-                                            ₪{leavePayment.toLocaleString()}
-                                          </div>
-                                        )}
-
-                                        {summaryPayment > 0 && emp.employee_type !== 'global' && (
-                                          <div className="text-xs text-green-700">₪{summaryPayment.toLocaleString()}</div>
-                                        )}
-
-                                        {adjustmentTotal !== 0 && (
-                                          <div className={`text-xs ${adjustmentTotal > 0 ? 'text-green-700' : 'text-red-700'}`}> 
-                                            {adjustmentTotal > 0 ? '+' : '-'}₪{Math.abs(adjustmentTotal).toLocaleString()}
-                                          </div>
-                                        )}
-
-                                        {isPreStartLeave && (
-                                          <div className="mt-1 text-[11px] text-amber-700">
-                                            תאריך לפני תחילת עבודה—הושמט מהסכום
-                                          </div>
-                                        )}
-                                    </TableCell>
-                                    );
+                                    {showNoRateWarning && (
+                                      <div className="mt-1 text-xs text-red-700">לא הוגדר תעריף</div>
+                                    )}
+                                  </TableCell>
+                                );
                             })}
                             </TableRow>
                         ))}
