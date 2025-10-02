@@ -247,6 +247,14 @@ function normalizeSessionPayload(raw) {
   if ('org_id' in payload) {
     delete payload.org_id;
   }
+  if ('_localId' in payload) {
+    delete payload._localId;
+  }
+  Object.keys(payload).forEach((key) => {
+    if (typeof payload[key] === 'undefined') {
+      delete payload[key];
+    }
+  });
   return payload;
 }
 
@@ -262,6 +270,31 @@ function normalizeSessionUpdates(raw) {
     delete updates.org_id;
   }
   return Object.keys(updates).length > 0 ? updates : null;
+}
+
+function stableStringify(value) {
+  if (typeof value === 'undefined') {
+    return 'undefined';
+  }
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(item => stableStringify(item)).join(',')}]`;
+  }
+  const keys = Object.keys(value).sort();
+  const entries = keys.map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`);
+  return `{${entries.join(',')}}`;
+}
+
+function buildSessionSignature(source, keys) {
+  if (!source || typeof source !== 'object') {
+    return '';
+  }
+  const keyList = Array.isArray(keys) && keys.length ? [...keys] : Object.keys(source);
+  keyList.sort();
+  const parts = keyList.map(key => `${key}:${stableStringify(source[key])}`);
+  return parts.join('|');
 }
 
 function resolveSessionId(context, body) {
@@ -456,17 +489,34 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid sessions payload' });
     }
 
-    const payload = sessions
-      .map((entry) => normalizeSessionPayload(entry))
-      .filter(Boolean);
+    const preparedSessions = [];
 
-    if (!payload.length) {
+    sessions.forEach((entry) => {
+      const payload = normalizeSessionPayload(entry);
+      if (!payload) {
+        return;
+      }
+      const rawLocalId = entry && typeof entry === 'object' ? entry._localId : null;
+      const localId = typeof rawLocalId === 'string' && rawLocalId ? rawLocalId : null;
+      const keys = Object.keys(payload).sort();
+      const signature = buildSessionSignature(payload, keys);
+      preparedSessions.push({
+        payload,
+        localId,
+        keys,
+        signature,
+      });
+    });
+
+    if (!preparedSessions.length) {
       return respond(context, 400, { message: 'invalid sessions payload' });
     }
 
+    const insertPayload = preparedSessions.map(item => item.payload);
+
     const { data, error } = await tenantClient
       .from('WorkSessions')
-      .insert(payload)
+      .insert(insertPayload)
       .select('*');
 
     if (error) {
@@ -474,7 +524,66 @@ export default async function (context, req) {
       return respond(context, 500, { message: 'failed_to_create_sessions' });
     }
 
-    return respond(context, 201, { created: data ?? [] });
+    const createdRows = Array.isArray(data) ? data : [];
+
+    const signatureQueues = new Map();
+    preparedSessions.forEach((item) => {
+      const queue = signatureQueues.get(item.signature);
+      if (queue) {
+        queue.push(item);
+      } else {
+        signatureQueues.set(item.signature, [item]);
+      }
+    });
+
+    const createdWithLocalIds = createdRows.map((row) => {
+      let attachedLocalId = null;
+      for (const [signature, queue] of signatureQueues) {
+        if (!queue.length) {
+          continue;
+        }
+        const keys = queue[0].keys;
+        const rowSignature = buildSessionSignature(row, keys);
+        if (rowSignature === signature) {
+          const match = queue.shift();
+          attachedLocalId = match.localId || null;
+          if (!queue.length) {
+            signatureQueues.delete(signature);
+          }
+          break;
+        }
+      }
+      return attachedLocalId ? { ...row, _localId: attachedLocalId } : { ...row };
+    });
+
+    const unmatchedWithLocalIds = [];
+    signatureQueues.forEach((queue) => {
+      queue.forEach((item) => {
+        if (item.localId) {
+          unmatchedWithLocalIds.push(item.localId);
+        }
+      });
+    });
+
+    if (unmatchedWithLocalIds.length) {
+      context.log?.error?.('work-sessions insert mapping failed', { unmatchedLocalIds: unmatchedWithLocalIds });
+      const createdIds = createdRows.map(row => row?.id).filter(Boolean);
+      if (createdIds.length) {
+        const { error: rollbackError } = await tenantClient
+          .from('WorkSessions')
+          .delete()
+          .in('id', createdIds);
+        if (rollbackError) {
+          context.log?.error?.('work-sessions insert rollback failed', {
+            message: rollbackError.message,
+            createdIds,
+          });
+        }
+      }
+      return respond(context, 500, { message: 'failed_to_create_sessions' });
+    }
+
+    return respond(context, 201, { created: createdWithLocalIds });
   }
 
   if (method === 'PATCH' || method === 'PUT') {

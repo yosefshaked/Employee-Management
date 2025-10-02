@@ -32,6 +32,18 @@ import { selectLeaveDayValue, selectLeaveRemaining } from '../../selectors.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
+const generateLocalId = () => {
+  try {
+    const globalCrypto = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
+    if (globalCrypto && typeof globalCrypto.randomUUID === 'function') {
+      return globalCrypto.randomUUID();
+    }
+  } catch {
+    // ignore and fall back to manual generation
+  }
+  return `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
 export function useTimeEntry({
   employees,
   services,
@@ -472,6 +484,7 @@ export function useTimeEntry({
       if (segment.id) {
         toUpdate.push({ id: segment.id, updates: payloadBase });
       } else {
+        payloadBase._localId = generateLocalId();
         toInsert.push(payloadBase);
       }
     }
@@ -869,12 +882,13 @@ export function useTimeEntry({
     const leaveSessionUpdates = [];
     const ledgerEntries = [];
 
-    const addLedgerEntry = ({ key, balance, leaveTypeValue, workSessionId = null }) => {
+    const addLedgerEntry = ({ key, balance, leaveTypeValue, workSessionId = null, localId = null }) => {
       const normalizedBalance = typeof balance === 'number' && Number.isFinite(balance)
         ? balance
         : (Number(balance) || 0);
       ledgerEntries.push({
         key: key || null,
+        localId: localId || null,
         payload: {
           employee_id: employee.id,
           effective_date: normalizedDate,
@@ -1155,24 +1169,43 @@ export function useTimeEntry({
     const insertedSessions = [];
     const pendingSessionInserts = [];
 
+    const ledgerEntryByKey = new Map();
+    ledgerEntries.forEach(entry => {
+      if (!entry) return;
+      const entryKey = entry.key || null;
+      if (!ledgerEntryByKey.has(entryKey)) {
+        ledgerEntryByKey.set(entryKey, entry);
+      }
+    });
+
     if (leaveSessionInserts.length) {
       leaveSessionInserts.forEach(item => {
         if (!item || !item.payload) return;
+        const localId = generateLocalId();
+        const payloadWithId = { ...item.payload, _localId: localId };
         pendingSessionInserts.push({
           type: 'leave',
           key: item.key || null,
-          payload: item.payload,
+          payload: payloadWithId,
+          localId,
         });
+        const ledgerEntry = ledgerEntryByKey.get(item.key || null);
+        if (ledgerEntry) {
+          ledgerEntry.localId = localId;
+        }
       });
     }
 
     if (workInserts.length) {
       workInserts.forEach(payload => {
         if (!payload) return;
+        const localId = generateLocalId();
+        const payloadWithId = { ...payload, _localId: localId };
         pendingSessionInserts.push({
           type: 'work',
           key: null,
-          payload,
+          payload: payloadWithId,
+          localId,
         });
       });
     }
@@ -1192,22 +1225,45 @@ export function useTimeEntry({
         );
         throw error;
       }
-      createdSessions.forEach((createdSession, index) => {
+      const createdSessionMap = new Map();
+      createdSessions.forEach((createdSession) => {
         insertedSessions.push(createdSession);
-        const descriptor = pendingSessionInserts[index];
-        if (descriptor.type === 'leave') {
-          const ledgerEntry = ledgerEntries.find(entry => entry.key === descriptor.key);
+        if (createdSession && typeof createdSession._localId === 'string' && createdSession._localId) {
+          createdSessionMap.set(createdSession._localId, createdSession);
+        }
+      });
+
+      const ledgerEntryByLocalId = new Map();
+      ledgerEntries.forEach(entry => {
+        if (entry?.localId) {
+          ledgerEntryByLocalId.set(entry.localId, entry);
+        }
+      });
+
+      for (const descriptor of pendingSessionInserts) {
+        const { localId, type, key } = descriptor;
+        const mappedSession = localId ? createdSessionMap.get(localId) : null;
+        if (!mappedSession) {
+          const error = new Error(
+            leaveSessionInserts.length > 0
+              ? 'שמירת רישום החופשה נכשלה.'
+              : 'שמירת רישומי העבודה נכשלה.',
+          );
+          throw error;
+        }
+        if (type === 'leave') {
+          const ledgerEntry = ledgerEntryByLocalId.get(localId) || ledgerEntryByKey.get(key || null);
           if (ledgerEntry) {
-            ledgerEntry.payload.work_session_id = createdSession.id || null;
-            if (createdSession.employee_id) {
-              ledgerEntry.payload.employee_id = createdSession.employee_id;
+            ledgerEntry.payload.work_session_id = mappedSession.id || null;
+            if (mappedSession.employee_id) {
+              ledgerEntry.payload.employee_id = mappedSession.employee_id;
             }
-            if (createdSession.date) {
-              ledgerEntry.payload.effective_date = createdSession.date;
+            if (mappedSession.date) {
+              ledgerEntry.payload.effective_date = mappedSession.date;
             }
           }
         }
-      });
+      }
     }
 
     const sessionUpdates = [...leaveSessionUpdates, ...workUpdates];
