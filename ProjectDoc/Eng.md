@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.6.3**
-**Last Updated: 2025-09-30**
+**Version: 1.6.6**
+**Last Updated: 2025-10-17**
 
 ## 1. Vision & Purpose
 
@@ -111,7 +111,7 @@ The work log. Each row represents a completed work session.
 | `employee_id` | `uuid` | References the `Employees` table | **Foreign Key** |
 | `service_id` | `uuid` | References the `Services` table (for instructors) | **Foreign Key** |
 | `date` | `date` | The date the work was performed | Not NULL |
-| `entry_type` | `text` | 'session', 'hours', 'adjustment', or 'paid_leave' | Not NULL |
+| `entry_type` | `text` | 'session', 'hours', 'adjustment', 'leave_employee_paid', 'leave_system_paid', 'leave_unpaid', or 'leave_half_day' | Not NULL |
 | `hours` | `numeric` | Number of hours (display-only for globals) | |
 | `sessions_count`| `int8` | Number of sessions (for instructors) | |
 | `students_count`| `int8` | Number of students (for `per_student` model) | |
@@ -127,16 +127,20 @@ The work log. Each row represents a completed work session.
   - Instructors: `sessions_count * students_count * rate_used` (or without students when not per-student).
   - Hourly employees: `hours * rate_used`.
   - Global hours: `monthly_rate / effectiveWorkingDays(employee, month)` (each row represents one day; hours field is ignored and multiple rows on the same date count once).
-  - Paid leave: same daily rate as global hours, stored with `entry_type='paid_leave'`.
+  - Leave rows: quota deductions use `entry_type='leave_employee_paid'`, system-paid holidays use `entry_type='leave_system_paid'`, unpaid leave records use `entry_type='leave_unpaid'` with `total_payment=0`, and half-day deductions use `entry_type='leave_half_day'` with `total_payment` equal to half of the resolved daily value.
   - Monthly totals and reports sum `total_payment` from `WorkSessions` rows only, deduplicating global rows by day; no external base salary is added.
-  - Unpaid absence = no row. Paid leave is explicitly recorded with an `entry_type='paid_leave'` row.
   - Each row may include optional `notes` (free text, max 300 chars).
+
+Half-day usage is now driven entirely by the `entry_type='leave_half_day'` flag; metadata no longer stores a `leave.half_day` boolean.
+
+All `POST /api/work-sessions` calls now return the full inserted records (not just identifiers) so the client can immediately link newly created leave rows to their ledger entries.
 
 #### WorkSessions Deletion Workflow
 
 - **Soft delete is the default:** Any removal initiated outside the Trash tab issues a soft delete (`deleted=true`, `deleted_at=NOW()`). The record remains recoverable and surfaces in the Trash view.
 - **Permanent delete is restricted:** Only the Trash tab can trigger a permanent delete. The UI requires the administrator to type "מחק" to confirm and the API must receive `DELETE /api/work-sessions/{id}?permanent=true`.
 - **API contract:** The Azure Function interprets `permanent=true` as an irreversible delete (`DELETE`). Calls without the flag always perform the soft-delete update.
+- **Ledger synchronization:** When the target row is a leave session, the API permanently removes the linked `LeaveBalances` entry on soft delete and recreates it automatically on restore. Permanent deletes clear both records together.
 - **UI confirmations:** Standard delete flows (forms, inline rows) show an informational dialog clarifying that the row will move to the Trash. The Trash tab exclusively presents the high-friction confirmation before final deletion.
 
 ### 3.5. `Settings` Table
@@ -167,13 +171,14 @@ Acts as the immutable ledger for employee leave allocations and usage.
 | :--- | :--- | :--- | :--- |
 | `id` | `bigint` | Auto-incrementing identifier | **Primary Key** |
 | `employee_id` | `uuid` | References the `Employees` table | **Foreign Key** |
+| `work_session_id` | `uuid` | Links to the originating `WorkSessions` row (time-entry generated) | **Foreign Key**, Nullable |
 | `leave_type` | `text` | Context for the entry (e.g., `allocation`, `usage_employee_paid`, `time_entry_leave_employee_paid`) | Not NULL |
 | `balance` | `numeric` | Positive values add quota, negative values deduct usage | Not NULL, Default `0` |
 | `effective_date` | `date` | Effective date of the leave event | Not NULL |
 | `notes` | `text` | Optional free-form details | |
 | `created_at` | `timestamptz` | Insert timestamp | Default: `now()` |
 
-Ledger entries support fractional values (e.g., `-0.5` for half-day usage when policy allows it). Negative entries representing usage are validated against the configured floor before insert; attempts to exceed the overdraft surface the toast "חריגה ממכסה ימי החופשה המותרים" and are rejected.
+Ledger entries support fractional values (e.g., `-0.5` for half-day usage when policy allows it). Negative entries representing usage are validated against the configured floor before insert; attempts to exceed the overdraft surface the toast "חריגה ממכסה ימי החופשה המותרים" and are rejected. Every leave saved through the Time Entry flow now creates a matching `LeaveBalances` row linked via `work_session_id`, even for unpaid or system-paid leave (balance `0`).
 
 ### Multi-date Quick Entry UX
 
@@ -190,7 +195,7 @@ The import modal supports either pasting text or uploading a `.csv` file. Lines 
 | Hebrew             | Internal field |
 |-------------------|----------------|
 | תאריך            | `date` (DD/MM/YYYY → YYYY-MM-DD) |
-| סוג רישום        | `entry_type` (`שיעור`=`session`, `שעות`=`hours`, `התאמה`=`adjustment`, `חופשה בתשלום`=`paid_leave`) |
+| סוג רישום        | `entry_type` (`שיעור`=`session`, `שעות`=`hours`, `התאמה`=`adjustment`, `חופשה בתשלום`=`leave_employee_paid`, `חופשה מערכת`=`leave_system_paid`, `חופשה ללא תשלום`=`leave_unpaid`, `חצי יום`=`leave_half_day`) |
 | שירות            | `service_name` |
 | שעות             | `hours` |
 | מספר שיעורים     | `sessions_count` |
@@ -209,7 +214,7 @@ Buttons in the modal allow downloading a CSV template (UTF‑8 with BOM) and a b
 - `date` must parse to ISO format.
 - `session` rows require `service_name`, `sessions_count` ≥1, `students_count` ≥1 and a rate snapshot.
 - `hours` rows require a rate snapshot; hourly employees must supply `hours`, while global employees ignore it and use a daily rate.
-- `paid_leave` rows are allowed only for global employees and use the global daily rate.
+- Leave entry types (`leave_employee_paid`, `leave_system_paid`, `leave_half_day`) require a rate snapshot for the selected employee and date; `leave_unpaid` rows insert with zero payment but still require the basic identifying fields.
 - `adjustment` rows require an `adjustment_amount` and ignore other fields.
 
 Only valid rows are inserted into `WorkSessions`; the summary dialog lists inserted, failed and skipped rows.
@@ -662,11 +667,11 @@ The leave module centralizes all holiday rules, quotas, and ledger actions so em
 - The **"חגים וימי חופשה"** screen under Settings edits the `leave_policy` JSON described in Section 3.5.
 - Toggles use the following Hebrew microcopy: "אישור חצי יום", "היתרה יכולה לרדת למינוס", "כמות חריגה מימי החופש המוגדרים", "העברת יתרה לשנה הבאה", and "מקסימום להעברה".
 - Holiday rows capture a name, date range, and tag selected from:
-  - `system_paid` → "חג משולם (מערכת)" (no deduction, payroll marks the day as paid by the organization).
-  - `employee_paid` → "חופשה מהמכסה" (deducts from the employee quota).
-  - `unpaid` → "לא משולם".
+  - `system_paid` → "חופשה בתשלום (על חשבון המערכת)" (no deduction; payroll marks the day as system funded).
+  - `employee_paid` → "חופשה בתשלום" (deducts from the employee quota).
+  - `unpaid` → "חופשה ללא תשלום".
   - `mixed` → "מעורב".
-  - `half_day` → "חצי יום" (available only when half-day usage is enabled).
+  - `half_day` → "חצי יום חופשה" (available only when half-day usage is enabled).
 - All persistence is routed through the secure API, which performs Supabase `upsert` calls on the `Settings` table to avoid duplicate keys.
 
 ### 6.2. Employee quota and proration
@@ -679,6 +684,8 @@ The leave module centralizes all holiday rules, quotas, and ledger actions so em
 
 - The Leave tab now provides a read-only balance overview with collapsible drill-down rows. Detailed entries are viewed in-place,
   while all new allocations or usage adjustments must be captured through the dedicated Time Entry workflow.
+- Within the Time Entry form the "על חשבון המערכת" switch is the sole way to mark system-paid holidays; the leave dropdowns now
+  present only "חופשה בתשלום", "חופשה ללא תשלום", and "חצי יום חופשה" labels for clarity.
 - Usage inserts a negative `balance` into `LeaveBalances` with a `leave_type` like `usage_employee_paid` or `time_entry_leave_employee_paid`. Allocations insert a positive `balance` with `leave_type='allocation'`.
 - When `allow_half_day` is false the UI blocks non-integer deductions. When enabled, half-day holidays auto-fill `-0.5`.
 - Negative balances are blocked once the projected balance would drop below `negative_floor_days`; the blocking toast reads **"חריגה ממכסה ימי החופשה המותרים"**.

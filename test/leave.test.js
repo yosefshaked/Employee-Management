@@ -55,7 +55,7 @@ describe('findHolidayForDate', () => {
     const res = findHolidayForDate(policyWithRules, '2025-05-11');
     assert.ok(res);
     assert.equal(res.type, 'system_paid');
-    assert.equal(res.label, 'חג משולם (מערכת)');
+    assert.equal(res.label, 'חופשה בתשלום (על חשבון המערכת)');
   });
 
   it('supports half-day type', () => {

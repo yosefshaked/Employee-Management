@@ -5,6 +5,7 @@ import { createHash, createDecipheriv } from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 import { json, resolveBearerAuthorization } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
+import { buildLedgerEntryFromSession } from '../_shared/leave-ledger.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -246,7 +247,65 @@ function normalizeSessionPayload(raw) {
   if ('org_id' in payload) {
     delete payload.org_id;
   }
+  if ('_localId' in payload) {
+    delete payload._localId;
+  }
+  Object.keys(payload).forEach((key) => {
+    if (typeof payload[key] === 'undefined') {
+      delete payload[key];
+    }
+  });
   return payload;
+}
+
+function parseMetadataObject(value) {
+  if (!value) {
+    return null;
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return { ...value };
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return { ...parsed };
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function extractLocalIdFromMetadata(metadata) {
+  const parsed = parseMetadataObject(metadata);
+  if (!parsed) {
+    return null;
+  }
+  const candidate = parsed._localId;
+  return typeof candidate === 'string' && candidate ? candidate : null;
+}
+
+function sanitizeMetadataMailbox(metadata) {
+  const parsed = parseMetadataObject(metadata);
+  if (!parsed) {
+    return { metadata: null, changed: false };
+  }
+  if (!Object.prototype.hasOwnProperty.call(parsed, '_localId')) {
+    return { metadata: parsed, changed: false };
+  }
+  const { _localId, ...rest } = parsed;
+  const cleaned = {};
+  Object.keys(rest).forEach((key) => {
+    if (typeof rest[key] !== 'undefined') {
+      cleaned[key] = rest[key];
+    }
+  });
+  if (Object.keys(cleaned).length === 0) {
+    return { metadata: null, changed: true };
+  }
+  return { metadata: cleaned, changed: true };
 }
 
 function normalizeSessionUpdates(raw) {
@@ -295,6 +354,39 @@ async function fetchWorkSessions(tenantClient, filters = {}) {
   }
 
   return { data: data || [] };
+}
+
+async function deleteLedgerForSession(tenantClient, sessionId) {
+  if (!sessionId) {
+    return { count: 0 };
+  }
+  const result = await tenantClient
+    .from('LeaveBalances')
+    .delete({ count: 'exact' })
+    .eq('work_session_id', sessionId);
+  if (result.error) {
+    return { error: result.error };
+  }
+  return { count: result.count || 0 };
+}
+
+async function insertLedgerForSession(tenantClient, session) {
+  const ledgerEntry = buildLedgerEntryFromSession(session);
+  if (!ledgerEntry) {
+    return { inserted: null };
+  }
+  if (!ledgerEntry.work_session_id && session?.id) {
+    ledgerEntry.work_session_id = session.id;
+  }
+  const insertResult = await tenantClient
+    .from('LeaveBalances')
+    .insert(ledgerEntry)
+    .select('*')
+    .maybeSingle();
+  if (insertResult.error) {
+    return { error: insertResult.error };
+  }
+  return { inserted: insertResult.data || ledgerEntry };
 }
 
 export default async function (context, req) {
@@ -422,25 +514,119 @@ export default async function (context, req) {
       return respond(context, 400, { message: 'invalid sessions payload' });
     }
 
-    const payload = sessions
-      .map((entry) => normalizeSessionPayload(entry))
-      .filter(Boolean);
+    const preparedSessions = [];
+    let missingMailbox = false;
 
-    if (!payload.length) {
+    sessions.forEach((entry) => {
+      const payload = normalizeSessionPayload(entry);
+      if (!payload) {
+        return;
+      }
+      const rawLocalId = entry && typeof entry === 'object' ? entry._localId : null;
+      const fallbackLocalId = typeof rawLocalId === 'string' && rawLocalId ? rawLocalId : null;
+      const parsedMetadata = parseMetadataObject(payload.metadata);
+      const metadataObject = parsedMetadata ? { ...parsedMetadata } : {};
+      if (parsedMetadata) {
+        payload.metadata = metadataObject;
+      }
+      let mailboxId = typeof metadataObject._localId === 'string' && metadataObject._localId ? metadataObject._localId : null;
+
+      if (!mailboxId && fallbackLocalId) {
+        metadataObject._localId = fallbackLocalId;
+        payload.metadata = metadataObject;
+        mailboxId = fallbackLocalId;
+      }
+
+      if (!mailboxId) {
+        missingMailbox = true;
+        return;
+      }
+
+      preparedSessions.push({
+        payload,
+        localId: mailboxId,
+      });
+    });
+
+    if (!preparedSessions.length || missingMailbox) {
       return respond(context, 400, { message: 'invalid sessions payload' });
     }
 
+    const insertPayload = preparedSessions.map(item => item.payload);
+
     const { data, error } = await tenantClient
       .from('WorkSessions')
-      .insert(payload)
-      .select('id');
+      .insert(insertPayload)
+      .select('*');
 
     if (error) {
       context.log?.error?.('work-sessions insert failed', { message: error.message });
       return respond(context, 500, { message: 'failed_to_create_sessions' });
     }
 
-    return respond(context, 201, { created: data?.map((row) => row.id) ?? [] });
+    const createdRows = Array.isArray(data) ? data : [];
+
+    const cleanupNullIds = [];
+    const cleanupObjectTargets = [];
+
+    const createdWithLocalIds = createdRows.map((row) => {
+      const mailboxId = extractLocalIdFromMetadata(row?.metadata);
+      const { metadata: sanitizedMetadata, changed } = sanitizeMetadataMailbox(row.metadata);
+      if (row && row.id && changed) {
+        if (!sanitizedMetadata || (typeof sanitizedMetadata === 'object' && Object.keys(sanitizedMetadata).length === 0)) {
+          cleanupNullIds.push(row.id);
+        } else {
+          cleanupObjectTargets.push({ id: row.id, metadata: sanitizedMetadata });
+        }
+      }
+      const baseRow = changed ? { ...row, metadata: sanitizedMetadata } : { ...row };
+      return mailboxId ? { ...baseRow, _localId: mailboxId } : baseRow;
+    });
+
+    let cleanupError = null;
+
+    if (cleanupNullIds.length) {
+      const { error: nullCleanupError } = await tenantClient
+        .from('WorkSessions')
+        .update({ metadata: null })
+        .in('id', cleanupNullIds);
+      if (nullCleanupError) {
+        cleanupError = nullCleanupError;
+      }
+    }
+
+    if (!cleanupError && cleanupObjectTargets.length) {
+      for (const target of cleanupObjectTargets) {
+        const { error: objectCleanupError } = await tenantClient
+          .from('WorkSessions')
+          .update({ metadata: target.metadata })
+          .eq('id', target.id);
+        if (objectCleanupError) {
+          cleanupError = objectCleanupError;
+          break;
+        }
+      }
+    }
+
+    if (cleanupError) {
+      context.log?.error?.('work-sessions metadata cleanup failed', { message: cleanupError.message });
+      const createdIds = createdRows.map(row => row?.id).filter(Boolean);
+      if (createdIds.length) {
+        const { error: rollbackError } = await tenantClient
+          .from('WorkSessions')
+          .delete()
+          .in('id', createdIds);
+        if (rollbackError) {
+          context.log?.error?.('work-sessions insert rollback failed', {
+            message: rollbackError.message,
+            createdIds,
+          });
+        }
+      }
+      return respond(context, 500, { message: 'failed_to_create_sessions' });
+    }
+
+    return respond(context, 201, { created: createdWithLocalIds });
   }
 
   if (method === 'PATCH' || method === 'PUT') {
@@ -452,22 +638,59 @@ export default async function (context, req) {
     const isRestore = body && typeof body === 'object' && body.restore === true;
 
     if (isRestore) {
-      const { error, data } = await tenantClient
+      const { data: existingSession, error: fetchError } = await tenantClient
         .from('WorkSessions')
-        .update({ deleted: false, deleted_at: null })
+        .select('*')
         .eq('id', sessionId)
-        .select('id');
+        .maybeSingle();
 
-      if (error) {
-        context.log?.error?.('work-sessions restore failed', { message: error.message, sessionId });
+      if (fetchError) {
+        context.log?.error?.('work-sessions restore lookup failed', { message: fetchError.message, sessionId });
         return respond(context, 500, { message: 'failed_to_restore_session' });
       }
 
-      if (!data || data.length === 0) {
+      if (!existingSession) {
         return respond(context, 404, { message: 'session_not_found' });
       }
 
-      return respond(context, 200, { restored: true });
+      const { error: updateError, data: updatedRows } = await tenantClient
+        .from('WorkSessions')
+        .update({ deleted: false, deleted_at: null })
+        .eq('id', sessionId)
+        .select('*');
+
+      if (updateError) {
+        context.log?.error?.('work-sessions restore failed', { message: updateError.message, sessionId });
+        return respond(context, 500, { message: 'failed_to_restore_session' });
+      }
+
+      if (!updatedRows || updatedRows.length === 0) {
+        return respond(context, 404, { message: 'session_not_found' });
+      }
+
+      const restoredSession = updatedRows[0];
+
+      const cleanupResult = await deleteLedgerForSession(tenantClient, sessionId);
+      if (cleanupResult.error) {
+        await tenantClient
+          .from('WorkSessions')
+          .update({ deleted: existingSession.deleted, deleted_at: existingSession.deleted_at })
+          .eq('id', sessionId);
+        context.log?.error?.('work-sessions restore ledger cleanup failed', { message: cleanupResult.error.message, sessionId });
+        return respond(context, 500, { message: 'failed_to_restore_session' });
+      }
+
+      const ledgerResult = await insertLedgerForSession(tenantClient, restoredSession);
+      if (ledgerResult.error) {
+        await tenantClient
+          .from('WorkSessions')
+          .update({ deleted: true, deleted_at: existingSession.deleted_at || new Date().toISOString() })
+          .eq('id', sessionId);
+        context.log?.error?.('work-sessions restore ledger insert failed', { message: ledgerResult.error.message, sessionId });
+        return respond(context, 500, { message: 'failed_to_restore_session' });
+      }
+
+      return respond(context, 200, { restored: true, session: restoredSession, ledger: ledgerResult.inserted || null });
     }
 
     const updates = normalizeSessionUpdates(body.updates || body.session || body.workSession || body.data);
@@ -504,19 +727,48 @@ export default async function (context, req) {
 
     const wantsPermanent = permanentFlag === 'true' || permanentFlag === '1';
 
+    const { data: sessionRow, error: fetchError } = await tenantClient
+      .from('WorkSessions')
+      .select('*')
+      .eq('id', sessionId)
+      .maybeSingle();
+
+    if (fetchError) {
+      context.log?.error?.('work-sessions delete lookup failed', { message: fetchError.message, sessionId });
+      return respond(context, 500, { message: 'failed_to_delete_session' });
+    }
+
+    if (!sessionRow) {
+      return respond(context, 404, { message: 'session_not_found' });
+    }
+
     if (wantsPermanent) {
-      const { error, data } = await tenantClient
+      const cleanupResult = await deleteLedgerForSession(tenantClient, sessionId);
+      if (cleanupResult.error) {
+        context.log?.error?.('work-sessions permanent delete ledger cleanup failed', { message: cleanupResult.error.message, sessionId });
+        return respond(context, 500, { message: 'failed_to_permanently_delete_session' });
+      }
+
+      const { error: deleteError, data } = await tenantClient
         .from('WorkSessions')
         .delete()
         .eq('id', sessionId)
         .select('id');
 
-      if (error) {
-        context.log?.error?.('work-sessions permanent delete failed', { message: error.message, sessionId });
+      if (deleteError) {
+        const rollbackLedger = await insertLedgerForSession(tenantClient, sessionRow);
+        if (rollbackLedger.error) {
+          context.log?.error?.('work-sessions permanent delete rollback ledger failed', { message: rollbackLedger.error.message, sessionId });
+        }
+        context.log?.error?.('work-sessions permanent delete failed', { message: deleteError.message, sessionId });
         return respond(context, 500, { message: 'failed_to_permanently_delete_session' });
       }
 
       if (!data || data.length === 0) {
+        const rollbackLedger = await insertLedgerForSession(tenantClient, sessionRow);
+        if (rollbackLedger.error) {
+          context.log?.error?.('work-sessions permanent delete rollback ledger failed', { message: rollbackLedger.error.message, sessionId });
+        }
         return respond(context, 404, { message: 'session_not_found' });
       }
 
@@ -524,19 +776,29 @@ export default async function (context, req) {
     }
 
     const timestamp = new Date().toISOString();
-    const { error, data } = await tenantClient
+    const { error: softDeleteError, data: updatedRows } = await tenantClient
       .from('WorkSessions')
       .update({ deleted: true, deleted_at: timestamp })
       .eq('id', sessionId)
-      .select('id');
+      .select('*');
 
-    if (error) {
-      context.log?.error?.('work-sessions soft delete failed', { message: error.message, sessionId });
+    if (softDeleteError) {
+      context.log?.error?.('work-sessions soft delete failed', { message: softDeleteError.message, sessionId });
       return respond(context, 500, { message: 'failed_to_delete_session' });
     }
 
-    if (!data || data.length === 0) {
+    if (!updatedRows || updatedRows.length === 0) {
       return respond(context, 404, { message: 'session_not_found' });
+    }
+
+    const ledgerDeleteResult = await deleteLedgerForSession(tenantClient, sessionId);
+    if (ledgerDeleteResult.error) {
+      await tenantClient
+        .from('WorkSessions')
+        .update({ deleted: sessionRow.deleted, deleted_at: sessionRow.deleted_at })
+        .eq('id', sessionId);
+      context.log?.error?.('work-sessions soft delete ledger cleanup failed', { message: ledgerDeleteResult.error.message, sessionId });
+      return respond(context, 500, { message: 'failed_to_delete_session' });
     }
 
     return respond(context, 200, { deleted: true, permanent: false });

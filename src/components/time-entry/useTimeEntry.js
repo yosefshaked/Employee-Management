@@ -32,6 +32,51 @@ import { selectLeaveDayValue, selectLeaveRemaining } from '../../selectors.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
+const generateLocalId = () => {
+  try {
+    const globalCrypto = typeof globalThis !== 'undefined' ? globalThis.crypto : undefined;
+    if (globalCrypto && typeof globalCrypto.randomUUID === 'function') {
+      return globalCrypto.randomUUID();
+    }
+  } catch {
+    // ignore and fall back to manual generation
+  }
+  return `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const parseMetadataCandidate = (value) => {
+  if (!value) {
+    return null;
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return { ...value };
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return { ...parsed };
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+const attachLocalIdMailbox = (payload, localId) => {
+  if (!payload || !localId) {
+    return { ...payload };
+  }
+  const metadataBase = parseMetadataCandidate(payload.metadata) || {};
+  const metadata = { ...metadataBase, _localId: localId };
+  return {
+    ...payload,
+    metadata,
+    _localId: localId,
+  };
+};
+
 export function useTimeEntry({
   employees,
   services,
@@ -230,11 +275,9 @@ export function useTimeEntry({
         payload.hours = 0;
         leaveOccupied.add(key);
         if (canWriteMetadata) {
-          const leaveKind = getLeaveKindFromEntryType(entryType) || 'system_paid';
           const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
           const metadata = buildLeaveMetadata({
             source: 'multi_date',
-            halfDay: leaveKind === 'half_day',
             method: payContext.method,
             lookbackMonths: payContext.lookback_months,
             legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
@@ -256,7 +299,6 @@ export function useTimeEntry({
           const metadata = buildLeaveMetadata({
             source: 'multi_date',
             subtype,
-            halfDay: false,
           });
           if (metadata) {
             payload.metadata = metadata;
@@ -268,7 +310,8 @@ export function useTimeEntry({
           payload.metadata = metadata;
         }
       }
-      inserts.push(payload);
+      const payloadWithMailbox = attachLocalIdMailbox(payload, generateLocalId());
+      inserts.push(payloadWithMailbox);
     }
     if (!inserts.length) {
       if (leaveConflicts.length > 0) {
@@ -475,7 +518,8 @@ export function useTimeEntry({
       if (segment.id) {
         toUpdate.push({ id: segment.id, updates: payloadBase });
       } else {
-        toInsert.push(payloadBase);
+        const payloadForInsert = attachLocalIdMailbox(payloadBase, generateLocalId());
+        toInsert.push(payloadForInsert);
       }
     }
 
@@ -530,6 +574,7 @@ export function useTimeEntry({
       halfDaySecondLeaveType = null,
       includeHalfDaySecondHalf = false,
       halfDayRemovedWorkIds = [],
+      halfDayPrimaryLeaveType = null,
     } = input || {};
 
     if (!employee || !employee.id) {
@@ -593,6 +638,28 @@ export function useTimeEntry({
     const shouldSaveWorkHalf = resolvedSecondHalfMode === 'work';
     const shouldSaveLeaveHalf = resolvedSecondHalfMode === 'leave';
     const workSegmentsInput = Array.isArray(halfDayWorkSegments) ? halfDayWorkSegments : [];
+
+    const baseHistoricalDailyValueRaw = resolveLeaveValue(employee.id, normalizedDate);
+    const baseHistoricalDailyValue = typeof baseHistoricalDailyValueRaw === 'number'
+      && Number.isFinite(baseHistoricalDailyValueRaw)
+      && baseHistoricalDailyValueRaw > 0
+      ? baseHistoricalDailyValueRaw
+      : 0;
+
+    const normalizedPrimaryHalfKind = baseLeaveKind === 'half_day'
+      ? (getLeaveBaseKind(halfDayPrimaryLeaveType) || halfDayPrimaryLeaveType || 'employee_paid')
+      : baseLeaveKind;
+
+    const normalizedSecondLeaveInput = typeof halfDaySecondLeaveType === 'string'
+      && halfDaySecondLeaveType
+      ? halfDaySecondLeaveType
+      : 'employee_paid';
+    const normalizedSecondaryHalfKind = shouldSaveLeaveHalf
+      ? (getLeaveBaseKind(normalizedSecondLeaveInput) || normalizedSecondLeaveInput)
+      : null;
+    const secondHalfPayableCandidate = normalizedSecondaryHalfKind
+      ? isPayableLeaveKind(normalizedSecondaryHalfKind)
+      : false;
 
     const removedWorkIdsInput = Array.isArray(halfDayRemovedWorkIds)
       ? halfDayRemovedWorkIds.filter(Boolean).map(id => String(id))
@@ -707,7 +774,11 @@ export function useTimeEntry({
       throw error;
     }
 
-    const isPayable = isMixed ? mixedIsPaid : isPayableLeaveKind(baseLeaveKind);
+    const isPayable = isMixed
+      ? mixedIsPaid
+      : (baseLeaveKind === 'half_day'
+        ? isPayableLeaveKind(normalizedPrimaryHalfKind)
+        : isPayableLeaveKind(baseLeaveKind));
     const leaveFraction = baseLeaveKind === 'half_day'
       ? 0.5
       : (isMixed ? (mixedHalfDayEnabled ? 0.5 : 1) : 1);
@@ -715,7 +786,9 @@ export function useTimeEntry({
       ? leaveFraction
       : 1;
 
-    const ledgerDelta = getLeaveLedgerDelta(baseLeaveKind) || 0;
+    const ledgerDelta = baseLeaveKind === 'half_day'
+      ? getLeaveLedgerDelta(normalizedPrimaryHalfKind)
+      : (getLeaveLedgerDelta(baseLeaveKind) || 0);
 
     const summary = selectLeaveRemaining(employee.id, normalizedDate, {
       employees,
@@ -747,46 +820,32 @@ export function useTimeEntry({
     let resolvedLeaveValue = 0;
     let fallbackWasRequired = false;
 
-    if (isPayable) {
-      const { rate, reason } = getRateForDate(
-        employee.id,
-        dayReference,
-        GENERIC_RATE_SERVICE_ID,
-      );
-      resolvedRateForDate = rate || 0;
-      if (!resolvedRateForDate) {
-        const fallbackRate = parseFloat(employee?.current_rate);
-        if (Number.isFinite(fallbackRate) && fallbackRate > 0) {
-          resolvedRateForDate = fallbackRate;
+    const needsDailyValue = isPayable || secondHalfPayableCandidate || shouldSaveWorkHalf;
+
+    if (needsDailyValue) {
+      if (hasOverrideDailyValue) {
+        resolvedLeaveValue = overrideDailyValueNumber;
+      } else if (baseHistoricalDailyValue > 0) {
+        resolvedLeaveValue = baseHistoricalDailyValue;
+      } else {
+        const { rate, reason } = getRateForDate(
+          employee.id,
+          dayReference,
+          GENERIC_RATE_SERVICE_ID,
+        );
+        resolvedRateForDate = rate || 0;
+        if (!resolvedRateForDate) {
+          const fallbackRate = parseFloat(employee?.current_rate);
+          if (Number.isFinite(fallbackRate) && fallbackRate > 0) {
+            resolvedRateForDate = fallbackRate;
+          }
         }
-      }
-      if (!resolvedRateForDate && employee.employee_type === 'global') {
-        const error = new Error(reason || 'לא הוגדר תעריף עבור תאריך זה.');
-        error.code = 'TIME_ENTRY_RATE_MISSING';
-        throw error;
-      }
+        if (!resolvedRateForDate && employee.employee_type === 'global') {
+          const error = new Error(reason || 'לא הוגדר תעריף עבור תאריך זה.');
+          error.code = 'TIME_ENTRY_RATE_MISSING';
+          throw error;
+        }
 
-      const selectorValue = resolveLeaveValue(employee.id, normalizedDate);
-      const baseDailyValue = typeof selectorValue === 'number' && Number.isFinite(selectorValue)
-        ? selectorValue
-        : 0;
-      if (!hasOverrideDailyValue && !(baseDailyValue > 0)) {
-        return {
-          needsConfirmation: true,
-          fallbackValue: 0,
-          fraction: normalizedLeaveFraction,
-          payable: true,
-        };
-      }
-      if (baseDailyValue > 0) {
-        resolvedLeaveValue = baseDailyValue;
-      }
-
-      const hasComputedValue = typeof resolvedLeaveValue === 'number'
-        && Number.isFinite(resolvedLeaveValue)
-        && resolvedLeaveValue > 0;
-
-      if (!hasComputedValue) {
         if (employee.employee_type === 'global') {
           try {
             resolvedLeaveValue = calculateGlobalDailyRate(employee, dayReference, resolvedRateForDate);
@@ -799,17 +858,24 @@ export function useTimeEntry({
           resolvedLeaveValue = resolvedRateForDate;
           fallbackWasRequired = true;
         }
-      }
 
-      if (hasOverrideDailyValue) {
-        resolvedLeaveValue = overrideDailyValueNumber;
+        if (!(resolvedLeaveValue > 0)) {
+          return {
+            needsConfirmation: true,
+            fallbackValue: 0,
+            fraction: normalizedLeaveFraction,
+            payable: true,
+          };
+        }
       }
     }
 
-    const fullDayValue = resolvedLeaveValue > 0 ? resolvedLeaveValue : 0;
-    const fallbackDailyValue = Number.isFinite(fullDayValue) && fullDayValue > 0 ? fullDayValue : 0;
+    const effectiveFullDayValue = resolvedLeaveValue > 0 ? resolvedLeaveValue : baseHistoricalDailyValue;
+    const fallbackDailyValue = Number.isFinite(effectiveFullDayValue) && effectiveFullDayValue > 0
+      ? effectiveFullDayValue
+      : 0;
 
-    if (isPayable && fallbackWasRequired && !hasOverrideDailyValue) {
+    if (fallbackWasRequired && !hasOverrideDailyValue) {
       if (!(fallbackDailyValue > 0)) {
         const error = new Error('לא ניתן לחשב שווי יום חופשה תקין.');
         error.code = 'TIME_ENTRY_LEAVE_FALLBACK_INVALID';
@@ -830,7 +896,7 @@ export function useTimeEntry({
       employee_id: employee.id,
       date: normalizedDate,
       notes: paidLeaveNotes ? paidLeaveNotes : null,
-      rate_used: isPayable && fullDayValue > 0 ? fullDayValue : null,
+      rate_used: isPayable && effectiveFullDayValue > 0 ? effectiveFullDayValue : null,
       total_payment: totalPaymentValue,
       entry_type: entryType,
       hours: 0,
@@ -850,15 +916,17 @@ export function useTimeEntry({
       const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
       const metadata = buildLeaveMetadata({
         source,
-        halfDay: baseLeaveKind === 'half_day' || mixedHalfDayEnabled,
         mixedPaid: isMixed ? mixedIsPaid : null,
         subtype: isMixed ? resolvedMixedSubtype : leaveSubtype,
         method: payContext.method,
         lookbackMonths: payContext.lookback_months,
         legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
         overrideApplied: payContext.override_applied,
-        extra: baseLeaveKind === 'half_day' && resolvedSecondHalfMode
-          ? { half_day_second_half: resolvedSecondHalfMode }
+        extra: baseLeaveKind === 'half_day'
+          ? {
+            half_day_second_half: resolvedSecondHalfMode || undefined,
+            half_day_primary_kind: normalizedPrimaryHalfKind,
+          }
           : undefined,
       });
       if (metadata) {
@@ -869,8 +937,31 @@ export function useTimeEntry({
 
     const workInserts = [];
     const workUpdates = [];
-    const inserts = [];
-    const updates = [];
+    const leaveSessionInserts = [];
+    const leaveSessionUpdates = [];
+    const ledgerEntries = [];
+
+    const addLedgerEntry = ({ key, balance, leaveTypeValue, workSessionId = null, localId = null }) => {
+      const normalizedBalance = typeof balance === 'number' && Number.isFinite(balance)
+        ? balance
+        : (Number(balance) || 0);
+      ledgerEntries.push({
+        key: key || null,
+        localId: localId || null,
+        payload: {
+          employee_id: employee.id,
+          effective_date: normalizedDate,
+          balance: normalizedBalance,
+          leave_type: `${TIME_ENTRY_LEAVE_PREFIX}_${leaveTypeValue}`,
+          notes: paidLeaveNotes ? paidLeaveNotes : null,
+          work_session_id: workSessionId,
+        },
+      });
+    };
+
+    const primaryLedgerType = baseLeaveKind === 'half_day'
+      ? (normalizedPrimaryHalfKind === 'system_paid' ? 'system_paid' : 'half_day')
+      : leaveType;
 
     if (shouldSaveWorkHalf) {
       if (!workSegmentsInput.length) {
@@ -997,6 +1088,93 @@ export function useTimeEntry({
       }
     }
 
+    const workPortionFraction = shouldSaveWorkHalf ? Math.max(0, 1 - normalizedLeaveFraction) : 0;
+    const effectiveDailyValueForWork = hasOverrideDailyValue
+      ? overrideDailyValueNumber
+      : (fallbackWasRequired ? fallbackDailyValue : 0);
+
+    if (
+      employee.employee_type === 'global'
+      && shouldSaveWorkHalf
+      && workPortionFraction > 0
+      && effectiveDailyValueForWork > 0
+    ) {
+      const fallbackWorkTotal = effectiveDailyValueForWork * workPortionFraction;
+      const workTargets = [];
+      workInserts.forEach(payload => {
+        if (payload) workTargets.push({ payload });
+      });
+      workUpdates.forEach(item => {
+        if (item && item.updates) {
+          workTargets.push({ payload: item.updates });
+        }
+      });
+
+      if (workTargets.length > 0) {
+        const globalDailyRate = employee.employee_type === 'global' && fallbackDailyValue > 0
+          ? fallbackDailyValue
+          : null;
+        const weights = workTargets.map(({ payload }) => {
+          if (!payload) return 0;
+          if (payload.entry_type === 'hours') {
+            const hoursValue = Number(payload.hours);
+            return Number.isFinite(hoursValue) && hoursValue > 0 ? hoursValue : 0;
+          }
+          if (payload.entry_type === 'session') {
+            const sessionsValue = Number(payload.sessions_count);
+            return Number.isFinite(sessionsValue) && sessionsValue > 0 ? sessionsValue : 1;
+          }
+          return 1;
+        });
+
+        let totalWeight = weights.reduce((sum, weight) => sum + (Number.isFinite(weight) && weight > 0 ? weight : 0), 0);
+        if (!(totalWeight > 0)) {
+          totalWeight = workTargets.length;
+          for (let index = 0; index < weights.length; index += 1) {
+            weights[index] = 1;
+          }
+        }
+
+        let remaining = fallbackWorkTotal;
+        workTargets.forEach(({ payload }, index) => {
+          if (!payload) return;
+          const weight = weights[index] || 0;
+          const ratio = totalWeight > 0 ? weight / totalWeight : 0;
+          let value = ratio > 0
+            ? fallbackWorkTotal * ratio
+            : (fallbackWorkTotal / workTargets.length);
+          if (!Number.isFinite(value) || value < 0) {
+            value = 0;
+          }
+          if (index === workTargets.length - 1) {
+            value = remaining;
+          } else {
+            if (value > remaining) {
+              value = remaining;
+            }
+            remaining -= value;
+          }
+          payload.total_payment = value;
+
+          if (globalDailyRate) {
+            payload.rate_used = globalDailyRate;
+          } else if (payload.entry_type === 'hours') {
+            const hoursValue = Number(payload.hours);
+            if (Number.isFinite(hoursValue) && hoursValue > 0) {
+              payload.rate_used = value / hoursValue;
+            }
+          } else if (payload.entry_type === 'session') {
+            const sessionsValue = Number(payload.sessions_count);
+            if (Number.isFinite(sessionsValue) && sessionsValue > 0) {
+              payload.rate_used = value / sessionsValue;
+            }
+          } else if (!Number.isFinite(payload.rate_used) || payload.rate_used === null) {
+            payload.rate_used = value;
+          }
+        });
+      }
+    }
+
     let secondLeaveRow = null;
     let normalizedSecondLeaveType = halfDaySecondLeaveType;
     if (shouldSaveLeaveHalf) {
@@ -1018,7 +1196,7 @@ export function useTimeEntry({
         employee_id: employee.id,
         date: normalizedDate,
         notes: paidLeaveNotes ? paidLeaveNotes : null,
-        rate_used: secondLeavePayable && fullDayValue > 0 ? fullDayValue : null,
+        rate_used: secondLeavePayable && effectiveFullDayValue > 0 ? effectiveFullDayValue : null,
         total_payment: secondTotalPayment,
         entry_type: secondEntryType,
         service_id: null,
@@ -1054,7 +1232,6 @@ export function useTimeEntry({
           leaveKind: secondLeaveKind,
           payable: secondLeavePayable,
           fraction: secondFraction,
-          halfDay: true,
           method: payContext.method,
           lookbackMonths: payContext.lookback_months,
           legalAllow12mIfBetter: payContext.legal_allow_12m_if_better,
@@ -1094,35 +1271,155 @@ export function useTimeEntry({
       }
     }
 
-    workInserts.forEach(payload => inserts.push(payload));
-    workUpdates.forEach(item => updates.push(item));
-
     if (paidLeaveId) {
-      updates.push({ id: paidLeaveId, updates: { ...leaveRow } });
+      leaveSessionUpdates.push({ id: paidLeaveId, updates: { ...leaveRow } });
+      addLedgerEntry({
+        key: 'primary',
+        balance: ledgerDelta,
+        leaveTypeValue: primaryLedgerType,
+        workSessionId: paidLeaveId,
+      });
     } else {
-      inserts.push({ ...leaveRow });
-    }
-
-    if (secondLeaveRow) {
-      if (secondLeaveRow.id) {
-        const { id, ...rest } = secondLeaveRow;
-        updates.push({ id, updates: rest });
-      } else {
-        inserts.push({ ...secondLeaveRow });
-      }
-    }
-
-    if (inserts.length) {
-      await createWorkSessions({
-        session,
-        orgId,
-        sessions: inserts,
+      leaveSessionInserts.push({ key: 'primary', payload: { ...leaveRow } });
+      addLedgerEntry({
+        key: 'primary',
+        balance: ledgerDelta,
+        leaveTypeValue: primaryLedgerType,
       });
     }
 
-    if (updates.length) {
+    if (secondLeaveRow) {
+      const { id: secondId, ...secondRest } = secondLeaveRow;
+      const secondKey = 'secondary';
+      if (secondId) {
+        leaveSessionUpdates.push({ id: secondId, updates: secondRest });
+        addLedgerEntry({
+          key: secondKey,
+          balance: secondLedgerDelta,
+          leaveTypeValue: normalizedSecondLeaveType || leaveType,
+          workSessionId: secondId,
+        });
+      } else {
+        leaveSessionInserts.push({ key: secondKey, payload: { ...secondLeaveRow } });
+        addLedgerEntry({
+          key: secondKey,
+          balance: secondLedgerDelta,
+          leaveTypeValue: normalizedSecondLeaveType || leaveType,
+        });
+      }
+    }
+
+    const totalPlannedInserts = leaveSessionInserts.length + workInserts.length;
+    const totalPlannedUpdates = leaveSessionUpdates.length + workUpdates.length;
+
+    if (totalPlannedInserts === 0 && totalPlannedUpdates === 0 && !workRemovalSet.size && !secondaryLeaveRemovalSet.size && !ledgerDeleteIds.length) {
+      throw new Error('אין שינויים לשמירה.');
+    }
+
+    const insertedSessions = [];
+    const pendingSessionInserts = [];
+
+    const ledgerEntryByKey = new Map();
+    ledgerEntries.forEach(entry => {
+      if (!entry) return;
+      const entryKey = entry.key || null;
+      if (!ledgerEntryByKey.has(entryKey)) {
+        ledgerEntryByKey.set(entryKey, entry);
+      }
+    });
+
+    if (leaveSessionInserts.length) {
+      leaveSessionInserts.forEach(item => {
+        if (!item || !item.payload) return;
+        const localId = generateLocalId();
+        const payloadWithId = attachLocalIdMailbox(item.payload, localId);
+        pendingSessionInserts.push({
+          type: 'leave',
+          key: item.key || null,
+          payload: payloadWithId,
+          localId,
+        });
+        const ledgerEntry = ledgerEntryByKey.get(item.key || null);
+        if (ledgerEntry) {
+          ledgerEntry.localId = localId;
+        }
+      });
+    }
+
+    if (workInserts.length) {
+      workInserts.forEach(payload => {
+        if (!payload) return;
+        const localId = generateLocalId();
+        const payloadWithId = attachLocalIdMailbox(payload, localId);
+        pendingSessionInserts.push({
+          type: 'work',
+          key: null,
+          payload: payloadWithId,
+          localId,
+        });
+      });
+    }
+
+    if (pendingSessionInserts.length) {
+      const insertResponse = await createWorkSessions({
+        session,
+        orgId,
+        sessions: pendingSessionInserts.map(item => item.payload),
+      });
+      const createdSessions = Array.isArray(insertResponse?.created) ? insertResponse.created : [];
+      if (createdSessions.length !== pendingSessionInserts.length) {
+        const error = new Error(
+          leaveSessionInserts.length > 0
+            ? 'שמירת רישום החופשה נכשלה.'
+            : 'שמירת רישומי העבודה נכשלה.',
+        );
+        throw error;
+      }
+      const createdSessionMap = new Map();
+      createdSessions.forEach((createdSession) => {
+        insertedSessions.push(createdSession);
+        if (createdSession && typeof createdSession._localId === 'string' && createdSession._localId) {
+          createdSessionMap.set(createdSession._localId, createdSession);
+        }
+      });
+
+      const ledgerEntryByLocalId = new Map();
+      ledgerEntries.forEach(entry => {
+        if (entry?.localId) {
+          ledgerEntryByLocalId.set(entry.localId, entry);
+        }
+      });
+
+      for (const descriptor of pendingSessionInserts) {
+        const { localId, type, key } = descriptor;
+        const mappedSession = localId ? createdSessionMap.get(localId) : null;
+        if (!mappedSession) {
+          const error = new Error(
+            leaveSessionInserts.length > 0
+              ? 'שמירת רישום החופשה נכשלה.'
+              : 'שמירת רישומי העבודה נכשלה.',
+          );
+          throw error;
+        }
+        if (type === 'leave') {
+          const ledgerEntry = ledgerEntryByLocalId.get(localId) || ledgerEntryByKey.get(key || null);
+          if (ledgerEntry) {
+            ledgerEntry.payload.work_session_id = mappedSession.id || null;
+            if (mappedSession.employee_id) {
+              ledgerEntry.payload.employee_id = mappedSession.employee_id;
+            }
+            if (mappedSession.date) {
+              ledgerEntry.payload.effective_date = mappedSession.date;
+            }
+          }
+        }
+      }
+    }
+
+    const sessionUpdates = [...leaveSessionUpdates, ...workUpdates];
+    if (sessionUpdates.length) {
       await Promise.all(
-        updates.map(({ id, updates: payload }) => updateWorkSession({
+        sessionUpdates.map(({ id, updates: payload }) => updateWorkSession({
           session,
           orgId,
           sessionId: id,
@@ -1157,40 +1454,27 @@ export function useTimeEntry({
       });
     }
 
-    const ledgerInsertPayloads = [];
-    if (ledgerDelta !== 0) {
-      ledgerInsertPayloads.push({
-        employee_id: employee.id,
-        effective_date: normalizedDate,
-        balance: ledgerDelta,
-        leave_type: `${TIME_ENTRY_LEAVE_PREFIX}_${leaveType}`,
-        notes: paidLeaveNotes ? paidLeaveNotes : null,
-      });
+    const ledgerInsertPayloads = ledgerEntries
+      .map(entry => entry?.payload)
+      .filter(payload => payload && payload.leave_type);
+
+    if (ledgerInsertPayloads.some(payload => !payload.work_session_id)) {
+      throw new Error('שגיאה בקישור רישום החופשה ליתרה.');
     }
-    if (secondLedgerDelta !== 0 && normalizedSecondLeaveType) {
-      ledgerInsertPayloads.push({
-        employee_id: employee.id,
-        effective_date: normalizedDate,
-        balance: secondLedgerDelta,
-        leave_type: `${TIME_ENTRY_LEAVE_PREFIX}_${normalizedSecondLeaveType}`,
-        notes: paidLeaveNotes ? paidLeaveNotes : null,
-      });
-    }
+
     if (ledgerInsertPayloads.length) {
-      for (const payload of ledgerInsertPayloads) {
-        await createLeaveBalanceEntry({
-          session,
-          orgId,
-          body: payload,
-        });
-      }
+      await createLeaveBalanceEntry({
+        session,
+        orgId,
+        entries: ledgerInsertPayloads,
+      });
     }
 
     const usedFallbackRate = isPayable && fallbackWasRequired && !hasOverrideDailyValue;
 
     return {
-      inserted: inserts,
-      updated: updates,
+      inserted: insertedSessions,
+      updated: sessionUpdates,
       ledgerDeletedIds: ledgerDeleteIds,
       ledgerInserted: ledgerInsertPayloads,
       usedFallbackRate,
@@ -1325,7 +1609,6 @@ export function useTimeEntry({
         const metadata = buildLeaveMetadata({
           source: 'multi_date_leave',
           subtype: bulkMode ? mixedSubtype : getLeaveSubtypeFromValue(resolvedKind),
-          halfDay,
           mixedPaid: bulkMode ? Boolean(isPaid) : null,
           method: payContext.method,
           lookbackMonths: payContext.lookback_months,
@@ -1428,7 +1711,8 @@ export function useTimeEntry({
       if (item?.id) {
         updates.push({ id: item.id, updates: basePayload });
       } else {
-        newEntries.push(basePayload);
+        const payloadWithMailbox = attachLocalIdMailbox(basePayload, generateLocalId());
+        newEntries.push(payloadWithMailbox);
       }
     }
 
