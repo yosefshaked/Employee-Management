@@ -44,6 +44,39 @@ const generateLocalId = () => {
   return `local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 };
 
+const parseMetadataCandidate = (value) => {
+  if (!value) {
+    return null;
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return { ...value };
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return { ...parsed };
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+const attachLocalIdMailbox = (payload, localId) => {
+  if (!payload || !localId) {
+    return { ...payload };
+  }
+  const metadataBase = parseMetadataCandidate(payload.metadata) || {};
+  const metadata = { ...metadataBase, _localId: localId };
+  return {
+    ...payload,
+    metadata,
+    _localId: localId,
+  };
+};
+
 export function useTimeEntry({
   employees,
   services,
@@ -277,7 +310,8 @@ export function useTimeEntry({
           payload.metadata = metadata;
         }
       }
-      inserts.push(payload);
+      const payloadWithMailbox = attachLocalIdMailbox(payload, generateLocalId());
+      inserts.push(payloadWithMailbox);
     }
     if (!inserts.length) {
       if (leaveConflicts.length > 0) {
@@ -484,8 +518,8 @@ export function useTimeEntry({
       if (segment.id) {
         toUpdate.push({ id: segment.id, updates: payloadBase });
       } else {
-        payloadBase._localId = generateLocalId();
-        toInsert.push(payloadBase);
+        const payloadForInsert = attachLocalIdMailbox(payloadBase, generateLocalId());
+        toInsert.push(payloadForInsert);
       }
     }
 
@@ -1298,7 +1332,7 @@ export function useTimeEntry({
       leaveSessionInserts.forEach(item => {
         if (!item || !item.payload) return;
         const localId = generateLocalId();
-        const payloadWithId = { ...item.payload, _localId: localId };
+        const payloadWithId = attachLocalIdMailbox(item.payload, localId);
         pendingSessionInserts.push({
           type: 'leave',
           key: item.key || null,
@@ -1316,7 +1350,7 @@ export function useTimeEntry({
       workInserts.forEach(payload => {
         if (!payload) return;
         const localId = generateLocalId();
-        const payloadWithId = { ...payload, _localId: localId };
+        const payloadWithId = attachLocalIdMailbox(payload, localId);
         pendingSessionInserts.push({
           type: 'work',
           key: null,
@@ -1677,7 +1711,8 @@ export function useTimeEntry({
       if (item?.id) {
         updates.push({ id: item.id, updates: basePayload });
       } else {
-        newEntries.push(basePayload);
+        const payloadWithMailbox = attachLocalIdMailbox(basePayload, generateLocalId());
+        newEntries.push(payloadWithMailbox);
       }
     }
 

@@ -258,6 +258,56 @@ function normalizeSessionPayload(raw) {
   return payload;
 }
 
+function parseMetadataObject(value) {
+  if (!value) {
+    return null;
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return { ...value };
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return { ...parsed };
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function extractLocalIdFromMetadata(metadata) {
+  const parsed = parseMetadataObject(metadata);
+  if (!parsed) {
+    return null;
+  }
+  const candidate = parsed._localId;
+  return typeof candidate === 'string' && candidate ? candidate : null;
+}
+
+function sanitizeMetadataMailbox(metadata) {
+  const parsed = parseMetadataObject(metadata);
+  if (!parsed) {
+    return { metadata: null, changed: false };
+  }
+  if (!Object.prototype.hasOwnProperty.call(parsed, '_localId')) {
+    return { metadata: parsed, changed: false };
+  }
+  const { _localId, ...rest } = parsed;
+  const cleaned = {};
+  Object.keys(rest).forEach((key) => {
+    if (typeof rest[key] !== 'undefined') {
+      cleaned[key] = rest[key];
+    }
+  });
+  if (Object.keys(cleaned).length === 0) {
+    return { metadata: null, changed: true };
+  }
+  return { metadata: cleaned, changed: true };
+}
+
 function normalizeSessionUpdates(raw) {
   if (!raw || typeof raw !== 'object') {
     return null;
@@ -270,31 +320,6 @@ function normalizeSessionUpdates(raw) {
     delete updates.org_id;
   }
   return Object.keys(updates).length > 0 ? updates : null;
-}
-
-function stableStringify(value) {
-  if (typeof value === 'undefined') {
-    return 'undefined';
-  }
-  if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(item => stableStringify(item)).join(',')}]`;
-  }
-  const keys = Object.keys(value).sort();
-  const entries = keys.map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`);
-  return `{${entries.join(',')}}`;
-}
-
-function buildSessionSignature(source, keys) {
-  if (!source || typeof source !== 'object') {
-    return '';
-  }
-  const keyList = Array.isArray(keys) && keys.length ? [...keys] : Object.keys(source);
-  keyList.sort();
-  const parts = keyList.map(key => `${key}:${stableStringify(source[key])}`);
-  return parts.join('|');
 }
 
 function resolveSessionId(context, body) {
@@ -490,6 +515,7 @@ export default async function (context, req) {
     }
 
     const preparedSessions = [];
+    let missingMailbox = false;
 
     sessions.forEach((entry) => {
       const payload = normalizeSessionPayload(entry);
@@ -497,18 +523,32 @@ export default async function (context, req) {
         return;
       }
       const rawLocalId = entry && typeof entry === 'object' ? entry._localId : null;
-      const localId = typeof rawLocalId === 'string' && rawLocalId ? rawLocalId : null;
-      const keys = Object.keys(payload).sort();
-      const signature = buildSessionSignature(payload, keys);
+      const fallbackLocalId = typeof rawLocalId === 'string' && rawLocalId ? rawLocalId : null;
+      const parsedMetadata = parseMetadataObject(payload.metadata);
+      const metadataObject = parsedMetadata ? { ...parsedMetadata } : {};
+      if (parsedMetadata) {
+        payload.metadata = metadataObject;
+      }
+      let mailboxId = typeof metadataObject._localId === 'string' && metadataObject._localId ? metadataObject._localId : null;
+
+      if (!mailboxId && fallbackLocalId) {
+        metadataObject._localId = fallbackLocalId;
+        payload.metadata = metadataObject;
+        mailboxId = fallbackLocalId;
+      }
+
+      if (!mailboxId) {
+        missingMailbox = true;
+        return;
+      }
+
       preparedSessions.push({
         payload,
-        localId,
-        keys,
-        signature,
+        localId: mailboxId,
       });
     });
 
-    if (!preparedSessions.length) {
+    if (!preparedSessions.length || missingMailbox) {
       return respond(context, 400, { message: 'invalid sessions payload' });
     }
 
@@ -526,47 +566,50 @@ export default async function (context, req) {
 
     const createdRows = Array.isArray(data) ? data : [];
 
-    const signatureQueues = new Map();
-    preparedSessions.forEach((item) => {
-      const queue = signatureQueues.get(item.signature);
-      if (queue) {
-        queue.push(item);
-      } else {
-        signatureQueues.set(item.signature, [item]);
-      }
-    });
+    const cleanupNullIds = [];
+    const cleanupObjectTargets = [];
 
     const createdWithLocalIds = createdRows.map((row) => {
-      let attachedLocalId = null;
-      for (const [signature, queue] of signatureQueues) {
-        if (!queue.length) {
-          continue;
+      const mailboxId = extractLocalIdFromMetadata(row?.metadata);
+      const { metadata: sanitizedMetadata, changed } = sanitizeMetadataMailbox(row.metadata);
+      if (row && row.id && changed) {
+        if (!sanitizedMetadata || (typeof sanitizedMetadata === 'object' && Object.keys(sanitizedMetadata).length === 0)) {
+          cleanupNullIds.push(row.id);
+        } else {
+          cleanupObjectTargets.push({ id: row.id, metadata: sanitizedMetadata });
         }
-        const keys = queue[0].keys;
-        const rowSignature = buildSessionSignature(row, keys);
-        if (rowSignature === signature) {
-          const match = queue.shift();
-          attachedLocalId = match.localId || null;
-          if (!queue.length) {
-            signatureQueues.delete(signature);
-          }
+      }
+      const baseRow = changed ? { ...row, metadata: sanitizedMetadata } : { ...row };
+      return mailboxId ? { ...baseRow, _localId: mailboxId } : baseRow;
+    });
+
+    let cleanupError = null;
+
+    if (cleanupNullIds.length) {
+      const { error: nullCleanupError } = await tenantClient
+        .from('WorkSessions')
+        .update({ metadata: null })
+        .in('id', cleanupNullIds);
+      if (nullCleanupError) {
+        cleanupError = nullCleanupError;
+      }
+    }
+
+    if (!cleanupError && cleanupObjectTargets.length) {
+      for (const target of cleanupObjectTargets) {
+        const { error: objectCleanupError } = await tenantClient
+          .from('WorkSessions')
+          .update({ metadata: target.metadata })
+          .eq('id', target.id);
+        if (objectCleanupError) {
+          cleanupError = objectCleanupError;
           break;
         }
       }
-      return attachedLocalId ? { ...row, _localId: attachedLocalId } : { ...row };
-    });
+    }
 
-    const unmatchedWithLocalIds = [];
-    signatureQueues.forEach((queue) => {
-      queue.forEach((item) => {
-        if (item.localId) {
-          unmatchedWithLocalIds.push(item.localId);
-        }
-      });
-    });
-
-    if (unmatchedWithLocalIds.length) {
-      context.log?.error?.('work-sessions insert mapping failed', { unmatchedLocalIds: unmatchedWithLocalIds });
+    if (cleanupError) {
+      context.log?.error?.('work-sessions metadata cleanup failed', { message: cleanupError.message });
       const createdIds = createdRows.map(row => row?.id).filter(Boolean);
       if (createdIds.length) {
         const { error: rollbackError } = await tenantClient
