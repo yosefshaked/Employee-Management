@@ -1059,7 +1059,12 @@ export function useTimeEntry({
       ? overrideDailyValueNumber
       : (fallbackWasRequired ? fallbackDailyValue : 0);
 
-    if (shouldSaveWorkHalf && workPortionFraction > 0 && effectiveDailyValueForWork > 0) {
+    if (
+      employee.employee_type === 'global'
+      && shouldSaveWorkHalf
+      && workPortionFraction > 0
+      && effectiveDailyValueForWork > 0
+    ) {
       const fallbackWorkTotal = effectiveDailyValueForWork * workPortionFraction;
       const workTargets = [];
       workInserts.forEach(payload => {
