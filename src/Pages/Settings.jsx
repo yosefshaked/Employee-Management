@@ -13,6 +13,7 @@ import { Plus, Save, Trash2, PlugZap, Sparkles } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import SetupAssistant from '@/components/settings/SetupAssistant.jsx';
 import OrgMembersCard from '@/components/settings/OrgMembersCard.jsx';
+import EmploymentScopeSettings from '@/components/settings/EmploymentScopeSettings.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import {
@@ -508,6 +509,12 @@ export default function Settings() {
             </div>
           </CardContent>
         </Card>
+
+        <EmploymentScopeSettings
+          session={session}
+          orgId={activeOrgId}
+          activeOrgHasConnection={activeOrgHasConnection}
+        />
 
         <Card className="border-0 shadow-lg bg-white/80">
           <CardHeader className="border-b">
