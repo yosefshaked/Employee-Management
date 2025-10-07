@@ -13,14 +13,13 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { createEmployee, updateEmployee as updateEmployeeRequest } from '@/api/employees.js';
 import { fetchEmploymentScopePolicySettings } from '@/lib/settings-client.js';
+import {
+  EMPLOYMENT_SCOPE_OPTIONS,
+  EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES,
+  normalizeEmploymentScopePolicy,
+} from '@/constants/employment-scope.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
-const EMPLOYMENT_SCOPE_OPTIONS = [
-  'משרה מלאה',
-  'חצי משרה',
-  '75% משרה',
-  '25% משרה',
-];
 
 export default function EmployeeForm({ employee, onSuccess, onCancel, services: servicesProp = [], rateHistories: rateHistoriesProp = [] }) {
   const [formData, setFormData] = useState({
@@ -66,7 +65,7 @@ export default function EmployeeForm({ employee, onSuccess, onCancel, services: 
   const [isLoading, setIsLoading] = useState(false);
   const { authClient, user, loading, session } = useSupabase();
   const { activeOrgId } = useOrg();
-  const [employmentScopeEnabledTypes, setEmploymentScopeEnabledTypes] = useState(['global']);
+  const [employmentScopeEnabledTypes, setEmploymentScopeEnabledTypes] = useState(() => [...EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES]);
   const [isEmploymentScopeLoading, setIsEmploymentScopeLoading] = useState(false);
   const [employmentScopePolicyError, setEmploymentScopePolicyError] = useState('');
   const [employmentScopeFieldError, setEmploymentScopeFieldError] = useState('');
@@ -122,7 +121,7 @@ useEffect(() => {
 
 useEffect(() => {
   if (!session || !activeOrgId) {
-    setEmploymentScopeEnabledTypes(['global']);
+    setEmploymentScopeEnabledTypes([...EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES]);
     setEmploymentScopePolicyError('');
     return;
   }
@@ -143,21 +142,15 @@ useEffect(() => {
         return;
       }
 
-      const rawEnabled = Array.isArray(response?.value?.enabled_types)
-        ? response.value.enabled_types
-        : null;
-      const normalized = (rawEnabled || ['global'])
-        .map((type) => (typeof type === 'string' ? type.trim().toLowerCase() : ''))
-        .filter(Boolean);
-      const nextEnabled = Array.from(new Set([...normalized, 'global']));
-      setEmploymentScopeEnabledTypes(nextEnabled);
+      const normalized = normalizeEmploymentScopePolicy(response?.value);
+      setEmploymentScopeEnabledTypes(normalized.enabledTypes);
     } catch (error) {
       if (abortController.signal.aborted) {
         return;
       }
       console.error('Failed to fetch employment scope policy', error);
       setEmploymentScopePolicyError('טעינת הגדרת היקף המשרה נכשלה. נעשה שימוש בערך ברירת המחדל.');
-      setEmploymentScopeEnabledTypes(['global']);
+      setEmploymentScopeEnabledTypes([...EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES]);
     } finally {
       if (isMounted) {
         setIsEmploymentScopeLoading(false);
@@ -464,9 +457,9 @@ useEffect(() => {
                     <SelectItem value="placeholder" disabled>
                       בחר היקף משרה...
                     </SelectItem>
-                    {EMPLOYMENT_SCOPE_OPTIONS.map((option) => (
-                      <SelectItem key={option} value={option}>
-                        {option}
+                    {EMPLOYMENT_SCOPE_OPTIONS.map(({ value, label }) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
                       </SelectItem>
                     ))}
                   </SelectContent>

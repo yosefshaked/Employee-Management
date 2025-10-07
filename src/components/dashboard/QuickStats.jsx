@@ -15,16 +15,22 @@ import {
   selectGlobalHours,
   selectLeaveDayValue,
 } from '@/selectors.js';
+import { sanitizeEmploymentScopeFilter } from '@/constants/employment-scope.js';
 
 export default function QuickStats({ employees = [], workSessions = [], services = [], currentDate, filters = {}, leavePayPolicy, isLoading }) {
   const start = startOfMonth(currentDate);
   const end = endOfMonth(currentDate);
+  const normalizedEmploymentScopes = React.useMemo(
+    () => sanitizeEmploymentScopeFilter(filters.employmentScopes),
+    [filters.employmentScopes],
+  );
   const baseFilters = {
     dateFrom: format(start, 'yyyy-MM-dd'),
     dateTo: format(end, 'yyyy-MM-dd'),
     employeeType: filters.employeeType || 'all',
     selectedEmployee: filters.selectedEmployee || null,
-    serviceId: filters.serviceId || 'all'
+    serviceId: filters.serviceId || 'all',
+    employmentScopes: normalizedEmploymentScopes,
   };
 
   const totals = computePeriodTotals({
@@ -36,6 +42,7 @@ export default function QuickStats({ employees = [], workSessions = [], services
     serviceFilter: baseFilters.serviceId,
     employeeFilter: baseFilters.selectedEmployee || '',
     employeeTypeFilter: baseFilters.employeeType,
+    employmentScopeFilter: normalizedEmploymentScopes,
     leavePayPolicy,
     leaveDayValueSelector: selectLeaveDayValue,
   });

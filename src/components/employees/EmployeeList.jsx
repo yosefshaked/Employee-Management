@@ -11,6 +11,10 @@ import { ChevronsUpDown, ChevronDown } from "lucide-react";
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { fetchEmploymentScopePolicySettings } from '@/lib/settings-client.js';
+import {
+  EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES,
+  normalizeEmploymentScopePolicy,
+} from '@/constants/employment-scope.js';
 
 const EMPLOYEE_TYPES = {
   hourly: 'עובד שעתי',
@@ -22,7 +26,7 @@ const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
 export default function EmployeeList({ employees, rateHistories, services, onEdit, onToggleActive, isLoading }) {
   const [openRows, setOpenRows] = useState({});
-  const [employmentScopeEnabledTypes, setEmploymentScopeEnabledTypes] = useState(['global']);
+  const [employmentScopeEnabledTypes, setEmploymentScopeEnabledTypes] = useState(() => [...EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES]);
   const [isEmploymentScopePolicyLoading, setIsEmploymentScopePolicyLoading] = useState(false);
   const [employmentScopePolicyError, setEmploymentScopePolicyError] = useState('');
   const { session } = useSupabase();
@@ -46,7 +50,7 @@ export default function EmployeeList({ employees, rateHistories, services, onEdi
 
   useEffect(() => {
     if (!session || !activeOrgId) {
-      setEmploymentScopeEnabledTypes(['global']);
+      setEmploymentScopeEnabledTypes([...EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES]);
       setEmploymentScopePolicyError('');
       return;
     }
@@ -67,21 +71,15 @@ export default function EmployeeList({ employees, rateHistories, services, onEdi
           return;
         }
 
-        const rawEnabled = Array.isArray(response?.value?.enabled_types)
-          ? response.value.enabled_types
-          : null;
-        const normalized = (rawEnabled || ['global'])
-          .map((type) => (typeof type === 'string' ? type.trim().toLowerCase() : ''))
-          .filter(Boolean);
-        const nextEnabled = Array.from(new Set([...normalized, 'global']));
-        setEmploymentScopeEnabledTypes(nextEnabled);
+        const normalized = normalizeEmploymentScopePolicy(response?.value);
+        setEmploymentScopeEnabledTypes(normalized.enabledTypes);
       } catch (error) {
         if (abortController.signal.aborted) {
           return;
         }
         console.error('Failed to fetch employment scope policy', error);
         setEmploymentScopePolicyError('טעינת הגדרת היקף המשרה נכשלה. נעשה שימוש בערך ברירת המחדל.');
-        setEmploymentScopeEnabledTypes(['global']);
+        setEmploymentScopeEnabledTypes([...EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES]);
       } finally {
         if (isMounted) {
           setIsEmploymentScopePolicyLoading(false);

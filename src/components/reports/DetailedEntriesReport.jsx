@@ -11,7 +11,16 @@ import { isLeaveEntryType, getLeaveKindFromEntryType, HOLIDAY_TYPE_LABELS } from
 import { createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
 import { selectLeaveDayValue } from '@/selectors.js';
 
-export default function DetailedEntriesReport({ sessions, employees, services, leavePayPolicy, workSessions = [], isLoading, initialGroupBy = 'none' }) {
+export default function DetailedEntriesReport({
+  sessions,
+  employees,
+  services,
+  leavePayPolicy,
+  workSessions = [],
+  isLoading,
+  initialGroupBy = 'none',
+  showEmploymentScopeColumn = false,
+}) {
   const [groupBy, setGroupBy] = useState(initialGroupBy);
   const EMPLOYEE_TYPE_LABELS = { global: 'גלובלי', hourly: 'שעתי', instructor: 'מדריך' };
 
@@ -81,27 +90,37 @@ export default function DetailedEntriesReport({ sessions, employees, services, l
   };
 
   const renderSessionRow = (session) => {
+    const employee = getEmployee(session.employee_id);
     const payment = resolvePayment(session);
+    const employmentScopeValue = typeof employee?.employment_scope === 'string'
+      ? employee.employment_scope.trim()
+      : '';
+    const isHourlyOrGlobal = employee?.employee_type === 'hourly' || employee?.employee_type === 'global';
+    const serviceColorKey = employee?.employee_type === 'hourly' ? null : session.service_id;
+    const serviceColor = getColorForService(serviceColorKey) || '#3B82F6';
     return (
       <TableRow key={session.id} className="hover:bg-slate-50">
-        <TableCell className="font-medium">{getEmployee(session.employee_id)?.name || 'לא ידוע'}</TableCell>
+        <TableCell className="font-medium">{employee?.name || 'לא ידוע'}</TableCell>
+        {showEmploymentScopeColumn ? (
+          <TableCell>{employmentScopeValue || '—'}</TableCell>
+        ) : null}
         <TableCell>{format(parseISO(session.date), 'dd/MM/yyyy', { locale: he })}</TableCell>
         <TableCell>
           <Badge
             variant="outline"
             className="font-medium"
             style={{
-              backgroundColor: `${getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id)}20`,
-              color: getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id),
-              borderColor: getColorForService(getEmployee(session.employee_id)?.employee_type === 'hourly' ? null : session.service_id),
+              backgroundColor: `${serviceColor}20`,
+              color: serviceColor,
+              borderColor: serviceColor,
             }}
           >
             {getServiceName(session)}
           </Badge>
         </TableCell>
-          <TableCell>
-            {(getEmployee(session.employee_id)?.employee_type === 'hourly' || getEmployee(session.employee_id)?.employee_type === 'global') ? `${session.hours || 0} שעות` : `${session.sessions_count || 0} מפגשים`}
-          </TableCell>
+        <TableCell>
+          {isHourlyOrGlobal ? `${session.hours || 0} שעות` : `${session.sessions_count || 0} מפגשים`}
+        </TableCell>
         <TableCell>{session.students_count || '-'}</TableCell>
         <TableCell>₪{session.rate_used?.toFixed(2) || '0.00'}</TableCell>
         <TableCell className="font-semibold">₪{payment.toFixed(2)}</TableCell>
@@ -109,6 +128,8 @@ export default function DetailedEntriesReport({ sessions, employees, services, l
       </TableRow>
     );
   };
+
+
 
   return (
     <div className="space-y-4">
@@ -135,7 +156,19 @@ export default function DetailedEntriesReport({ sessions, employees, services, l
         <div className="overflow-x-auto border rounded-lg bg-white">
           {groupBy === 'none' ? (
             <Table>
-              <TableHeader><TableRow className="bg-slate-50 hover:bg-slate-50"><TableHead>עובד</TableHead><TableHead>תאריך</TableHead><TableHead>סוג רישום</TableHead><TableHead>כמות</TableHead><TableHead>תלמידים</TableHead><TableHead>תעריף</TableHead><TableHead>סה״כ</TableHead><TableHead>הערות</TableHead></TableRow></TableHeader>
+              <TableHeader>
+                <TableRow className="bg-slate-50 hover:bg-slate-50">
+                  <TableHead>עובד</TableHead>
+                  {showEmploymentScopeColumn ? <TableHead>היקף משרה</TableHead> : null}
+                  <TableHead>תאריך</TableHead>
+                  <TableHead>סוג רישום</TableHead>
+                  <TableHead>כמות</TableHead>
+                  <TableHead>תלמידים</TableHead>
+                  <TableHead>תעריף</TableHead>
+                  <TableHead>סה״כ</TableHead>
+                  <TableHead>הערות</TableHead>
+                </TableRow>
+              </TableHeader>
               <TableBody>{sortedSessions.map(session => renderSessionRow(session))}</TableBody>
             </Table>
           ) : (

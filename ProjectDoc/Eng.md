@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.6.6**
-**Last Updated: 2025-10-17**
+**Version: 1.6.7**
+**Last Updated: 2025-10-18**
 
 ## 1. Vision & Purpose
 
@@ -708,6 +708,7 @@ The leave module centralizes all holiday rules, quotas, and ledger actions so em
 - Centralized leave policy management via the new Settings screen, including holiday tagging and negative balance controls.
 - Employee leave balances now rely on the `LeaveBalances` ledger with annual quota proration and carry-over enforcement.
 - Payroll and reports consume the shared leave selectors so paid holidays and remaining days stay aligned across the app.
+- Reports expose an Employment Scope filter and optional column that only render when the `employment_scope_policy` enables the active employee types.
 - Date filters in reports accept manual input or calendar selection and support multiple formats.
 - Hours KPI counts time for hourly employees only; employee type filter now includes global staff.
 - Detailed entries report can group by employee type with subtotals.
