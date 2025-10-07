@@ -15,6 +15,14 @@ export const EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES = ['global'];
 const SUPPORTED_EMPLOYEE_TYPES = new Set(['global', 'hourly', 'instructor']);
 const EMPLOYMENT_SCOPE_VALUES = new Set(EMPLOYMENT_SCOPE_VALUE_STRINGS);
 
+export function getEmploymentScopeValue(source) {
+  if (!source || typeof source.employment_scope !== 'string') {
+    return '';
+  }
+  const trimmed = source.employment_scope.trim();
+  return EMPLOYMENT_SCOPE_VALUES.has(trimmed) ? trimmed : '';
+}
+
 export function normalizeEmploymentScopeEnabledTypes(source) {
   const rawList = Array.isArray(source) ? source : [];
   const normalized = rawList

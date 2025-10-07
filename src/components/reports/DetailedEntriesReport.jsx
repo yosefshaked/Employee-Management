@@ -10,6 +10,7 @@ import { getColorForService } from '@/lib/colorUtils';
 import { isLeaveEntryType, getLeaveKindFromEntryType, HOLIDAY_TYPE_LABELS } from '@/lib/leave.js';
 import { createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
 import { selectLeaveDayValue } from '@/selectors.js';
+import { getEmploymentScopeValue } from '@/constants/employment-scope.js';
 
 export default function DetailedEntriesReport({
   sessions,
@@ -92,9 +93,7 @@ export default function DetailedEntriesReport({
   const renderSessionRow = (session) => {
     const employee = getEmployee(session.employee_id);
     const payment = resolvePayment(session);
-    const employmentScopeValue = typeof employee?.employment_scope === 'string'
-      ? employee.employment_scope.trim()
-      : '';
+    const employmentScopeValue = getEmploymentScopeValue(employee);
     const isHourlyOrGlobal = employee?.employee_type === 'hourly' || employee?.employee_type === 'global';
     const serviceColorKey = employee?.employee_type === 'hourly' ? null : session.service_id;
     const serviceColor = getColorForService(serviceColorKey) || '#3B82F6';

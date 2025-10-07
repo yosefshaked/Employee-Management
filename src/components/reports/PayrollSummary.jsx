@@ -11,6 +11,7 @@ import {
   getLeaveLedgerEntryDelta,
   getLeaveLedgerEntryType,
 } from '@/lib/leave.js';
+import { getEmploymentScopeValue } from '@/constants/employment-scope.js';
 
 const EMPLOYEE_TYPES = {
   hourly: 'שעתי',
@@ -142,9 +143,7 @@ export default function PayrollSummary({
       leaveBalances,
       policy: leavePolicy,
     });
-    const employmentScope = typeof employee.employment_scope === 'string'
-      ? employee.employment_scope.trim()
-      : '';
+    const employmentScope = getEmploymentScopeValue(employee);
     return {
       id: employee.id,
       name: employee.name,

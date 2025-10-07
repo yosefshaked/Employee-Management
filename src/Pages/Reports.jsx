@@ -26,6 +26,7 @@ import {
   EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES,
   normalizeEmploymentScopePolicy,
   sanitizeEmploymentScopeFilter,
+  getEmploymentScopeValue,
 } from '@/constants/employment-scope.js';
 import { fetchEmployeesList } from '@/api/employees.js';
 import { fetchWorkSessions } from '@/api/work-sessions.js';
@@ -410,9 +411,7 @@ export default function Reports() {
       .sort((a, b) => new Date(a.date) - new Date(b.date))
       .map((session) => {
         const employee = employees.find(emp => emp.id === session.employee_id);
-        const employmentScopeValue = typeof employee?.employment_scope === 'string'
-          ? employee.employment_scope.trim()
-          : '';
+        const employmentScopeValue = getEmploymentScopeValue(employee);
         return {
           'שם העובד': employee ? employee.name : 'לא ידוע',
           'תאריך': session.date,

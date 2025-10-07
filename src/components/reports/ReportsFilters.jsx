@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -9,6 +9,7 @@ import { Calendar } from "@/components/ui/calendar";
 import { Calendar as CalendarIcon, Filter } from "lucide-react";
 import { parseDateStrict } from '@/lib/date.js';
 import { format } from 'date-fns';
+import { sanitizeEmploymentScopeFilter } from '@/constants/employment-scope.js';
 
 export default function ReportsFilters({
   filters,
@@ -26,7 +27,25 @@ export default function ReportsFilters({
     setFilters(prev => ({ ...prev, [key]: value }));
   };
 
-  const selectedEmploymentScopes = Array.isArray(employmentScopes) ? employmentScopes : [];
+  const selectedEmploymentScopes = useMemo(
+    () => sanitizeEmploymentScopeFilter(employmentScopes),
+    [employmentScopes],
+  );
+
+  const employmentScopeSummary = useMemo(() => {
+    if (selectedEmploymentScopes.length === 0) {
+      return 'כל ההגדרות';
+    }
+    const labelsByValue = new Map(
+      (employmentScopeOptions || []).map(option => [option.value, option.label || option.value]),
+    );
+    const orderedValues = (employmentScopeOptions || [])
+      .map(option => option.value)
+      .filter(value => selectedEmploymentScopes.includes(value));
+    const labels = (orderedValues.length ? orderedValues : selectedEmploymentScopes)
+      .map(value => labelsByValue.get(value) || value);
+    return labels.join(', ');
+  }, [selectedEmploymentScopes, employmentScopeOptions]);
 
   const handleEmploymentScopeToggle = (value) => {
     if (typeof onEmploymentScopeChange !== 'function') {
@@ -36,12 +55,18 @@ export default function ReportsFilters({
     const next = isSelected
       ? selectedEmploymentScopes.filter(item => item !== value)
       : [...selectedEmploymentScopes, value];
-    onEmploymentScopeChange(next);
+    onEmploymentScopeChange(sanitizeEmploymentScopeFilter(next));
   };
 
-  const employmentScopeSummary = selectedEmploymentScopes.length
-    ? selectedEmploymentScopes.join(', ')
-    : 'כל ההגדרות';
+  const handleEmploymentScopeSelectAll = () => {
+    if (typeof onEmploymentScopeChange !== 'function') {
+      return;
+    }
+    const allValues = sanitizeEmploymentScopeFilter(
+      (employmentScopeOptions || []).map(option => option.value),
+    );
+    onEmploymentScopeChange(allValues);
+  };
 
   const gridColumnsClass = showEmploymentScopeFilter
     ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4'
@@ -209,7 +234,7 @@ export default function ReportsFilters({
                         type="button"
                         variant="ghost"
                         size="sm"
-                        onClick={() => onEmploymentScopeChange(employmentScopeOptions.map(option => option.value))}
+                        onClick={handleEmploymentScopeSelectAll}
                         disabled={employmentScopeLoading}
                       >
                         בחר הכל

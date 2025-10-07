@@ -1,6 +1,6 @@
 import { startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
 import { isLeaveEntryType, getLeaveValueMultiplier } from './leave.js';
-import { sanitizeEmploymentScopeFilter } from '@/constants/employment-scope.js';
+import { sanitizeEmploymentScopeFilter, getEmploymentScopeValue } from '@/constants/employment-scope.js';
 
 const DAY_NAMES = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
 
@@ -203,9 +203,7 @@ export function computePeriodTotals({
     if (employeeTypeFilter !== 'all' && emp.employee_type !== employeeTypeFilter) return false;
     if (serviceFilter !== 'all' && row.service_id !== serviceFilter) return false;
     if (normalizedEmploymentScopes.length > 0) {
-      const scopeValue = typeof emp.employment_scope === 'string'
-        ? emp.employment_scope.trim()
-        : '';
+      const scopeValue = getEmploymentScopeValue(emp);
       if (!normalizedEmploymentScopes.includes(scopeValue)) {
         return false;
       }
@@ -340,9 +338,7 @@ function entryMatchesFilters(row, emp, filters = {}) {
   if (serviceId !== 'all' && row.service_id !== serviceId) return false;
   const normalizedScopes = sanitizeEmploymentScopeFilter(employmentScopes);
   if (normalizedScopes.length > 0) {
-    const scopeValue = typeof emp.employment_scope === 'string'
-      ? emp.employment_scope.trim()
-      : '';
+    const scopeValue = getEmploymentScopeValue(emp);
     if (!normalizedScopes.includes(scopeValue)) return false;
   }
   return true;
