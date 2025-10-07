@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -8,6 +8,9 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"; // We might not need tooltip, but it's good to have it just in case. Let's remove it later if unused.
 import { ChevronsUpDown, ChevronDown } from "lucide-react";
+import { useSupabase } from '@/context/SupabaseContext.jsx';
+import { useOrg } from '@/org/OrgContext.jsx';
+import { fetchEmploymentScopePolicySettings } from '@/lib/settings-client.js';
 
 const EMPLOYEE_TYPES = {
   hourly: 'עובד שעתי',
@@ -19,6 +22,11 @@ const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
 export default function EmployeeList({ employees, rateHistories, services, onEdit, onToggleActive, isLoading }) {
   const [openRows, setOpenRows] = useState({});
+  const [employmentScopeEnabledTypes, setEmploymentScopeEnabledTypes] = useState(['global']);
+  const [isEmploymentScopePolicyLoading, setIsEmploymentScopePolicyLoading] = useState(false);
+  const [employmentScopePolicyError, setEmploymentScopePolicyError] = useState('');
+  const { session } = useSupabase();
+  const { activeOrgId } = useOrg();
 
   const toggleRow = (employeeId) => {
     setOpenRows(prev => ({ ...prev, [employeeId]: !prev[employeeId] }));
@@ -36,8 +44,87 @@ export default function EmployeeList({ employees, rateHistories, services, onEdi
     setOpenRows(newOpenState);
   };
 
+  useEffect(() => {
+    if (!session || !activeOrgId) {
+      setEmploymentScopeEnabledTypes(['global']);
+      setEmploymentScopePolicyError('');
+      return;
+    }
+
+    const abortController = new AbortController();
+    let isMounted = true;
+
+    async function loadEmploymentScopePolicy() {
+      setIsEmploymentScopePolicyLoading(true);
+      setEmploymentScopePolicyError('');
+      try {
+        const response = await fetchEmploymentScopePolicySettings({
+          session,
+          orgId: activeOrgId,
+          signal: abortController.signal,
+        });
+        if (!isMounted) {
+          return;
+        }
+
+        const rawEnabled = Array.isArray(response?.value?.enabled_types)
+          ? response.value.enabled_types
+          : null;
+        const normalized = (rawEnabled || ['global'])
+          .map((type) => (typeof type === 'string' ? type.trim().toLowerCase() : ''))
+          .filter(Boolean);
+        const nextEnabled = Array.from(new Set([...normalized, 'global']));
+        setEmploymentScopeEnabledTypes(nextEnabled);
+      } catch (error) {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        console.error('Failed to fetch employment scope policy', error);
+        setEmploymentScopePolicyError('טעינת הגדרת היקף המשרה נכשלה. נעשה שימוש בערך ברירת המחדל.');
+        setEmploymentScopeEnabledTypes(['global']);
+      } finally {
+        if (isMounted) {
+          setIsEmploymentScopePolicyLoading(false);
+        }
+      }
+    }
+
+    loadEmploymentScopePolicy();
+
+    return () => {
+      isMounted = false;
+      abortController.abort();
+    };
+  }, [session, activeOrgId]);
+
+  const renderEmploymentScopeContent = (employee) => {
+    if (isEmploymentScopePolicyLoading) {
+      return <span className="text-xs text-slate-400">טוען...</span>;
+    }
+
+    const requiresScope = employmentScopeEnabledTypes.includes(employee.employee_type);
+    const scopeValue = typeof employee.employment_scope === 'string'
+      ? employee.employment_scope.trim()
+      : '';
+
+    if (scopeValue) {
+      return <span className="text-slate-900">{scopeValue}</span>;
+    }
+
+    if (requiresScope) {
+      return <span className="text-xs font-medium text-red-600">נדרשת הגדרה</span>;
+    }
+
+    return null;
+  };
+
   return (
     <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
+      {employmentScopePolicyError ? (
+        <div className="px-4 pt-4">
+          <p className="text-sm text-amber-600">{employmentScopePolicyError}</p>
+        </div>
+      ) : null}
       <div className="p-2 border-b flex justify-end">
         <Button variant="ghost" size="sm" onClick={toggleAllRows}>
           <ChevronsUpDown className="w-4 h-4 ml-2" />
@@ -50,6 +137,7 @@ export default function EmployeeList({ employees, rateHistories, services, onEdi
             <TableHead className="w-[50px]"></TableHead>
             <TableHead className="text-right">שם</TableHead>
             <TableHead className="text-right">סוג עובד</TableHead>
+            <TableHead className="text-right">היקף משרה</TableHead>
             <TableHead className="text-right">תעריף / שכר</TableHead>
             <TableHead className="text-right">סטטוס</TableHead>
             <TableHead className="text-center">פעולות</TableHead>
@@ -59,12 +147,12 @@ export default function EmployeeList({ employees, rateHistories, services, onEdi
           {isLoading ? (
             Array(5).fill(0).map((_, i) => (
               <TableRow key={i}>
-                <TableCell colSpan={6}><Skeleton className="h-8 w-full" /></TableCell>
+                <TableCell colSpan={7}><Skeleton className="h-8 w-full" /></TableCell>
               </TableRow>
             ))
           ) : employees.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} className="text-center h-24">לא נמצאו עובדים</TableCell>
+              <TableCell colSpan={7} className="text-center h-24">לא נמצאו עובדים</TableCell>
             </TableRow>
           ) : (
             employees.map((employee) => {
@@ -106,6 +194,7 @@ export default function EmployeeList({ employees, rateHistories, services, onEdi
                     </TableCell>
                     <TableCell className="font-medium py-2">{employee.name}</TableCell>
                     <TableCell className="py-2">{EMPLOYEE_TYPES[employee.employee_type]}</TableCell>
+                    <TableCell className="py-2">{renderEmploymentScopeContent(employee)}</TableCell>
                     <TableCell className="py-2">
                       {employee.employee_type !== 'instructor' && (currentRate !== null ? `₪${currentRate}` : '-')}
                     </TableCell>
@@ -127,7 +216,7 @@ export default function EmployeeList({ employees, rateHistories, services, onEdi
                   {/* --- שורת התוכן הנפתחת (רק למדריכים) --- */}
                   {isRowOpen && employee.employee_type === 'instructor' && (
                     <TableRow className="bg-slate-50">
-                      <TableCell colSpan={6} className="p-4">
+                      <TableCell colSpan={7} className="p-4">
                           <h4 className="font-semibold mb-3 text-slate-800">פירוט תעריפים:</h4>
                           {instructorRatesDetails.length > 0 ? (
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
