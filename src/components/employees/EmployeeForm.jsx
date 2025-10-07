@@ -12,8 +12,15 @@ import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { createEmployee, updateEmployee as updateEmployeeRequest } from '@/api/employees.js';
+import { fetchEmploymentScopePolicySettings } from '@/lib/settings-client.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+const EMPLOYMENT_SCOPE_OPTIONS = [
+  'משרה מלאה',
+  'חצי משרה',
+  '75% משרה',
+  '25% משרה',
+];
 
 export default function EmployeeForm({ employee, onSuccess, onCancel, services: servicesProp = [], rateHistories: rateHistoriesProp = [] }) {
   const [formData, setFormData] = useState({
@@ -27,29 +34,31 @@ export default function EmployeeForm({ employee, onSuccess, onCancel, services: 
     is_active: employee?.is_active !== undefined ? employee.is_active : true,
     notes: employee?.notes || '',
     working_days: employee?.working_days || ['SUN','MON','TUE','WED','THU'],
-    annual_leave_days: employee?.annual_leave_days ?? 0
+    annual_leave_days: employee?.annual_leave_days ?? 0,
+    employment_scope: employee?.employment_scope || '',
   });
 
   useEffect(() => {
-  // This effect resets the form whenever the employee to be edited changes.
-  setFormData({
-    name: employee?.name || '',
-    employee_id: employee?.employee_id || '',
-    employee_type: employee?.employee_type || 'hourly',
-    current_rate: '', // Always start with a blank rate
-    phone: employee?.phone || '',
-    email: employee?.email || '',
-    start_date: employee?.start_date || new Date().toISOString().split('T')[0],
-    is_active: employee?.is_active !== undefined ? employee.is_active : true,
-    notes: employee?.notes || '',
-    working_days: employee?.working_days || ['SUN','MON','TUE','WED','THU'],
-    annual_leave_days: employee?.annual_leave_days ?? 0
-  });
-  
-  // Also reset the instructor-specific rates
-  setServiceRates({});
+    // This effect resets the form whenever the employee to be edited changes.
+    setFormData({
+      name: employee?.name || '',
+      employee_id: employee?.employee_id || '',
+      employee_type: employee?.employee_type || 'hourly',
+      current_rate: '', // Always start with a blank rate
+      phone: employee?.phone || '',
+      email: employee?.email || '',
+      start_date: employee?.start_date || new Date().toISOString().split('T')[0],
+      is_active: employee?.is_active !== undefined ? employee.is_active : true,
+      notes: employee?.notes || '',
+      working_days: employee?.working_days || ['SUN','MON','TUE','WED','THU'],
+      annual_leave_days: employee?.annual_leave_days ?? 0,
+      employment_scope: employee?.employment_scope || '',
+    });
 
-}, [employee]); // This dependency is crucial!
+    // Also reset the instructor-specific rates
+    setServiceRates({});
+
+  }, [employee]); // This dependency is crucial!
 
   const [services, setServices] = useState([]);
   const [rateHistory, setRateHistory] = useState([]);
@@ -57,6 +66,10 @@ export default function EmployeeForm({ employee, onSuccess, onCancel, services: 
   const [isLoading, setIsLoading] = useState(false);
   const { authClient, user, loading, session } = useSupabase();
   const { activeOrgId } = useOrg();
+  const [employmentScopeEnabledTypes, setEmploymentScopeEnabledTypes] = useState(['global']);
+  const [isEmploymentScopeLoading, setIsEmploymentScopeLoading] = useState(false);
+  const [employmentScopePolicyError, setEmploymentScopePolicyError] = useState('');
+  const [employmentScopeFieldError, setEmploymentScopeFieldError] = useState('');
 
 useEffect(() => {
   if (formData.employee_type === 'instructor') {
@@ -107,12 +120,88 @@ useEffect(() => {
   }
 }, [employee, rateHistory]);
 
+useEffect(() => {
+  if (!session || !activeOrgId) {
+    setEmploymentScopeEnabledTypes(['global']);
+    setEmploymentScopePolicyError('');
+    return;
+  }
+
+  const abortController = new AbortController();
+  let isMounted = true;
+
+  async function loadEmploymentScopePolicy() {
+    setIsEmploymentScopeLoading(true);
+    setEmploymentScopePolicyError('');
+    try {
+      const response = await fetchEmploymentScopePolicySettings({
+        session,
+        orgId: activeOrgId,
+        signal: abortController.signal,
+      });
+      if (!isMounted) {
+        return;
+      }
+
+      const rawEnabled = Array.isArray(response?.value?.enabled_types)
+        ? response.value.enabled_types
+        : null;
+      const normalized = (rawEnabled || ['global'])
+        .map((type) => (typeof type === 'string' ? type.trim().toLowerCase() : ''))
+        .filter(Boolean);
+      const nextEnabled = Array.from(new Set([...normalized, 'global']));
+      setEmploymentScopeEnabledTypes(nextEnabled);
+    } catch (error) {
+      if (abortController.signal.aborted) {
+        return;
+      }
+      console.error('Failed to fetch employment scope policy', error);
+      setEmploymentScopePolicyError('טעינת הגדרת היקף המשרה נכשלה. נעשה שימוש בערך ברירת המחדל.');
+      setEmploymentScopeEnabledTypes(['global']);
+    } finally {
+      if (isMounted) {
+        setIsEmploymentScopeLoading(false);
+      }
+    }
+  }
+
+  loadEmploymentScopePolicy();
+
+  return () => {
+    isMounted = false;
+    abortController.abort();
+  };
+}, [session, activeOrgId]);
+
+  const shouldShowEmploymentScopeField = employmentScopeEnabledTypes.includes(formData.employee_type);
+
+useEffect(() => {
+  if (!shouldShowEmploymentScopeField) {
+    setEmploymentScopeFieldError('');
+  }
+}, [shouldShowEmploymentScopeField]);
+
   const handleServiceRateChange = (serviceId, value) => {
     setServiceRates(prev => ({ ...prev, [serviceId]: value }));
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    if (shouldShowEmploymentScopeField && isEmploymentScopeLoading) {
+      toast.error('המתינו לטעינת היקף המשרה לפני השמירה.');
+      return;
+    }
+    const trimmedEmploymentScope = typeof formData.employment_scope === 'string'
+      ? formData.employment_scope.trim()
+      : '';
+    if (shouldShowEmploymentScopeField && !trimmedEmploymentScope) {
+      const message = 'יש לבחור היקף משרה עבור סוג עובד זה.';
+      setEmploymentScopeFieldError(message);
+      toast.error(message);
+      return;
+    }
+
+    setEmploymentScopeFieldError('');
     setIsLoading(true);
     try {
       if (!session) {
@@ -123,6 +212,11 @@ useEffect(() => {
       }
 
       const { current_rate: currentRate, ...employeeDetails } = formData;
+      if (shouldShowEmploymentScopeField) {
+        employeeDetails.employment_scope = trimmedEmploymentScope;
+      } else {
+        delete employeeDetails.employment_scope;
+      }
       const annualLeave = Number(employeeDetails.annual_leave_days);
       employeeDetails.annual_leave_days = Number.isNaN(annualLeave) ? 0 : annualLeave;
 
@@ -237,7 +331,23 @@ useEffect(() => {
   };
 
   const handleChange = (field, value) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    setFormData(prev => {
+      if (field === 'employee_type') {
+        const shouldKeepScope = employmentScopeEnabledTypes.includes(value);
+        return {
+          ...prev,
+          employee_type: value,
+          employment_scope: shouldKeepScope ? prev.employment_scope : '',
+        };
+      }
+      if (field === 'employment_scope') {
+        return { ...prev, employment_scope: value };
+      }
+      return { ...prev, [field]: value };
+    });
+    if (field === 'employee_type' || field === 'employment_scope') {
+      setEmploymentScopeFieldError('');
+    }
   };
 
   const toggleWorkingDay = (day) => {
@@ -334,6 +444,41 @@ useEffect(() => {
                 </SelectContent>
               </Select>
             </div>
+            {shouldShowEmploymentScopeField && (
+              <div className="space-y-2">
+                <Label htmlFor="employment_scope" className="text-sm font-semibold text-slate-700">היקף משרה *</Label>
+                <Select
+                  value={formData.employment_scope || 'placeholder'}
+                  onValueChange={(value) => {
+                    if (value === 'placeholder') {
+                      return;
+                    }
+                    handleChange('employment_scope', value);
+                  }}
+                  disabled={isEmploymentScopeLoading}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={isEmploymentScopeLoading ? 'טוען היקפי משרה...' : 'בחר היקף משרה...'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="placeholder" disabled>
+                      בחר היקף משרה...
+                    </SelectItem>
+                    {EMPLOYMENT_SCOPE_OPTIONS.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {employmentScopeFieldError && (
+                  <p className="text-xs text-red-600">{employmentScopeFieldError}</p>
+                )}
+                {employmentScopePolicyError && (
+                  <p className="text-xs text-amber-600">{employmentScopePolicyError}</p>
+                )}
+              </div>
+            )}
             {(formData.employee_type === 'hourly' || formData.employee_type === 'global') && (
               <div className="space-y-2">
                 <Label htmlFor="current_rate" className="text-sm font-semibold text-slate-700">
