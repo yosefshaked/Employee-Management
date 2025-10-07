@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -24,7 +24,7 @@ export default function DetailedEntriesReport({
   const [groupBy, setGroupBy] = useState(initialGroupBy);
   const EMPLOYEE_TYPE_LABELS = { global: 'גלובלי', hourly: 'שעתי', instructor: 'מדריך' };
 
-  const resolveLeaveValue = React.useMemo(() => createLeaveDayValueResolver({
+  const resolveLeaveValue = useMemo(() => createLeaveDayValueResolver({
     employees,
     workSessions,
     services,
