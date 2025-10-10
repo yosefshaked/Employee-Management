@@ -50,3 +50,7 @@ export async function fetchLeavePolicySettings(options) {
 export async function fetchLeavePayPolicySettings(options) {
   return fetchSettingsValue(options, 'leave_pay_policy');
 }
+
+export async function fetchEmploymentScopePolicySettings(options) {
+  return fetchSettingsValue(options, 'employment_scope_policy');
+}

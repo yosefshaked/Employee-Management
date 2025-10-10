@@ -11,6 +11,8 @@ import {
   getLeaveLedgerEntryDelta,
   getLeaveLedgerEntryType,
 } from '@/lib/leave.js';
+import { getEmploymentScopeValue } from '@/constants/employment-scope.js';
+import { getEmploymentScopeLabel } from '@/lib/translations.js';
 
 const EMPLOYEE_TYPES = {
   hourly: 'שעתי',
@@ -19,10 +21,10 @@ const EMPLOYEE_TYPES = {
 };
 
 // קומפוננטה קטנה לשורות הפירוט עם עיצוב משופר
-const InstructorDetailsRow = ({ details }) => (
+const InstructorDetailsRow = ({ details, colSpan }) => (
   <TableRow className="bg-slate-50 hover:bg-slate-100/70">
     <TableCell colSpan={1} className="py-2"></TableCell>
-    <TableCell colSpan={5} className="p-2 px-4">
+    <TableCell colSpan={colSpan} className="p-2 px-4">
       <div className="font-semibold text-xs text-slate-500 grid grid-cols-4 gap-4 mb-1 px-2">
         <span>שם השירות</span>
         <span className="text-center">כמות מפגשים</span>
@@ -52,6 +54,7 @@ export default function PayrollSummary({
   employeeTotals = [],
   leaveBalances = [],
   leavePolicy = DEFAULT_LEAVE_POLICY,
+  showEmploymentScopeColumn = false,
 }) {
   const [expandedRows, setExpandedRows] = useState({});
 
@@ -76,6 +79,8 @@ export default function PayrollSummary({
   const toggleRow = (employeeId) => {
     setExpandedRows(prev => ({...prev, [employeeId]: !prev[employeeId]}));
   };
+
+  const instructorDetailsColSpan = showEmploymentScopeColumn ? 11 : 10;
 
   const totalsMap = Object.fromEntries(employeeTotals.map(t => [t.employee_id, t]));
   const leaveByEmployee = useMemo(() => {
@@ -139,6 +144,10 @@ export default function PayrollSummary({
       leaveBalances,
       policy: leavePolicy,
     });
+    const employmentScopeValue = getEmploymentScopeValue(employee);
+    const employmentScopeLabel = employmentScopeValue
+      ? getEmploymentScopeLabel(employmentScopeValue)
+      : '';
     return {
       id: employee.id,
       name: employee.name,
@@ -153,6 +162,8 @@ export default function PayrollSummary({
       systemPaidCount,
       employeePaidDays,
       leaveRemaining: leaveSummary.remaining,
+      employmentScopeValue,
+      employmentScopeLabel,
     };
   }).filter(emp => {
     const hasActivity = emp.totalPayment !== 0 || emp.totalHours > 0 || emp.totalSessions > 0;
@@ -169,6 +180,9 @@ export default function PayrollSummary({
             <TableHead className="w-12"></TableHead>
             <TableHead className="text-right">עובד</TableHead>
             <TableHead className="text-right">סוג</TableHead>
+            {showEmploymentScopeColumn ? (
+              <TableHead className="text-right">היקף משרה</TableHead>
+            ) : null}
             <TableHead className="text-right">שכר בסיס</TableHead>
             <TableHead className="text-right">סה"כ פעילות</TableHead>
             <TableHead className="text-right">חגים (מערכת)</TableHead>
@@ -196,6 +210,9 @@ export default function PayrollSummary({
                     {EMPLOYEE_TYPE_CONFIG[employee.employeeType]?.label || 'לא ידוע'}
                   </Badge>
                 </TableCell>
+                {showEmploymentScopeColumn ? (
+                  <TableCell className="text-right">{employee.employmentScopeLabel || '—'}</TableCell>
+                ) : null}
                 <TableCell className="font-semibold text-slate-600">
                   {employee.baseSalary !== null ? `₪${employee.baseSalary.toLocaleString()}` : '-'}
                 </TableCell>
@@ -217,7 +234,9 @@ export default function PayrollSummary({
                   </Badge>
                 </TableCell>
               </TableRow>
-              {expandedRows[employee.id] && <InstructorDetailsRow details={employee.details} />}
+              {expandedRows[employee.id] && (
+                <InstructorDetailsRow details={employee.details} colSpan={instructorDetailsColSpan} />
+              )}
             </React.Fragment>
           ))}
         </TableBody>

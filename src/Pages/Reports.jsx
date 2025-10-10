@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useLocation } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTooltip } from "../components/InfoTooltip";
@@ -20,11 +20,33 @@ import ChartsOverview from "../components/reports/ChartsOverview";
 import { computePeriodTotals, createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
 import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, normalizeLeavePayPolicy, isLeaveEntryType } from '@/lib/leave.js';
 import { useOrg } from '@/org/OrgContext.jsx';
-import { fetchLeavePolicySettings, fetchLeavePayPolicySettings } from '@/lib/settings-client.js';
+import { fetchLeavePolicySettings, fetchLeavePayPolicySettings, fetchEmploymentScopePolicySettings } from '@/lib/settings-client.js';
+import {
+  EMPLOYMENT_SCOPE_OPTIONS,
+  EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES,
+  normalizeEmploymentScopePolicy,
+  sanitizeEmploymentScopeFilter,
+  getEmploymentScopeValue,
+} from '@/constants/employment-scope.js';
+import { getEmploymentScopeLabel } from '@/lib/translations.js';
 import { fetchEmployeesList } from '@/api/employees.js';
 import { fetchWorkSessions } from '@/api/work-sessions.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+
+function shouldDisplayEmploymentScope({ employeeTypeFilter, enabledTypes, isLoading }) {
+  if (isLoading) {
+    return false;
+  }
+  const normalizedTypes = Array.isArray(enabledTypes) ? enabledTypes : [];
+  if (normalizedTypes.length === 0) {
+    return false;
+  }
+  if (!employeeTypeFilter || employeeTypeFilter === 'all') {
+    return true;
+  }
+  return normalizedTypes.includes(employeeTypeFilter);
+}
 
 const getLedgerTimestamp = (entry = {}) => {
   const raw = entry.date || entry.entry_date || entry.effective_date || entry.change_date || entry.created_at;
@@ -57,6 +79,9 @@ export default function Reports() {
   const [leaveBalances, setLeaveBalances] = useState([]);
   const [leavePolicy, setLeavePolicy] = useState(DEFAULT_LEAVE_POLICY);
   const [leavePayPolicy, setLeavePayPolicy] = useState(DEFAULT_LEAVE_PAY_POLICY);
+  const [employmentScopeEnabledTypes, setEmploymentScopeEnabledTypes] = useState(() => [...EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES]);
+  const [isEmploymentScopePolicyLoading, setIsEmploymentScopePolicyLoading] = useState(false);
+  const [employmentScopePolicyError, setEmploymentScopePolicyError] = useState('');
   const { tenantClientReady, activeOrgHasConnection, activeOrgId } = useOrg();
   const { authClient, user, loading, session } = useSupabase();
 
@@ -98,8 +123,25 @@ export default function Reports() {
     dateTo: format(new Date(), 'dd/MM/yyyy'),
     employeeType: 'all',
     serviceId: 'all',
+    employmentScopes: [],
   });
   const lastValid = useRef({ dateFrom: format(startOfMonth(new Date()), 'dd/MM/yyyy'), dateTo: format(new Date(), 'dd/MM/yyyy') });
+
+  const sanitizedEmploymentScopes = useMemo(
+    () => sanitizeEmploymentScopeFilter(filters.employmentScopes),
+    [filters.employmentScopes],
+  );
+
+  const showEmploymentScopeUi = shouldDisplayEmploymentScope({
+    employeeTypeFilter: filters.employeeType,
+    enabledTypes: employmentScopeEnabledTypes,
+    isLoading: isEmploymentScopePolicyLoading,
+  });
+
+  const effectiveEmploymentScopeFilter = useMemo(
+    () => (showEmploymentScopeUi ? sanitizedEmploymentScopes : []),
+    [showEmploymentScopeUi, sanitizedEmploymentScopes],
+  );
 
   const handleDateBlur = (key, value) => {
     const res = parseDateStrict(value);
@@ -146,6 +188,7 @@ export default function Reports() {
       serviceFilter: filters.serviceId,
       employeeFilter: filters.selectedEmployee,
       employeeTypeFilter: filters.employeeType,
+      employmentScopeFilter: effectiveEmploymentScopeFilter,
       leavePayPolicy,
       leaveDayValueSelector: selectLeaveDayValue,
     });
@@ -228,11 +271,58 @@ export default function Reports() {
       totalsByEmployee: updatedTotalsByEmployee,
       diagnostics: updatedDiagnostics
     });
-  }, [workSessions, employees, services, filters, leavePayPolicy]);
+  }, [workSessions, employees, services, filters, leavePayPolicy, effectiveEmploymentScopeFilter]);
 
   useEffect(() => {
     applyFilters();
   }, [applyFilters]);
+
+  useEffect(() => {
+    if (!session || !activeOrgId || !activeOrgHasConnection) {
+      setEmploymentScopeEnabledTypes([...EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES]);
+      setEmploymentScopePolicyError('');
+      setIsEmploymentScopePolicyLoading(false);
+      return;
+    }
+
+    const abortController = new AbortController();
+    let isMounted = true;
+
+    const loadEmploymentScopePolicy = async () => {
+      setIsEmploymentScopePolicyLoading(true);
+      setEmploymentScopePolicyError('');
+      try {
+        const response = await fetchEmploymentScopePolicySettings({
+          session,
+          orgId: activeOrgId,
+          signal: abortController.signal,
+        });
+        if (!isMounted) {
+          return;
+        }
+        const normalized = normalizeEmploymentScopePolicy(response?.value);
+        setEmploymentScopeEnabledTypes(normalized.enabledTypes);
+      } catch (policyError) {
+        if (abortController.signal.aborted) {
+          return;
+        }
+        console.error('Failed to fetch employment scope policy', policyError);
+        setEmploymentScopeEnabledTypes([...EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES]);
+        setEmploymentScopePolicyError('טעינת הגדרת היקף המשרה נכשלה. נעשה שימוש בערך ברירת המחדל.');
+      } finally {
+        if (isMounted) {
+          setIsEmploymentScopePolicyLoading(false);
+        }
+      }
+    };
+
+    loadEmploymentScopePolicy();
+
+    return () => {
+      isMounted = false;
+      abortController.abort();
+    };
+  }, [session, activeOrgId, activeOrgHasConnection]);
 
   const loadInitialData = useCallback(async () => {
     if (!tenantClientReady || !activeOrgHasConnection || !session || !activeOrgId) {
@@ -291,16 +381,41 @@ export default function Reports() {
     loadInitialData();
   }, [loadInitialData]);
 
+  useEffect(() => {
+    if (!showEmploymentScopeUi && sanitizedEmploymentScopes.length > 0) {
+      setFilters(prev => ({ ...prev, employmentScopes: [] }));
+      return;
+    }
+    if (showEmploymentScopeUi) {
+      const current = Array.isArray(filters.employmentScopes) ? filters.employmentScopes : [];
+      if (
+        current.length !== sanitizedEmploymentScopes.length ||
+        !sanitizedEmploymentScopes.every((value, index) => value === current[index])
+      ) {
+        setFilters(prev => ({ ...prev, employmentScopes: sanitizedEmploymentScopes }));
+      }
+    }
+  }, [showEmploymentScopeUi, sanitizedEmploymentScopes, filters.employmentScopes, setFilters]);
+
+  const handleEmploymentScopeChange = useCallback((nextScopes) => {
+    const sanitized = sanitizeEmploymentScopeFilter(nextScopes);
+    setFilters(prev => ({ ...prev, employmentScopes: sanitized }));
+  }, [setFilters]);
+
   const getServiceName = (serviceId) => {
     const service = services.find(s => s.id === serviceId);
     return service ? service.name : 'עבודה שעתית';
   };
 
   const exportToExcel = () => {
-      const exportData = [...filteredSessions]       // copy so the original array isn’t mutated
+    const exportData = [...filteredSessions]
       .sort((a, b) => new Date(a.date) - new Date(b.date))
-      .map(session => {
+      .map((session) => {
         const employee = employees.find(emp => emp.id === session.employee_id);
+        const employmentScopeValue = getEmploymentScopeValue(employee);
+        const employmentScopeLabel = employmentScopeValue
+          ? getEmploymentScopeLabel(employmentScopeValue)
+          : '';
         return {
           'שם העובד': employee ? employee.name : 'לא ידוע',
           'תאריך': session.date,
@@ -308,29 +423,30 @@ export default function Reports() {
           'שעות': session.hours || '',
           'מפגשים': session.sessions_count || '',
           'תלמידים': session.students_count || '',
+          'היקף משרה': employmentScopeLabel,
           'תעריף': session.rate_used,
           'סה"כ תשלום': session.total_payment,
-          'הערות': session.notes || ''
+          'הערות': session.notes || '',
         };
       });
 
-      if (exportData.length === 0) return;
+    if (exportData.length === 0) return;
 
-      const headers = Object.keys(exportData[0]);
-      const csvContent = [
-        headers.join(','),
-        ...exportData.map(row => headers.map(header => `"${row[header] || ''}"`).join(','))
-      ].join('\n');
+    const headers = Object.keys(exportData[0]);
+    const csvContent = [
+      headers.join(','),
+      ...exportData.map(row => headers.map(header => `"${row[header] || ''}"`).join(',')),
+    ].join('\n');
 
-      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-      const link = document.createElement('a');
-      const url = URL.createObjectURL(blob);
-      link.setAttribute('href', url);
-      link.setAttribute('download', `דוח_שכר_${new Date().toISOString().split('T')[0]}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    };
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `דוח_שכר_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   // Show a warning when the selected range is a partial month
   const fromParsed = parseDateStrict(filters.dateFrom);
@@ -342,7 +458,8 @@ export default function Reports() {
     dateTo: toParsed.ok ? toISODateString(toParsed.date) : null,
     employeeType: filters.employeeType,
     selectedEmployee: filters.selectedEmployee || null,
-    serviceId: filters.serviceId
+    serviceId: filters.serviceId,
+    employmentScopes: effectiveEmploymentScopeFilter,
   };
 
   const hourlyHours = selectHourlyHours(workSessions, employees, baseFilters);
@@ -394,12 +511,22 @@ export default function Reports() {
             שים לב: נבחר טווח חלקי של חודש. הסיכומים מתבססים רק על הרישומים שבטווח שנבחר.
           </div>
         )}
+        {employmentScopePolicyError ? (
+          <div className="mb-4 p-3 rounded-md bg-amber-50 border border-amber-200 text-amber-800 text-sm" role="alert">
+            {employmentScopePolicyError}
+          </div>
+        ) : null}
         <ReportsFilters
           filters={filters}
           setFilters={setFilters}
           employees={employees}
           services={services}
           onDateBlur={handleDateBlur}
+          showEmploymentScopeFilter={showEmploymentScopeUi}
+          employmentScopeOptions={EMPLOYMENT_SCOPE_OPTIONS}
+          employmentScopes={sanitizedEmploymentScopes}
+          onEmploymentScopeChange={handleEmploymentScopeChange}
+          employmentScopeLoading={isEmploymentScopePolicyLoading}
         />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -433,7 +560,18 @@ export default function Reports() {
                 <TabsTrigger value="payroll">דוח שכר</TabsTrigger>
               </TabsList>
               <TabsContent value="overview"><ChartsOverview sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} leavePayPolicy={leavePayPolicy} isLoading={isLoading} /></TabsContent>
-              <TabsContent value="employee"><DetailedEntriesReport sessions={filteredSessions} employees={employees} services={services} leavePayPolicy={leavePayPolicy} workSessions={workSessions} rateHistories={rateHistories} isLoading={isLoading} /></TabsContent>
+              <TabsContent value="employee">
+                <DetailedEntriesReport
+                  sessions={filteredSessions}
+                  employees={employees}
+                  services={services}
+                  leavePayPolicy={leavePayPolicy}
+                  workSessions={workSessions}
+                  rateHistories={rateHistories}
+                  isLoading={isLoading}
+                  showEmploymentScopeColumn={showEmploymentScopeUi}
+                />
+              </TabsContent>
               <TabsContent value="monthly"><MonthlyReport sessions={filteredSessions} employees={employees} services={services} workSessions={workSessions} leavePayPolicy={leavePayPolicy} isLoading={isLoading} /></TabsContent>
               <TabsContent value="payroll">
                 <PayrollSummary
@@ -445,6 +583,7 @@ export default function Reports() {
                   employeeTotals={totals.totalsByEmployee}
                   leaveBalances={leaveBalances}
                   leavePolicy={leavePolicy}
+                  showEmploymentScopeColumn={showEmploymentScopeUi}
                 />
               </TabsContent>
             </Tabs>

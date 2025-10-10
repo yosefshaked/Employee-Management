@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -9,11 +9,74 @@ import { Calendar } from "@/components/ui/calendar";
 import { Calendar as CalendarIcon, Filter } from "lucide-react";
 import { parseDateStrict } from '@/lib/date.js';
 import { format } from 'date-fns';
+import { sanitizeEmploymentScopeFilter } from '@/constants/employment-scope.js';
+import { EMPLOYMENT_SCOPES } from '@/lib/translations.js';
 
-export default function ReportsFilters({ filters, setFilters, employees, services = [], onDateBlur }) {
+export default function ReportsFilters({
+  filters,
+  setFilters,
+  employees,
+  services = [],
+  onDateBlur,
+  showEmploymentScopeFilter = false,
+  employmentScopeOptions = [],
+  employmentScopes = [],
+  onEmploymentScopeChange = () => {},
+  employmentScopeLoading = false,
+}) {
   const handleFilterChange = (key, value) => {
     setFilters(prev => ({ ...prev, [key]: value }));
   };
+
+  const scopeOptions = useMemo(() => {
+    if (Array.isArray(employmentScopeOptions) && employmentScopeOptions.length > 0) {
+      return employmentScopeOptions;
+    }
+    return Object.entries(EMPLOYMENT_SCOPES).map(([value, label]) => ({ value, label }));
+  }, [employmentScopeOptions]);
+
+  const selectedEmploymentScopes = useMemo(
+    () => sanitizeEmploymentScopeFilter(employmentScopes),
+    [employmentScopes],
+  );
+
+  const employmentScopeSummary = useMemo(() => {
+    if (selectedEmploymentScopes.length === 0) {
+      return 'כל ההגדרות';
+    }
+    const labelsByValue = new Map(
+      scopeOptions.map(option => [option.value, option.label || option.value]),
+    );
+    const orderedValues = scopeOptions
+      .map(option => option.value)
+      .filter(value => selectedEmploymentScopes.includes(value));
+    const labels = (orderedValues.length ? orderedValues : selectedEmploymentScopes)
+      .map(value => labelsByValue.get(value) || value);
+    return labels.join(', ');
+  }, [selectedEmploymentScopes, scopeOptions]);
+
+  const handleEmploymentScopeToggle = (value) => {
+    if (typeof onEmploymentScopeChange !== 'function') {
+      return;
+    }
+    const isSelected = selectedEmploymentScopes.includes(value);
+    const next = isSelected
+      ? selectedEmploymentScopes.filter(item => item !== value)
+      : [...selectedEmploymentScopes, value];
+    onEmploymentScopeChange(sanitizeEmploymentScopeFilter(next));
+  };
+
+  const handleEmploymentScopeSelectAll = () => {
+    if (typeof onEmploymentScopeChange !== 'function') {
+      return;
+    }
+    const allValues = sanitizeEmploymentScopeFilter(scopeOptions.map(option => option.value));
+    onEmploymentScopeChange(allValues);
+  };
+
+  const gridColumnsClass = showEmploymentScopeFilter
+    ? 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4'
+    : 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4';
 
   return (
     <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg">
@@ -22,8 +85,8 @@ export default function ReportsFilters({ filters, setFilters, employees, service
           <Filter className="w-5 h-5 text-blue-500" />
           <h3 className="text-lg font-semibold text-slate-900">מסננים</h3>
         </div>
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+
+        <div className={gridColumnsClass}>
           <div className="space-y-2">
             <Label className="text-sm font-semibold">עובד ספציפי</Label>
             <Select
@@ -129,6 +192,68 @@ export default function ReportsFilters({ filters, setFilters, employees, service
               </SelectContent>
             </Select>
           </div>
+
+          {showEmploymentScopeFilter ? (
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">היקף משרה</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between" disabled={employmentScopeLoading}>
+                    <span className="truncate text-right flex-1">{employmentScopeSummary}</span>
+                    <span className="ml-2 text-xs text-slate-500">בחר</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-56" align="end">
+                  <div className="space-y-2">
+                    {scopeOptions.map(option => {
+                      const isChecked = selectedEmploymentScopes.includes(option.value);
+                      const inputId = `employment-scope-filter-${option.value}`;
+                      return (
+                        <label
+                          key={option.value}
+                          htmlFor={inputId}
+                          className="flex items-center justify-between text-sm text-slate-700"
+                        >
+                          <span>{option.label}</span>
+                          <input
+                            id={inputId}
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleEmploymentScopeToggle(option.value)}
+                            disabled={employmentScopeLoading}
+                            className="h-4 w-4"
+                          />
+                        </label>
+                      );
+                    })}
+                    <div className="flex justify-between pt-2 border-t">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onEmploymentScopeChange([])}
+                        disabled={employmentScopeLoading || selectedEmploymentScopes.length === 0}
+                      >
+                        נקה
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleEmploymentScopeSelectAll}
+                        disabled={employmentScopeLoading}
+                      >
+                        בחר הכל
+                      </Button>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+              {employmentScopeLoading ? (
+                <p className="text-xs text-slate-400">טוען היקפי משרה...</p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </CardContent>
     </Card>
