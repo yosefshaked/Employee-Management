@@ -1,4 +1,5 @@
 import { sumHourlyHours } from './lib/payroll.js';
+import { sanitizeEmploymentScopeFilter, getEmploymentScopeValue } from '@/constants/employment-scope.js';
 import {
   DEFAULT_LEAVE_POLICY,
   DEFAULT_LEAVE_PAY_POLICY,
@@ -197,12 +198,24 @@ function logInsufficientData(method, employeeId, details) {
 
 function entryMatchesFilters(row, emp, filters = {}) {
   if (!row || row.deleted) return false;
-  const { dateFrom, dateTo, selectedEmployee, employeeType = 'all', serviceId = 'all' } = filters;
+  const {
+    dateFrom,
+    dateTo,
+    selectedEmployee,
+    employeeType = 'all',
+    serviceId = 'all',
+    employmentScopes = [],
+  } = filters;
   if (dateFrom && new Date(row.date) < new Date(dateFrom)) return false;
   if (dateTo && new Date(row.date) > new Date(dateTo)) return false;
   if (selectedEmployee && row.employee_id !== selectedEmployee) return false;
   if (employeeType !== 'all' && emp.employee_type !== employeeType) return false;
   if (serviceId !== 'all' && row.service_id !== serviceId) return false;
+  const normalizedScopes = sanitizeEmploymentScopeFilter(employmentScopes);
+  if (normalizedScopes.length > 0) {
+    const scopeValue = getEmploymentScopeValue(emp);
+    if (!normalizedScopes.includes(scopeValue)) return false;
+  }
   return true;
 }
 

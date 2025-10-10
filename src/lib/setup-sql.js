@@ -26,6 +26,9 @@ create table if not exists public."Employees" (
   constraint "Employees_pkey" primary key ("id")
 );
 
+ALTER TABLE "public"."Employees"
+ADD COLUMN IF NOT EXISTS "employment_scope" TEXT;
+
 create table if not exists public."Services" (
   "id" uuid not null default gen_random_uuid(),
   "name" text not null,

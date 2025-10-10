@@ -1,5 +1,6 @@
 import { startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
 import { isLeaveEntryType, getLeaveValueMultiplier } from './leave.js';
+import { sanitizeEmploymentScopeFilter, getEmploymentScopeValue } from '@/constants/employment-scope.js';
 
 const DAY_NAMES = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
 
@@ -181,6 +182,7 @@ export function computePeriodTotals({
   serviceFilter = 'all',
   employeeFilter = '',
   employeeTypeFilter = 'all',
+  employmentScopeFilter = [],
   leavePayPolicy = null,
   settings = null,
   leaveDayValueSelector = null,
@@ -191,6 +193,7 @@ export function computePeriodTotals({
   const baseSessions = Array.isArray(workSessions)
     ? workSessions.filter(row => row && !row.deleted)
     : [];
+  const normalizedEmploymentScopes = sanitizeEmploymentScopeFilter(employmentScopeFilter);
   const filtered = baseSessions.filter(row => {
     const d = new Date(row.date);
     if (d < start || d > end) return false;
@@ -199,6 +202,12 @@ export function computePeriodTotals({
     if (employeeFilter && row.employee_id !== employeeFilter) return false;
     if (employeeTypeFilter !== 'all' && emp.employee_type !== employeeTypeFilter) return false;
     if (serviceFilter !== 'all' && row.service_id !== serviceFilter) return false;
+    if (normalizedEmploymentScopes.length > 0) {
+      const scopeValue = getEmploymentScopeValue(emp);
+      if (!normalizedEmploymentScopes.includes(scopeValue)) {
+        return false;
+      }
+    }
     if (emp.start_date && row.date < emp.start_date) return false;
     return true;
   });
@@ -314,12 +323,24 @@ export function computePeriodTotals({
 
 function entryMatchesFilters(row, emp, filters = {}) {
   if (!row || row.deleted) return false;
-  const { dateFrom, dateTo, selectedEmployee, employeeType = 'all', serviceId = 'all' } = filters;
+  const {
+    dateFrom,
+    dateTo,
+    selectedEmployee,
+    employeeType = 'all',
+    serviceId = 'all',
+    employmentScopes = [],
+  } = filters;
   if (dateFrom && new Date(row.date) < new Date(dateFrom)) return false;
   if (dateTo && new Date(row.date) > new Date(dateTo)) return false;
   if (selectedEmployee && row.employee_id !== selectedEmployee) return false;
   if (employeeType !== 'all' && emp.employee_type !== employeeType) return false;
   if (serviceId !== 'all' && row.service_id !== serviceId) return false;
+  const normalizedScopes = sanitizeEmploymentScopeFilter(employmentScopes);
+  if (normalizedScopes.length > 0) {
+    const scopeValue = getEmploymentScopeValue(emp);
+    if (!normalizedScopes.includes(scopeValue)) return false;
+  }
   return true;
 }
 

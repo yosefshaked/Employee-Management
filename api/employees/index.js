@@ -292,6 +292,15 @@ function normalizeEmployeePayload(raw) {
   }
 
   const payload = { ...raw };
+  if (Object.prototype.hasOwnProperty.call(payload, 'employment_scope')) {
+    const value = payload.employment_scope;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      payload.employment_scope = trimmed ? trimmed : null;
+    } else {
+      payload.employment_scope = null;
+    }
+  }
   if (payload.annual_leave_days !== undefined && payload.annual_leave_days !== null) {
     const parsed = Number(payload.annual_leave_days);
     payload.annual_leave_days = Number.isNaN(parsed) ? 0 : parsed;
