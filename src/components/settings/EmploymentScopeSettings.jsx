@@ -20,11 +20,14 @@ function normalizePolicy(value) {
   }
 
   const allowedValues = EMPLOYMENT_SCOPE_OPTIONS.map(option => option.value);
-  const seen = new Set();
   const normalizedTypes = Array.isArray(value.enabled_types)
-    ? value.enabled_types
-        .map(item => (typeof item === 'string' ? item.trim() : ''))
-        .filter(item => item && allowedValues.includes(item) && !seen.has(item) && !seen.add(item))
+    ? [
+        ...new Set(
+          value.enabled_types
+            .map(item => (typeof item === 'string' ? item.trim() : ''))
+            .filter(item => item && allowedValues.includes(item)),
+        ),
+      ]
     : [];
 
   if (!normalizedTypes.includes('global')) {
@@ -108,14 +111,12 @@ function EmploymentScopeSettings({ session, orgId, activeOrgHasConnection }) {
   const handleToggle = (type) => (event) => {
     const { checked } = event.target;
     setPolicy(prevPolicy => {
-      const current = new Set(prevPolicy.enabled_types || []);
-      if (checked) {
-        current.add(type);
-      } else {
-        current.delete(type);
-      }
-      const next = normalizePolicy({ enabled_types: Array.from(current) });
-      return next;
+      const currentEnabledTypes = prevPolicy.enabled_types || [];
+      const updatedTypes = checked
+        ? [...currentEnabledTypes, type]
+        : currentEnabledTypes.filter(existingType => existingType !== type);
+      const uniqueUpdatedTypes = [...new Set(updatedTypes)];
+      return normalizePolicy({ enabled_types: uniqueUpdatedTypes });
     });
   };
 
