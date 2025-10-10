@@ -10,6 +10,7 @@ import { Calendar as CalendarIcon, Filter } from "lucide-react";
 import { parseDateStrict } from '@/lib/date.js';
 import { format } from 'date-fns';
 import { sanitizeEmploymentScopeFilter } from '@/constants/employment-scope.js';
+import { EMPLOYMENT_SCOPES } from '@/lib/translations.js';
 
 export default function ReportsFilters({
   filters,
@@ -27,6 +28,13 @@ export default function ReportsFilters({
     setFilters(prev => ({ ...prev, [key]: value }));
   };
 
+  const scopeOptions = useMemo(() => {
+    if (Array.isArray(employmentScopeOptions) && employmentScopeOptions.length > 0) {
+      return employmentScopeOptions;
+    }
+    return Object.entries(EMPLOYMENT_SCOPES).map(([value, label]) => ({ value, label }));
+  }, [employmentScopeOptions]);
+
   const selectedEmploymentScopes = useMemo(
     () => sanitizeEmploymentScopeFilter(employmentScopes),
     [employmentScopes],
@@ -37,15 +45,15 @@ export default function ReportsFilters({
       return 'כל ההגדרות';
     }
     const labelsByValue = new Map(
-      (employmentScopeOptions || []).map(option => [option.value, option.label || option.value]),
+      scopeOptions.map(option => [option.value, option.label || option.value]),
     );
-    const orderedValues = (employmentScopeOptions || [])
+    const orderedValues = scopeOptions
       .map(option => option.value)
       .filter(value => selectedEmploymentScopes.includes(value));
     const labels = (orderedValues.length ? orderedValues : selectedEmploymentScopes)
       .map(value => labelsByValue.get(value) || value);
     return labels.join(', ');
-  }, [selectedEmploymentScopes, employmentScopeOptions]);
+  }, [selectedEmploymentScopes, scopeOptions]);
 
   const handleEmploymentScopeToggle = (value) => {
     if (typeof onEmploymentScopeChange !== 'function') {
@@ -62,9 +70,7 @@ export default function ReportsFilters({
     if (typeof onEmploymentScopeChange !== 'function') {
       return;
     }
-    const allValues = sanitizeEmploymentScopeFilter(
-      (employmentScopeOptions || []).map(option => option.value),
-    );
+    const allValues = sanitizeEmploymentScopeFilter(scopeOptions.map(option => option.value));
     onEmploymentScopeChange(allValues);
   };
 
@@ -199,7 +205,7 @@ export default function ReportsFilters({
                 </PopoverTrigger>
                 <PopoverContent className="w-56" align="end">
                   <div className="space-y-2">
-                    {employmentScopeOptions.map(option => {
+                    {scopeOptions.map(option => {
                       const isChecked = selectedEmploymentScopes.includes(option.value);
                       const inputId = `employment-scope-filter-${option.value}`;
                       return (

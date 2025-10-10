@@ -12,6 +12,7 @@ import {
   getLeaveLedgerEntryType,
 } from '@/lib/leave.js';
 import { getEmploymentScopeValue } from '@/constants/employment-scope.js';
+import { getEmploymentScopeLabel } from '@/lib/translations.js';
 
 const EMPLOYEE_TYPES = {
   hourly: 'שעתי',
@@ -143,7 +144,10 @@ export default function PayrollSummary({
       leaveBalances,
       policy: leavePolicy,
     });
-    const employmentScope = getEmploymentScopeValue(employee);
+    const employmentScopeValue = getEmploymentScopeValue(employee);
+    const employmentScopeLabel = employmentScopeValue
+      ? getEmploymentScopeLabel(employmentScopeValue)
+      : '';
     return {
       id: employee.id,
       name: employee.name,
@@ -158,7 +162,8 @@ export default function PayrollSummary({
       systemPaidCount,
       employeePaidDays,
       leaveRemaining: leaveSummary.remaining,
-      employmentScope,
+      employmentScopeValue,
+      employmentScopeLabel,
     };
   }).filter(emp => {
     const hasActivity = emp.totalPayment !== 0 || emp.totalHours > 0 || emp.totalSessions > 0;
@@ -206,7 +211,7 @@ export default function PayrollSummary({
                   </Badge>
                 </TableCell>
                 {showEmploymentScopeColumn ? (
-                  <TableCell className="text-right">{employee.employmentScope || '—'}</TableCell>
+                  <TableCell className="text-right">{employee.employmentScopeLabel || '—'}</TableCell>
                 ) : null}
                 <TableCell className="font-semibold text-slate-600">
                   {employee.baseSalary !== null ? `₪${employee.baseSalary.toLocaleString()}` : '-'}

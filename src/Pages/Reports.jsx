@@ -28,6 +28,7 @@ import {
   sanitizeEmploymentScopeFilter,
   getEmploymentScopeValue,
 } from '@/constants/employment-scope.js';
+import { getEmploymentScopeLabel } from '@/lib/translations.js';
 import { fetchEmployeesList } from '@/api/employees.js';
 import { fetchWorkSessions } from '@/api/work-sessions.js';
 
@@ -412,6 +413,9 @@ export default function Reports() {
       .map((session) => {
         const employee = employees.find(emp => emp.id === session.employee_id);
         const employmentScopeValue = getEmploymentScopeValue(employee);
+        const employmentScopeLabel = employmentScopeValue
+          ? getEmploymentScopeLabel(employmentScopeValue)
+          : '';
         return {
           'שם העובד': employee ? employee.name : 'לא ידוע',
           'תאריך': session.date,
@@ -419,7 +423,7 @@ export default function Reports() {
           'שעות': session.hours || '',
           'מפגשים': session.sessions_count || '',
           'תלמידים': session.students_count || '',
-          'היקף משרה': employmentScopeValue,
+          'היקף משרה': employmentScopeLabel,
           'תעריף': session.rate_used,
           'סה"כ תשלום': session.total_payment,
           'הערות': session.notes || '',

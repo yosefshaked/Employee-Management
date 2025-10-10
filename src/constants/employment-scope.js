@@ -1,26 +1,28 @@
-export const EMPLOYMENT_SCOPE_VALUE_STRINGS = [
-  'משרה מלאה',
-  'חצי משרה',
-  '75% משרה',
-  '25% משרה',
-];
+import {
+  EMPLOYMENT_SCOPES,
+  EMPLOYMENT_SCOPE_OPTIONS,
+  EMPLOYMENT_SCOPE_VALUES,
+  normalizeEmploymentScopeSystemValue,
+} from '@/lib/translations.js';
 
-export const EMPLOYMENT_SCOPE_OPTIONS = EMPLOYMENT_SCOPE_VALUE_STRINGS.map((value) => ({
-  value,
-  label: value,
-}));
+export { EMPLOYMENT_SCOPES, EMPLOYMENT_SCOPE_OPTIONS };
 
 export const EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES = ['global'];
 
 const SUPPORTED_EMPLOYEE_TYPES = new Set(['global', 'hourly', 'instructor']);
-const EMPLOYMENT_SCOPE_VALUES = new Set(EMPLOYMENT_SCOPE_VALUE_STRINGS);
+const EMPLOYMENT_SCOPE_VALUE_SET = new Set(EMPLOYMENT_SCOPE_VALUES);
 
 export function getEmploymentScopeValue(source) {
-  if (!source || typeof source.employment_scope !== 'string') {
+  if (!source) {
     return '';
   }
-  const trimmed = source.employment_scope.trim();
-  return EMPLOYMENT_SCOPE_VALUES.has(trimmed) ? trimmed : '';
+  const rawValue = typeof source === 'string'
+    ? source
+    : typeof source.employment_scope === 'string'
+      ? source.employment_scope
+      : '';
+  const normalized = normalizeEmploymentScopeSystemValue(rawValue);
+  return normalized && EMPLOYMENT_SCOPE_VALUE_SET.has(normalized) ? normalized : '';
 }
 
 export function normalizeEmploymentScopeEnabledTypes(source) {
@@ -43,10 +45,9 @@ export function sanitizeEmploymentScopeFilter(values) {
   }
   const unique = new Set();
   values.forEach((value) => {
-    if (typeof value !== 'string') return;
-    const trimmed = value.trim();
-    if (trimmed && EMPLOYMENT_SCOPE_VALUES.has(trimmed)) {
-      unique.add(trimmed);
+    const normalized = getEmploymentScopeValue(value);
+    if (normalized) {
+      unique.add(normalized);
     }
   });
   return Array.from(unique);

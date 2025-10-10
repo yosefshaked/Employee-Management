@@ -11,6 +11,7 @@ import { isLeaveEntryType, getLeaveKindFromEntryType, HOLIDAY_TYPE_LABELS } from
 import { createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
 import { selectLeaveDayValue } from '@/selectors.js';
 import { getEmploymentScopeValue } from '@/constants/employment-scope.js';
+import { getEmploymentScopeLabel } from '@/lib/translations.js';
 
 export default function DetailedEntriesReport({
   sessions,
@@ -94,6 +95,9 @@ export default function DetailedEntriesReport({
     const employee = getEmployee(session.employee_id);
     const payment = resolvePayment(session);
     const employmentScopeValue = getEmploymentScopeValue(employee);
+    const employmentScopeLabel = employmentScopeValue
+      ? getEmploymentScopeLabel(employmentScopeValue)
+      : '';
     const isHourlyOrGlobal = employee?.employee_type === 'hourly' || employee?.employee_type === 'global';
     const serviceColorKey = employee?.employee_type === 'hourly' ? null : session.service_id;
     const serviceColor = getColorForService(serviceColorKey) || '#3B82F6';
@@ -101,7 +105,7 @@ export default function DetailedEntriesReport({
       <TableRow key={session.id} className="hover:bg-slate-50">
         <TableCell className="font-medium">{employee?.name || 'לא ידוע'}</TableCell>
         {showEmploymentScopeColumn ? (
-          <TableCell>{employmentScopeValue || '—'}</TableCell>
+          <TableCell>{employmentScopeLabel || '—'}</TableCell>
         ) : null}
         <TableCell>{format(parseISO(session.date), 'dd/MM/yyyy', { locale: he })}</TableCell>
         <TableCell>

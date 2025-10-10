@@ -14,7 +14,9 @@ import { fetchEmploymentScopePolicySettings } from '@/lib/settings-client.js';
 import {
   EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES,
   normalizeEmploymentScopePolicy,
+  getEmploymentScopeValue,
 } from '@/constants/employment-scope.js';
+import { getEmploymentScopeLabel } from '@/lib/translations.js';
 
 const EMPLOYEE_TYPES = {
   hourly: 'עובד שעתי',
@@ -101,12 +103,10 @@ export default function EmployeeList({ employees, rateHistories, services, onEdi
     }
 
     const requiresScope = employmentScopeEnabledTypes.includes(employee.employee_type);
-    const scopeValue = typeof employee.employment_scope === 'string'
-      ? employee.employment_scope.trim()
-      : '';
+    const normalizedScope = getEmploymentScopeValue(employee);
 
-    if (scopeValue) {
-      return <span className="text-slate-900">{scopeValue}</span>;
+    if (normalizedScope) {
+      return <span className="text-slate-900">{getEmploymentScopeLabel(normalizedScope)}</span>;
     }
 
     if (requiresScope) {

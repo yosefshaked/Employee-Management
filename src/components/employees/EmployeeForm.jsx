@@ -14,10 +14,11 @@ import { useOrg } from '@/org/OrgContext.jsx';
 import { createEmployee, updateEmployee as updateEmployeeRequest } from '@/api/employees.js';
 import { fetchEmploymentScopePolicySettings } from '@/lib/settings-client.js';
 import {
-  EMPLOYMENT_SCOPE_OPTIONS,
   EMPLOYMENT_SCOPE_DEFAULT_ENABLED_TYPES,
   normalizeEmploymentScopePolicy,
+  getEmploymentScopeValue,
 } from '@/constants/employment-scope.js';
+import { EMPLOYMENT_SCOPES, normalizeEmploymentScopeSystemValue } from '@/lib/translations.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
@@ -34,7 +35,7 @@ export default function EmployeeForm({ employee, onSuccess, onCancel, services: 
     notes: employee?.notes || '',
     working_days: employee?.working_days || ['SUN','MON','TUE','WED','THU'],
     annual_leave_days: employee?.annual_leave_days ?? 0,
-    employment_scope: employee?.employment_scope || '',
+    employment_scope: employee ? getEmploymentScopeValue(employee) : '',
   });
 
   useEffect(() => {
@@ -51,7 +52,7 @@ export default function EmployeeForm({ employee, onSuccess, onCancel, services: 
       notes: employee?.notes || '',
       working_days: employee?.working_days || ['SUN','MON','TUE','WED','THU'],
       annual_leave_days: employee?.annual_leave_days ?? 0,
-      employment_scope: employee?.employment_scope || '',
+      employment_scope: employee ? getEmploymentScopeValue(employee) : '',
     });
 
     // Also reset the instructor-specific rates
@@ -184,10 +185,8 @@ useEffect(() => {
       toast.error('המתינו לטעינת היקף המשרה לפני השמירה.');
       return;
     }
-    const trimmedEmploymentScope = typeof formData.employment_scope === 'string'
-      ? formData.employment_scope.trim()
-      : '';
-    if (shouldShowEmploymentScopeField && !trimmedEmploymentScope) {
+    const normalizedEmploymentScope = normalizeEmploymentScopeSystemValue(formData.employment_scope);
+    if (shouldShowEmploymentScopeField && !normalizedEmploymentScope) {
       const message = 'יש לבחור היקף משרה עבור סוג עובד זה.';
       setEmploymentScopeFieldError(message);
       toast.error(message);
@@ -206,7 +205,7 @@ useEffect(() => {
 
       const { current_rate: currentRate, ...employeeDetails } = formData;
       if (shouldShowEmploymentScopeField) {
-        employeeDetails.employment_scope = trimmedEmploymentScope;
+        employeeDetails.employment_scope = normalizedEmploymentScope;
       } else {
         delete employeeDetails.employment_scope;
       }
@@ -334,7 +333,7 @@ useEffect(() => {
         };
       }
       if (field === 'employment_scope') {
-        return { ...prev, employment_scope: value };
+        return { ...prev, employment_scope: normalizeEmploymentScopeSystemValue(value) };
       }
       return { ...prev, [field]: value };
     });
@@ -457,7 +456,7 @@ useEffect(() => {
                     <SelectItem value="placeholder" disabled>
                       בחר היקף משרה...
                     </SelectItem>
-                    {EMPLOYMENT_SCOPE_OPTIONS.map(({ value, label }) => (
+                    {Object.entries(EMPLOYMENT_SCOPES).map(([value, label]) => (
                       <SelectItem key={value} value={value}>
                         {label}
                       </SelectItem>
