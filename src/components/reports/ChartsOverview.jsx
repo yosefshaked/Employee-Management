@@ -1,5 +1,6 @@
 import React from 'react';
-import { aggregateGlobalDays, createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
+import { createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
+import { collectGlobalDayAggregates } from '@/lib/global-day-aggregator.js';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
@@ -94,7 +95,7 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     const employeeSessions = sessions.filter(
       s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
     );
-    const agg = aggregateGlobalDays(employeeSessions, { [employee.id]: employee });
+    const agg = collectGlobalDayAggregates(employeeSessions, { [employee.id]: employee });
     const totals = employeeSessions.reduce((acc, session) => {
       const isLeave = isLeaveEntryType(session.entry_type);
       const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || isLeave);
@@ -133,7 +134,7 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     });
     let payment = 0, hours = 0, sessionsCount = 0;
     const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
-    const agg = aggregateGlobalDays(monthSessions, employeesById);
+    const agg = collectGlobalDayAggregates(monthSessions, employeesById);
     monthSessions.forEach(session => {
       const employee = employeesById[session.employee_id];
       if (!employee || !employee.is_active) return;

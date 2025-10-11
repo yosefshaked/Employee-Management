@@ -1,5 +1,6 @@
 import React from 'react';
-import { aggregateGlobalDays, createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
+import { createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
+import { collectGlobalDayAggregates } from '@/lib/global-day-aggregator.js';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Calendar, TrendingUp } from "lucide-react";
@@ -63,7 +64,7 @@ export default function MonthlyReport({ sessions, employees, services, workSessi
     let totalStudents = 0;
     const employeePayments = {};
     const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
-    const agg = aggregateGlobalDays(monthSessions, employeesById);
+    const agg = collectGlobalDayAggregates(monthSessions, employeesById);
     monthSessions.forEach(session => {
       const emp = employeesById[session.employee_id];
       if (!emp || (emp.start_date && session.date < emp.start_date)) return;
