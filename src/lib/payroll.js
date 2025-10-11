@@ -33,26 +33,29 @@ export function aggregateGlobalDays(rows, employeesById) {
     const key = `${row.employee_id}|${row.date}`;
     const amount = Number(row.total_payment);
     const safeAmount = Number.isFinite(amount) ? amount : 0;
+    const rawMultiplier = isLeaveEntryType(row.entry_type)
+      ? getLeaveValueMultiplier({
+        entry_type: row.entry_type,
+        metadata: row.metadata,
+        leave_type: row.leave_type,
+        leave_kind: row.leave_kind,
+      })
+      : 1;
+    const normalizedMultiplier = Number.isFinite(rawMultiplier) && rawMultiplier > 0 ? rawMultiplier : 1;
     const existing = map.get(key);
     if (!existing) {
-      const multiplier = isLeaveEntryType(row.entry_type)
-        ? getLeaveValueMultiplier({
-          entry_type: row.entry_type,
-          metadata: row.metadata,
-          leave_type: row.leave_type,
-          leave_kind: row.leave_kind,
-        })
-        : 1;
       map.set(key, {
         dayType: row.entry_type,
         indices: [index],
         dailyAmount: safeAmount,
         payable: row.payable !== false,
-        multiplier: Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1,
+        multiplier: normalizedMultiplier,
       });
     } else {
       existing.indices.push(index);
       existing.dailyAmount += safeAmount;
+      const currentMultiplier = Number.isFinite(existing.multiplier) ? existing.multiplier : 0;
+      existing.multiplier = currentMultiplier + normalizedMultiplier;
       if (existing.dayType && row.entry_type && existing.dayType !== row.entry_type) {
         existing.conflict = true;
       }
