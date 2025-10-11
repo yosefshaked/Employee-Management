@@ -1,5 +1,10 @@
 import { format } from 'date-fns';
-import { createWorkSessions, updateWorkSession, softDeleteWorkSession } from '@/api/work-sessions.js';
+import {
+  fetchWorkSessions,
+  createWorkSessions,
+  updateWorkSession,
+  softDeleteWorkSession,
+} from '@/api/work-sessions.js';
 import { createLeaveBalanceEntry, deleteLeaveBalanceEntries } from '@/api/leave-balances.js';
 import { hasDuplicateSession } from '@/lib/workSessionsUtils.js';
 import { calculateGlobalDailyRate } from '../../lib/payroll.js';
@@ -395,6 +400,58 @@ export function useTimeEntry({
 
     const canWriteMetadata = await resolveCanWriteMetadata();
 
+    const submittedSegmentIds = new Set(
+      segmentList
+        .filter(segment => segment && segment.id)
+        .map(segment => String(segment.id)),
+    );
+
+    let hasPaidGlobalSegment = false;
+    let preferExistingGlobalSegments = submittedSegmentIds.size > 0;
+
+    if (employee.employee_type === 'global') {
+      let existingSessionsResponse;
+      try {
+        existingSessionsResponse = await fetchWorkSessions({
+          session,
+          orgId,
+          query: {
+            start_date: normalizedDate,
+            end_date: normalizedDate,
+            employee_id: employee.id,
+          },
+        });
+      } catch (error) {
+        const fetchError = new Error('נכשל באימות רישומי העבודה הקיימים ליום זה. נסה שוב.');
+        fetchError.code = error?.code || 'TIME_ENTRY_EXISTING_FETCH_FAILED';
+        throw fetchError;
+      }
+
+      const existingSessions = Array.isArray(existingSessionsResponse?.sessions)
+        ? existingSessionsResponse.sessions
+        : [];
+
+      const existingWorkSegments = existingSessions.filter(session => (
+        session
+        && session.employee_id === employee.id
+        && !isLeaveEntryType(session.entry_type)
+        && session.entry_type !== 'adjustment'
+      ));
+
+      const persistedOtherSegments = existingWorkSegments.filter(session => {
+        const sessionId = session?.id ? String(session.id) : null;
+        if (!sessionId) {
+          return true;
+        }
+        return !submittedSegmentIds.has(sessionId);
+      });
+
+      if (persistedOtherSegments.length > 0) {
+        hasPaidGlobalSegment = true;
+        preferExistingGlobalSegments = true;
+      }
+    }
+
     const toInsert = [];
     const toUpdate = [];
 
@@ -450,11 +507,29 @@ export function useTimeEntry({
       if (isHourly) {
         totalPayment = (Number.isFinite(hoursValue) ? hoursValue : 0) * rateUsed;
       } else if (isGlobal) {
-        try {
-          totalPayment = calculateGlobalDailyRate(employee, dayReference, rateUsed);
-        } catch (error) {
-          error.code = error.code || 'TIME_ENTRY_GLOBAL_RATE_FAILED';
-          throw error;
+        let shouldAssignFullDailyRate = false;
+        if (!hasPaidGlobalSegment) {
+          const isExistingSegment = Boolean(segment.id);
+          const allowFullRateForNewSegment = !preferExistingGlobalSegments;
+          if (isExistingSegment || allowFullRateForNewSegment) {
+            shouldAssignFullDailyRate = true;
+          }
+        }
+
+        if (shouldAssignFullDailyRate) {
+          try {
+            totalPayment = calculateGlobalDailyRate(employee, dayReference, rateUsed);
+            hasPaidGlobalSegment = true;
+            preferExistingGlobalSegments = true;
+          } catch (error) {
+            error.code = error.code || 'TIME_ENTRY_GLOBAL_RATE_FAILED';
+            throw error;
+          }
+        } else {
+          totalPayment = 0;
+          if (!preferExistingGlobalSegments) {
+            preferExistingGlobalSegments = Boolean(segment.id);
+          }
         }
       } else {
         const service = services.find(svc => svc.id === segment.service_id);
