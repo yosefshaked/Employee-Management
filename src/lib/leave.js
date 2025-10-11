@@ -207,8 +207,8 @@ const ENTRY_TYPE_TO_KIND = {
   paid_leave: 'system_paid',
   leave_system_paid: 'system_paid',
   leave_employee_paid: 'employee_paid',
-  leave_unpaid: 'unpaid',
-  leave: 'unpaid',
+  leave_unpaid: 'vacation_unpaid',
+  leave: 'vacation_unpaid',
   leave_half_day: 'half_day',
 };
 
