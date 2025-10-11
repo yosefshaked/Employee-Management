@@ -14,7 +14,8 @@ import { useTimeEntry } from './useTimeEntry.js';
 import { ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import he from '@/i18n/he.json';
-import { calculateGlobalDailyRate, aggregateGlobalDays, createLeaveDayValueResolver } from '@/lib/payroll.js';
+import { calculateGlobalDailyRate, createLeaveDayValueResolver } from '@/lib/payroll.js';
+import { collectGlobalDayAggregates } from '@/lib/global-day-aggregator.js';
 import {
   isLeaveEntryType,
   LEAVE_TYPE_OPTIONS,
@@ -267,7 +268,7 @@ export default function MultiDateEntryModal({
         : r.entry_type,
       total_payment: payments[i]
     }));
-    return aggregateGlobalDays(withPay, employeesById);
+    return collectGlobalDayAggregates(withPay, employeesById);
   }, [rows, payments, employeesById]);
   const duplicateMap = useMemo(() => {
     const map = {};

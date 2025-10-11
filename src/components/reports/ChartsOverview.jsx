@@ -1,35 +1,14 @@
 import React from 'react';
-import { aggregateGlobalDays, createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, parseISO, startOfMonth, endOfMonth, eachMonthOfInterval } from "date-fns";
 import { he } from "date-fns/locale";
-import { isLeaveEntryType } from '@/lib/leave.js';
-import { selectLeaveDayValue } from '@/selectors.js';
 
 const COLORS = ['#3B82F6', '#10B981', '#8B5CF6', '#F59E0B', '#EF4444', '#06B6D4'];
 
-export default function ChartsOverview({ sessions, employees, isLoading, services, workSessions = [], leavePayPolicy }) {
+export default function ChartsOverview({ sessions, employees, isLoading, services, workSessions = [] }) {
   const [pieType, setPieType] = React.useState('count');
   const [trendType, setTrendType] = React.useState('payment');
-
-  const resolveLeaveValue = React.useMemo(() => createLeaveDayValueResolver({
-    employees,
-    workSessions,
-    services,
-    leavePayPolicy,
-    leaveDayValueSelector: selectLeaveDayValue,
-  }), [employees, workSessions, services, leavePayPolicy]);
-
-  const resolvePayment = React.useCallback((session) => {
-    const employee = employees.find(emp => emp.id === session.employee_id);
-    if (!employee || employee.employee_type === 'global') return Number(session.total_payment) || 0;
-    if (!isLeaveEntryType(session.entry_type) || session.payable === false) return Number(session.total_payment) || 0;
-    const { amount, preStartDate } = resolveLeaveSessionValue(session, resolveLeaveValue, { employee });
-    if (preStartDate) return 0;
-    if (typeof amount === 'number' && Number.isFinite(amount)) return amount;
-    return Number(session.total_payment) || 0;
-  }, [employees, resolveLeaveValue]);
   
   // Aggregate sessions by type for the pie chart (count vs time)
   // Must be declared before any early returns to preserve hook order
@@ -75,6 +54,30 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     return Array.from(totals, ([name, value]) => ({ name, value }));
   }, [sessions, employees, services, pieType]);
 
+  const paymentByEmployee = React.useMemo(() => {
+    if (!sessions || !employees) return [];
+
+    const employeeById = new Map(employees.map(emp => [emp.id, emp]));
+    const totals = new Map();
+
+    for (const session of sessions) {
+      const employee = employeeById.get(session.employee_id);
+      if (!employee || !employee.is_active) continue;
+      if (employee.start_date && session.date < employee.start_date) continue;
+
+      const amount = Number(session.total_payment) || 0;
+      if (!totals.has(employee.id)) {
+        totals.set(employee.id, { name: employee.name, payment: 0, sessions: 0 });
+      }
+
+      const bucket = totals.get(employee.id);
+      bucket.payment += amount;
+      bucket.sessions += 1;
+    }
+
+    return Array.from(totals.values()).filter(item => item.payment !== 0);
+  }, [sessions, employees]);
+
   if (isLoading) {
     return (
       <div className="space-y-8">
@@ -86,31 +89,6 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
       </div>
     );
   }
-
-  // No rate calculations needed for chart totals; rely on stored session payments
-
-  // Payment by employee (active employees only)
-  const paymentByEmployee = employees.filter(e => e.is_active).map(employee => {
-    const employeeSessions = sessions.filter(
-      s => s.employee_id === employee.id && (!employee.start_date || s.date >= employee.start_date)
-    );
-    const agg = aggregateGlobalDays(employeeSessions, { [employee.id]: employee });
-    const totals = employeeSessions.reduce((acc, session) => {
-      const isLeave = isLeaveEntryType(session.entry_type);
-      const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || isLeave);
-      if (!isGlobalDay) acc.payment += resolvePayment(session);
-      if (session.entry_type === 'session') {
-        acc.totalSessions += session.sessions_count || 0;
-      }
-      return acc;
-    }, { payment: 0, totalSessions: 0 });
-    agg.forEach(v => { totals.payment += v.dailyAmount; });
-    return {
-      name: employee.name,
-      payment: totals.payment,
-      sessions: employeeSessions.length
-    };
-  }).filter(item => item.payment !== 0);
 
   // Monthly trend based on filtered range (fallback to last 6 months)
   let startDate, endDate;
@@ -133,14 +111,11 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
     });
     let payment = 0, hours = 0, sessionsCount = 0;
     const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
-    const agg = aggregateGlobalDays(monthSessions, employeesById);
     monthSessions.forEach(session => {
       const employee = employeesById[session.employee_id];
       if (!employee || !employee.is_active) return;
       if (employee.start_date && session.date < employee.start_date) return;
-      const isLeave = isLeaveEntryType(session.entry_type);
-      const isGlobalDay = employee.employee_type === 'global' && (session.entry_type === 'hours' || isLeave);
-      if (!isGlobalDay) payment += resolvePayment(session);
+      payment += Number(session.total_payment) || 0;
       if (session.entry_type === 'hours') {
         hours += session.hours || 0;
         sessionsCount += session.hours || 0;
@@ -152,7 +127,6 @@ export default function ChartsOverview({ sessions, employees, isLoading, service
         sessionsCount += session.sessions_count || 0;
       }
     });
-    agg.forEach(v => { payment += v.dailyAmount; });
     return {
       month: format(month, 'MMM', { locale: he }),
       payment,

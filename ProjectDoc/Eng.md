@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.6.8**
-**Last Updated: 2025-10-10**
+**Version: 1.7.0**
+**Last Updated: 2025-10-12**
 
 ## 1. Vision & Purpose
 
@@ -712,6 +712,8 @@ The leave module centralizes all holiday rules, quotas, and ledger actions so em
 - Date filters in reports accept manual input or calendar selection and support multiple formats.
 - Hours KPI counts time for hourly employees only; employee type filter now includes global staff.
 - Detailed entries report can group by employee type with subtotals.
+- Global payroll aggregation now sums `total_payment` snapshots per employee-day to prevent double-paying segmented workdays.
+- Monthly Report totals now track a dedicated “תשלום חופשה” (Leave Pay) column, populated from the per-employee leave payment accumulator.
 
 ## 8. Reports CSV Export
 

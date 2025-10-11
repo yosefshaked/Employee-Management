@@ -4,9 +4,9 @@ import path from 'node:path';
 import fs from 'node:fs';
 import {
   calculateGlobalDailyRate,
-  aggregateGlobalDays,
   computePeriodTotals,
 } from '../src/lib/payroll.js';
+import { collectGlobalDayAggregates } from '../src/lib/global-day-aggregator.js';
 import { useTimeEntry } from '../src/components/time-entry/useTimeEntry.js';
 import { __setWorkSessionMetadataSupportForTests } from '../src/lib/workSessionsMetadata.js';
 
@@ -81,7 +81,7 @@ describe('global leave audit', () => {
     assert.equal(inserted[0].payable, false);
     assert.equal(inserted[0].total_payment, 0);
     assert.equal(inserted[0].rate_used, null);
-    const agg = aggregateGlobalDays(inserted, { [employee.id]: employee });
+    const agg = collectGlobalDayAggregates(inserted, { [employee.id]: employee });
     assert.equal(agg.size, 0);
     const totals = computePeriodTotals({
       workSessions: inserted,
@@ -107,7 +107,7 @@ describe('global leave audit', () => {
     assert.equal(inserted[0].payable, true);
     assert.equal(inserted[0].total_payment, expectedDaily);
     assert.equal(inserted[0].rate_used, rate);
-    const agg = aggregateGlobalDays(inserted, { [employee.id]: employee });
+    const agg = collectGlobalDayAggregates(inserted, { [employee.id]: employee });
     assert.equal(agg.size, 1);
     const [entry] = [...agg.values()];
     assert.equal(entry.dailyAmount, expectedDaily);
@@ -134,7 +134,7 @@ describe('global leave audit', () => {
     const inserted = harness.getInserted();
     assert.equal(inserted[0].payable, true);
     assert.equal(inserted[0].total_payment, expectedDaily);
-    const agg = aggregateGlobalDays(inserted, { [employee.id]: employee });
+    const agg = collectGlobalDayAggregates(inserted, { [employee.id]: employee });
     const [entry] = [...agg.values()];
     assert.equal(entry.dailyAmount, expectedDaily);
     const totals = computePeriodTotals({
@@ -159,7 +159,7 @@ describe('global leave audit', () => {
     assert.equal(result.inserted.length, 1);
     const inserted = harness.getInserted();
     assert.equal(inserted[0].total_payment, fullDaily / 2);
-    const agg = aggregateGlobalDays(inserted, { [employee.id]: employee });
+    const agg = collectGlobalDayAggregates(inserted, { [employee.id]: employee });
     const [entry] = [...agg.values()];
     assert.equal(entry.dailyAmount, fullDaily / 2);
     assert.equal(entry.multiplier, 0.5);
@@ -194,7 +194,7 @@ describe('global leave audit', () => {
     assert.equal(paidRow.total_payment, expectedDaily);
     assert.equal(unpaidRow.payable, false);
     assert.equal(unpaidRow.total_payment, 0);
-    const agg = aggregateGlobalDays(inserted, { [employee.id]: employee });
+    const agg = collectGlobalDayAggregates(inserted, { [employee.id]: employee });
     assert.equal(agg.size, 1);
     const [entry] = [...agg.values()];
     assert.equal(entry.dailyAmount, expectedDaily);
@@ -301,7 +301,7 @@ describe('global leave audit', () => {
       { employee_id: employee.id, date: halfDate, entry_type: 'leave_half_day', payable: true, total_payment: halfDaily },
       { employee_id: employee.id, date: unpaidDate, entry_type: 'leave_system_paid', payable: false, total_payment: 0 },
     ];
-    const agg = aggregateGlobalDays(rows, { [employee.id]: employee });
+    const agg = collectGlobalDayAggregates(rows, { [employee.id]: employee });
     const tableSum = [...agg.values()].reduce((sum, entry) => sum + entry.dailyAmount, 0);
     const totals = computePeriodTotals({
       workSessions: rows,
