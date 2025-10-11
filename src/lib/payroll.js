@@ -31,11 +31,11 @@ export function aggregateGlobalDays(rows, employeesById) {
     if (row.entry_type !== 'hours' && !isLeaveEntryType(row.entry_type)) return;
     if (isLeaveEntryType(row.entry_type) && row.payable === false) return;
     const key = `${row.employee_id}|${row.date}`;
+    const amount = row.total_payment != null
+      ? row.total_payment
+      : (row.rate_used != null ? calculateGlobalDailyRate(emp, row.date, row.rate_used) : 0);
     const existing = map.get(key);
     if (!existing) {
-      const amount = row.total_payment != null
-        ? row.total_payment
-        : (row.rate_used != null ? calculateGlobalDailyRate(emp, row.date, row.rate_used) : 0);
       const multiplier = isLeaveEntryType(row.entry_type)
         ? getLeaveValueMultiplier({
           entry_type: row.entry_type,
@@ -54,6 +54,7 @@ export function aggregateGlobalDays(rows, employeesById) {
       });
     } else {
       existing.indices.push(index);
+      existing.dailyAmount += amount;
       if (existing.dayType && row.entry_type && existing.dayType !== row.entry_type) {
         existing.conflict = true;
       }
