@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.6.7**
-**Last Updated: 2025-10-18**
+**Version: 1.6.8**
+**Last Updated: 2025-10-10**
 
 ## 1. Vision & Purpose
 
@@ -712,4 +712,27 @@ The leave module centralizes all holiday rules, quotas, and ledger actions so em
 - Date filters in reports accept manual input or calendar selection and support multiple formats.
 - Hours KPI counts time for hourly employees only; employee type filter now includes global staff.
 - Detailed entries report can group by employee type with subtotals.
+
+## 8. Reports CSV Export
+
+### 8.1 Detailed Entries CSV Schema (Desktop Export)
+
+The Reports page now builds CSV files through a dedicated transformation pipeline that resolves employees, services, employment scope labels, and leave metadata before serializing the output with a UTF-8 BOM for Excel compatibility. Rows are sorted by work date (oldest first) so administrators can review the period chronologically offline.
+
+| Column Header (Hebrew) | Source Fields | Content Rules |
+| :--- | :--- | :--- |
+| שם העובד | `WorkSession.employee_id` → `Employee.name` | Falls back to "לא ידוע" when the employee record is missing. |
+| מספר עובד | `Employee.employee_id` | Blank when the internal identifier is not defined. |
+| סוג עובד | `Employee.employee_type` | Mapped with `EMPLOYEE_TYPE_LABELS` ("שעתי", "גלובלי", "מדריך"); blank if the type is unknown. |
+| היקף משרה | `Employee` employment scope helpers | Uses `getEmploymentScopeValue` + `getEmploymentScopeLabel`; blank when scope is disabled or unset. |
+| תאריך | `WorkSession.date` | Formatted as `DD/MM/YYYY` using `date-fns`. |
+| יום בשבוע | `WorkSession.date` | Formatted with the Hebrew locale (e.g., "יום שני"). |
+| סוג רישום | `WorkSession.entry_type` | Leave types map via `HOLIDAY_TYPE_LABELS`; other types use localized labels (hours, sessions, adjustments) with "רישום אחר" as the fallback. |
+| תיאור / שירות | `WorkSession.entry_type`, `service_id` | Leave rows reuse the leave label, session rows show the resolved service name ("שירות לא ידוע" fallback), all other types display "עבודה שעתית". |
+| שעות | `WorkSession.hours` | Rendered only for hourly/global entries with `entry_type === 'hours'`; numeric values preserve whole numbers or 2 decimals. |
+| מספר מפגשים | `WorkSession.sessions_count` | Populated only when `entry_type === 'session'`. |
+| מספר תלמידים | `WorkSession.students_count` | Populated only for session rows. |
+| תעריף | `WorkSession.rate_used` | Serialized with two decimals when numeric; otherwise blank. |
+| סה"כ לתשלום | `WorkSession.total_payment` | Serialized with two decimals when numeric; otherwise blank. |
+| הערות | `WorkSession.notes` | Free-text note, blank when absent. |
 
