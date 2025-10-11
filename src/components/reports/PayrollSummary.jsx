@@ -28,7 +28,7 @@ const InstructorDetailsRow = ({ details, colSpan }) => (
       <div className="font-semibold text-xs text-slate-500 grid grid-cols-4 gap-4 mb-1 px-2">
         <span>שם השירות</span>
         <span className="text-center">כמות מפגשים</span>
-        <span className="text-center">תעריף למפגש</span>
+        <span className="text-center">תעריף ממוצע למפגש</span>
         <span className="text-left">סה"כ</span>
       </div>
       <div className="space-y-1">
