@@ -408,6 +408,7 @@ export function useTimeEntry({
 
     let hasPaidGlobalSegment = false;
     let preferExistingGlobalSegments = submittedSegmentIds.size > 0;
+    let remainingGlobalDailyPortion = 1;
 
     if (employee.employee_type === 'global') {
       let existingSessionsResponse;
@@ -431,6 +432,35 @@ export function useTimeEntry({
         ? existingSessionsResponse.sessions
         : [];
 
+      const existingPaidLeaveSessions = existingSessions.filter(session => (
+        session
+        && session.employee_id === employee.id
+        && isLeaveEntryType(session.entry_type)
+        && session.entry_type !== 'adjustment'
+        && session.payable !== false
+      ));
+
+      const existingLeavePortion = existingPaidLeaveSessions.reduce((sum, leaveSession) => {
+        if (!leaveSession) {
+          return sum;
+        }
+        if (isHalfDayLeaveSession(leaveSession)) {
+          return sum + 0.5;
+        }
+        const multiplierValue = typeof leaveSession.multiplier === 'number'
+          ? leaveSession.multiplier
+          : Number.parseFloat(leaveSession.multiplier);
+        if (Number.isFinite(multiplierValue) && multiplierValue > 0) {
+          return sum + multiplierValue;
+        }
+        return sum + 1;
+      }, 0);
+
+      remainingGlobalDailyPortion = Math.max(0, 1 - existingLeavePortion);
+      if (remainingGlobalDailyPortion <= 0) {
+        hasPaidGlobalSegment = true;
+      }
+
       const existingWorkSegments = existingSessions.filter(session => (
         session
         && session.employee_id === employee.id
@@ -446,8 +476,18 @@ export function useTimeEntry({
         return !submittedSegmentIds.has(sessionId);
       });
 
-      if (persistedOtherSegments.length > 0) {
+      const hasPersistedPaidSegment = persistedOtherSegments.some(session => {
+        const paymentValue = typeof session?.total_payment === 'number'
+          ? session.total_payment
+          : Number.parseFloat(session?.total_payment);
+        return Number.isFinite(paymentValue) && paymentValue > 0;
+      });
+
+      if (hasPersistedPaidSegment) {
         hasPaidGlobalSegment = true;
+        preferExistingGlobalSegments = true;
+        remainingGlobalDailyPortion = 0;
+      } else if (persistedOtherSegments.length > 0) {
         preferExistingGlobalSegments = true;
       }
     }
@@ -518,9 +558,12 @@ export function useTimeEntry({
 
         if (shouldAssignFullDailyRate) {
           try {
-            totalPayment = calculateGlobalDailyRate(employee, dayReference, rateUsed);
+            const dailyRate = calculateGlobalDailyRate(employee, dayReference, rateUsed);
+            const payablePortion = Math.max(0, Math.min(1, remainingGlobalDailyPortion));
+            totalPayment = dailyRate * payablePortion;
             hasPaidGlobalSegment = true;
             preferExistingGlobalSegments = true;
+            remainingGlobalDailyPortion = Math.max(0, remainingGlobalDailyPortion - payablePortion);
           } catch (error) {
             error.code = error.code || 'TIME_ENTRY_GLOBAL_RATE_FAILED';
             throw error;
