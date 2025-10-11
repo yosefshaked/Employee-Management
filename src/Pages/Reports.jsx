@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { BarChart3, Download, TrendingUp } from "lucide-react";
 import CombinedHoursCard from "@/components/dashboard/CombinedHoursCard.jsx";
 import { selectHourlyHours, selectMeetingHours, selectGlobalHours, selectLeaveDayValue } from "@/selectors.js";
-import { format, startOfMonth } from "date-fns";
+import { format, startOfMonth, parseISO } from "date-fns";
+import { he } from "date-fns/locale";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 
@@ -18,7 +19,15 @@ import MonthlyReport from "../components/reports/MonthlyReport";
 import PayrollSummary from "../components/reports/PayrollSummary";
 import ChartsOverview from "../components/reports/ChartsOverview";
 import { computePeriodTotals, createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
-import { DEFAULT_LEAVE_POLICY, DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePolicy, normalizeLeavePayPolicy, isLeaveEntryType } from '@/lib/leave.js';
+import {
+  DEFAULT_LEAVE_POLICY,
+  DEFAULT_LEAVE_PAY_POLICY,
+  normalizeLeavePolicy,
+  normalizeLeavePayPolicy,
+  isLeaveEntryType,
+  getLeaveKindFromEntryType,
+  HOLIDAY_TYPE_LABELS,
+} from '@/lib/leave.js';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { fetchLeavePolicySettings, fetchLeavePayPolicySettings, fetchEmploymentScopePolicySettings } from '@/lib/settings-client.js';
 import {
@@ -33,6 +42,157 @@ import { fetchEmployeesList } from '@/api/employees.js';
 import { fetchWorkSessions } from '@/api/work-sessions.js';
 
 const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+
+const EMPLOYEE_TYPE_LABELS = Object.freeze({
+  hourly: 'שעתי',
+  global: 'גלובלי',
+  instructor: 'מדריך',
+});
+
+const ENTRY_TYPE_LABELS = Object.freeze({
+  hours: 'שעות',
+  session: 'מפגש',
+  adjustment: 'התאמה',
+});
+
+const CSV_HEADERS = [
+  'שם העובד',
+  'מספר עובד',
+  'סוג עובד',
+  'היקף משרה',
+  'תאריך',
+  'יום בשבוע',
+  'סוג רישום',
+  'תיאור / שירות',
+  'שעות',
+  'מספר מפגשים',
+  'מספר תלמידים',
+  'תעריף',
+  'סה"כ לתשלום',
+  'הערות',
+];
+
+function parseSessionDate(value) {
+  if (!value) {
+    return null;
+  }
+  const parsed = typeof value === 'string' ? parseISO(value) : new Date(value);
+  if (!(parsed instanceof Date) || Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+function formatNumeric(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return '';
+  }
+  return numericValue.toFixed(2);
+}
+
+function formatHoursValue(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return '';
+  }
+  return numericValue % 1 === 0 ? String(numericValue) : numericValue.toFixed(2);
+}
+
+function escapeCsvValue(value) {
+  const stringValue = value === null || value === undefined ? '' : String(value);
+  return `"${stringValue.replace(/"/g, '""')}"`;
+}
+
+function buildCsvRows({ sessions, employees, services }) {
+  if (!Array.isArray(sessions) || sessions.length === 0) {
+    return [];
+  }
+
+  const employeeMap = new Map(Array.isArray(employees) ? employees.map(employee => [employee.id, employee]) : []);
+  const serviceMap = new Map(Array.isArray(services) ? services.map(service => [service.id, service]) : []);
+
+  return [...sessions]
+    .sort((a, b) => {
+      const first = parseSessionDate(a?.date)?.getTime() || 0;
+      const second = parseSessionDate(b?.date)?.getTime() || 0;
+      return first - second;
+    })
+    .map((session) => {
+      const employee = employeeMap.get(session.employee_id) || null;
+      const employeeName = employee?.name || 'לא ידוע';
+      const employeeNumber = employee?.employee_id || '';
+      const employeeType = employee?.employee_type || '';
+      const employeeTypeLabel = employeeType
+        ? (EMPLOYEE_TYPE_LABELS[employeeType] || 'לא ידוע')
+        : '';
+
+      const employmentScopeValue = getEmploymentScopeValue(employee);
+      const employmentScopeLabel = employmentScopeValue
+        ? getEmploymentScopeLabel(employmentScopeValue)
+        : '';
+
+      const parsedDate = parseSessionDate(session.date);
+      const formattedDate = parsedDate
+        ? format(parsedDate, 'dd/MM/yyyy')
+        : '';
+      const dayOfWeek = parsedDate
+        ? format(parsedDate, 'EEEE', { locale: he })
+        : '';
+
+      const entryType = session?.entry_type || '';
+      const isLeave = isLeaveEntryType(entryType);
+      const leaveKind = isLeave ? getLeaveKindFromEntryType(entryType) : null;
+      const leaveLabel = leaveKind ? (HOLIDAY_TYPE_LABELS[leaveKind] || 'חופשה') : '';
+
+      const entryTypeLabel = isLeave
+        ? leaveLabel
+        : (ENTRY_TYPE_LABELS[entryType] || (entryType ? 'רישום אחר' : ''));
+
+      let description = 'עבודה שעתית';
+      if (isLeave) {
+        description = leaveLabel;
+      } else if (entryType === 'session') {
+        const serviceName = serviceMap.get(session.service_id)?.name || 'שירות לא ידוע';
+        description = serviceName;
+      }
+
+      const isHourlyOrGlobal = employeeType === 'hourly' || employeeType === 'global';
+      const hours = isHourlyOrGlobal && entryType === 'hours'
+        ? formatHoursValue(session.hours)
+        : '';
+
+      const sessionsCount = entryType === 'session'
+        ? (session.sessions_count ?? '')
+        : '';
+
+      const studentsCount = entryType === 'session'
+        ? (session.students_count ?? '')
+        : '';
+
+      const rate = formatNumeric(session.rate_used);
+      const totalPayment = formatNumeric(session.total_payment);
+
+      const notes = session?.notes || '';
+
+      return {
+        'שם העובד': employeeName,
+        'מספר עובד': employeeNumber,
+        'סוג עובד': employeeTypeLabel,
+        'היקף משרה': employmentScopeLabel,
+        'תאריך': formattedDate,
+        'יום בשבוע': dayOfWeek,
+        'סוג רישום': entryTypeLabel,
+        'תיאור / שירות': description,
+        'שעות': hours,
+        'מספר מפגשים': sessionsCount,
+        'מספר תלמידים': studentsCount,
+        'תעריף': rate,
+        'סה"כ לתשלום': totalPayment,
+        'הערות': notes,
+      };
+    });
+}
 
 function shouldDisplayEmploymentScope({ employeeTypeFilter, enabledTypes, isLoading }) {
   if (isLoading) {
@@ -402,40 +562,20 @@ export default function Reports() {
     setFilters(prev => ({ ...prev, employmentScopes: sanitized }));
   }, [setFilters]);
 
-  const getServiceName = (serviceId) => {
-    const service = services.find(s => s.id === serviceId);
-    return service ? service.name : 'עבודה שעתית';
-  };
-
   const exportToExcel = () => {
-    const exportData = [...filteredSessions]
-      .sort((a, b) => new Date(a.date) - new Date(b.date))
-      .map((session) => {
-        const employee = employees.find(emp => emp.id === session.employee_id);
-        const employmentScopeValue = getEmploymentScopeValue(employee);
-        const employmentScopeLabel = employmentScopeValue
-          ? getEmploymentScopeLabel(employmentScopeValue)
-          : '';
-        return {
-          'שם העובד': employee ? employee.name : 'לא ידוע',
-          'תאריך': session.date,
-          'שירות': getServiceName(session.service_id),
-          'שעות': session.hours || '',
-          'מפגשים': session.sessions_count || '',
-          'תלמידים': session.students_count || '',
-          'היקף משרה': employmentScopeLabel,
-          'תעריף': session.rate_used,
-          'סה"כ תשלום': session.total_payment,
-          'הערות': session.notes || '',
-        };
-      });
+    const rows = buildCsvRows({
+      sessions: filteredSessions,
+      employees,
+      services,
+    });
 
-    if (exportData.length === 0) return;
+    if (rows.length === 0) {
+      return;
+    }
 
-    const headers = Object.keys(exportData[0]);
     const csvContent = [
-      headers.join(','),
-      ...exportData.map(row => headers.map(header => `"${row[header] || ''}"`).join(',')),
+      CSV_HEADERS.join(','),
+      ...rows.map(row => CSV_HEADERS.map(header => escapeCsvValue(row[header])).join(',')),
     ].join('\n');
 
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
