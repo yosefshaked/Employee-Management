@@ -243,8 +243,21 @@ export function computePeriodTotals({
       ? (Number.isFinite(val.multiplier) && val.multiplier > 0 ? val.multiplier : 1)
       : 0;
     if (leaveCredit) result.diagnostics.paidLeaveDays += leaveCredit;
-    if (!perEmp[empId]) perEmp[empId] = { employee_id: empId, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
+    if (!perEmp[empId]) {
+      perEmp[empId] = {
+        employee_id: empId,
+        pay: 0,
+        hours: 0,
+        sessions: 0,
+        daysPaid: 0,
+        adjustments: 0,
+        leavePay: 0,
+      };
+    }
     perEmp[empId].pay += val.dailyAmount;
+    if (isLeaveEntryType(val.dayType) && val.payable !== false) {
+      perEmp[empId].leavePay += val.dailyAmount;
+    }
     perEmp[empId].daysPaid += leaveCredit || 1;
   });
 
@@ -252,7 +265,15 @@ export function computePeriodTotals({
     const emp = employeesById[row.employee_id];
     if (!emp) return;
     if (!perEmp[row.employee_id]) {
-      perEmp[row.employee_id] = { employee_id: row.employee_id, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
+      perEmp[row.employee_id] = {
+        employee_id: row.employee_id,
+        pay: 0,
+        hours: 0,
+        sessions: 0,
+        daysPaid: 0,
+        adjustments: 0,
+        leavePay: 0,
+      };
     }
     const bucket = perEmp[row.employee_id];
     const isGlobal = emp.employee_type === 'global';
@@ -286,10 +307,12 @@ export function computePeriodTotals({
       const credit = Math.min(multiplier, remaining);
       const scale = multiplier ? credit / multiplier : 0;
       const amount = sessionValue.amount * scale;
-      if (amount) {
-        result.totalPay += amount;
-        bucket.pay += amount;
+      const safeAmount = Number.isFinite(amount) ? amount : 0;
+      if (safeAmount) {
+        result.totalPay += safeAmount;
+        bucket.pay += safeAmount;
       }
+      bucket.leavePay += safeAmount;
       processedLeave.set(key, already + credit);
       bucket.daysPaid += credit;
       result.diagnostics.paidLeaveDays += credit;

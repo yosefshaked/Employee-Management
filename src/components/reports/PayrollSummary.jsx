@@ -80,7 +80,7 @@ export default function PayrollSummary({
     setExpandedRows(prev => ({...prev, [employeeId]: !prev[employeeId]}));
   };
 
-  const instructorDetailsColSpan = showEmploymentScopeColumn ? 11 : 10;
+  const instructorDetailsColSpan = showEmploymentScopeColumn ? 12 : 11;
 
   const totalsMap = Object.fromEntries(employeeTotals.map(t => [t.employee_id, t]));
   const leaveByEmployee = useMemo(() => {
@@ -124,7 +124,14 @@ export default function PayrollSummary({
         detail.avgRate = detail.totalPayment / (detail.sessionsCount || 1);
       });
     }
-    const totals = totalsMap[employee.id] || { pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
+    const totals = totalsMap[employee.id] || {
+      pay: 0,
+      hours: 0,
+      sessions: 0,
+      daysPaid: 0,
+      adjustments: 0,
+      leavePay: 0,
+    };
     const baseSalary = employee.employee_type === 'global' ? getRateForDate(employee.id, new Date()).rate : null;
     const leaveEntries = leaveByEmployee.get(employee.id) || [];
     const systemPaidCount = leaveEntries.filter(entry => {
@@ -164,6 +171,7 @@ export default function PayrollSummary({
       leaveRemaining: leaveSummary.remaining,
       employmentScopeValue,
       employmentScopeLabel,
+      leavePay: totals.leavePay || 0,
     };
   }).filter(emp => {
     const hasActivity = emp.totalPayment !== 0 || emp.totalHours > 0 || emp.totalSessions > 0;
@@ -187,6 +195,7 @@ export default function PayrollSummary({
             <TableHead className="text-right">סה"כ פעילות</TableHead>
             <TableHead className="text-right">חגים (מערכת)</TableHead>
             <TableHead className="text-right">חגים (מכסה)</TableHead>
+            <TableHead className="text-right">תשלום חופשה</TableHead>
             <TableHead className="text-right">יתרת חופשה</TableHead>
             <TableHead className="text-right">התאמות</TableHead>
             <TableHead className="text-right">סה״כ לתשלום</TableHead>
@@ -221,6 +230,9 @@ export default function PayrollSummary({
                 </TableCell>
                 <TableCell className="font-semibold text-slate-600 text-right">{employee.systemPaidCount}</TableCell>
                 <TableCell className="font-semibold text-slate-600 text-right">{employee.employeePaidDays.toFixed(1)}</TableCell>
+                <TableCell className="font-semibold text-right text-slate-700">
+                  ₪{(employee.leavePay || 0).toLocaleString()}
+                </TableCell>
                 <TableCell className={employee.leaveRemaining < 0 ? 'text-right text-red-600 font-semibold' : 'text-right font-semibold text-slate-700'}>
                   {employee.leaveRemaining.toFixed(1)}
                 </TableCell>
