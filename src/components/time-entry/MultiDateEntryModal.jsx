@@ -167,11 +167,13 @@ export default function MultiDateEntryModal({
 
   const createDefaultLeaveSelection = useCallback((employee, dateStr) => ({
     leaveType: defaultLeaveType,
+    lastNonSystemLeaveType: defaultLeaveType,
     systemPaid: false,
     notes: '',
     includeSecondHalf: false,
     secondHalfMode: 'work',
     secondHalfLeaveType: defaultSecondHalfLeaveType,
+    secondHalfLastNonSystemLeaveType: defaultSecondHalfLeaveType,
     workRow: createDefaultWorkRow(employee, dateStr),
     primaryHalfLeaveType: 'employee_paid',
   }), [defaultLeaveType, defaultSecondHalfLeaveType, createDefaultWorkRow]);
@@ -368,27 +370,47 @@ export default function MultiDateEntryModal({
     updateLeaveSelection(empId, dateStr, current => {
       const normalized = value || defaultLeaveType;
       const baseKind = getLeaveBaseKind(normalized) || normalized;
-      const next = { ...current, leaveType: normalized };
+      const next = { ...current };
+
       if (normalized === 'system_paid') {
+        next.leaveType = 'system_paid';
         next.systemPaid = true;
-      } else if (normalized !== 'half_day') {
-        next.systemPaid = false;
+        return next;
       }
+
+      next.leaveType = normalized;
+      next.systemPaid = false;
+      next.lastNonSystemLeaveType = normalized;
+
       if (normalized !== 'half_day') {
         next.includeSecondHalf = false;
         next.secondHalfMode = 'work';
         next.secondHalfLeaveType = defaultSecondHalfLeaveType;
+        next.secondHalfLastNonSystemLeaveType = defaultSecondHalfLeaveType;
         next.primaryHalfLeaveType = 'employee_paid';
       } else if (baseKind === 'half_day' && !allowHalfDay) {
         next.leaveType = defaultLeaveType;
-      }
-      if (normalized === 'half_day') {
+        next.lastNonSystemLeaveType = defaultLeaveType;
+        next.includeSecondHalf = false;
+        next.secondHalfMode = 'work';
+        next.secondHalfLeaveType = defaultSecondHalfLeaveType;
+        next.secondHalfLastNonSystemLeaveType = defaultSecondHalfLeaveType;
+        next.primaryHalfLeaveType = 'employee_paid';
+      } else if (normalized === 'half_day') {
         const employee = employeesById[empId];
         next.workRow = current.workRow || createDefaultWorkRow(employee, dateStr);
       }
+
       return next;
     });
-  }, [updateLeaveSelection, defaultLeaveType, defaultSecondHalfLeaveType, allowHalfDay, employeesById, createDefaultWorkRow]);
+  }, [
+    updateLeaveSelection,
+    defaultLeaveType,
+    defaultSecondHalfLeaveType,
+    allowHalfDay,
+    employeesById,
+    createDefaultWorkRow,
+  ]);
 
   const toggleSystemPaidForRow = useCallback((empId, dateStr, checked) => {
     updateLeaveSelection(empId, dateStr, current => {
@@ -405,32 +427,54 @@ export default function MultiDateEntryModal({
       if (checked) {
         return { ...current, leaveType: 'system_paid', systemPaid: true };
       }
-      if (current.leaveType === 'system_paid') {
-        return { ...current, leaveType: 'employee_paid', systemPaid: false };
-      }
-      return { ...current, systemPaid: checked };
+      const fallback = current.lastNonSystemLeaveType;
+      const normalizedFallback = leaveTypeOptions.some(([value]) => value === fallback)
+        ? fallback
+        : defaultLeaveType;
+      return {
+        ...current,
+        leaveType: normalizedFallback,
+        systemPaid: false,
+      };
     });
-  }, [updateLeaveSelection]);
+  }, [updateLeaveSelection, leaveTypeOptions, defaultLeaveType]);
 
   const setIncludeSecondHalf = useCallback((empId, dateStr, checked) => {
-    updateLeaveSelection(empId, dateStr, current => ({
-      ...current,
-      includeSecondHalf: checked,
-      secondHalfMode: checked ? current.secondHalfMode || 'work' : 'work',
-    }));
-  }, [updateLeaveSelection]);
+    updateLeaveSelection(empId, dateStr, current => {
+      const employee = employeesById[empId];
+      const next = {
+        ...current,
+        includeSecondHalf: checked,
+        secondHalfMode: checked ? current.secondHalfMode || 'work' : 'work',
+      };
+      if (checked && (next.secondHalfMode === 'work')) {
+        next.workRow = current.workRow || createDefaultWorkRow(employee, dateStr);
+      }
+      return next;
+    });
+  }, [updateLeaveSelection, employeesById, createDefaultWorkRow]);
 
   const setSecondHalfModeForRow = useCallback((empId, dateStr, mode) => {
-    updateLeaveSelection(empId, dateStr, current => ({
-      ...current,
-      secondHalfMode: mode === 'leave' ? 'leave' : 'work',
-    }));
-  }, [updateLeaveSelection]);
+    updateLeaveSelection(empId, dateStr, current => {
+      const nextMode = mode === 'leave' ? 'leave' : 'work';
+      const employee = employeesById[empId];
+      const next = {
+        ...current,
+        secondHalfMode: nextMode,
+      };
+      if (nextMode === 'work') {
+        next.workRow = current.workRow || createDefaultWorkRow(employee, dateStr);
+      }
+      return next;
+    });
+  }, [updateLeaveSelection, employeesById, createDefaultWorkRow]);
 
   const setSecondHalfLeaveTypeForRow = useCallback((empId, dateStr, value) => {
+    const normalized = value || defaultSecondHalfLeaveType;
     updateLeaveSelection(empId, dateStr, current => ({
       ...current,
-      secondHalfLeaveType: value || defaultSecondHalfLeaveType,
+      secondHalfLeaveType: normalized,
+      secondHalfLastNonSystemLeaveType: normalized,
     }));
   }, [updateLeaveSelection, defaultSecondHalfLeaveType]);
 
@@ -442,6 +486,8 @@ export default function MultiDateEntryModal({
     if (!segment) return null;
     return {
       id: segment.id || null,
+      employee_id: segment.employee_id || null,
+      date: segment.date || null,
       hours: segment.hours ?? null,
       service_id: segment.service_id || null,
       sessions_count: segment.sessions_count ?? null,
@@ -583,14 +629,16 @@ export default function MultiDateEntryModal({
         const dayReference = new Date(`${dateStr}T00:00:00`);
         if (Number.isNaN(dayReference.getTime())) continue;
 
-        let resolvedLeaveType = selection.leaveType || defaultLeaveType;
-        if (resolvedLeaveType !== 'half_day' && resolvedLeaveType !== 'system_paid') {
-          if (selection.systemPaid && resolvedLeaveType === 'employee_paid') {
-            resolvedLeaveType = 'system_paid';
-          }
-        }
-
-        const isHalfDay = resolvedLeaveType === 'half_day';
+        const baseLeaveType = selection.leaveType || defaultLeaveType;
+        const lastNonSystem = selection.lastNonSystemLeaveType;
+        const normalizedLastNonSystem = leaveTypeOptions.some(([value]) => value === lastNonSystem)
+          ? lastNonSystem
+          : defaultLeaveType;
+        const isHalfDay = baseLeaveType === 'half_day'
+          || (baseLeaveType === 'system_paid' && normalizedLastNonSystem === 'half_day');
+        const resolvedLeaveType = isHalfDay
+          ? 'half_day'
+          : (baseLeaveType === 'system_paid' ? 'system_paid' : baseLeaveType);
         const includeSecondHalf = isHalfDay && selection.includeSecondHalf;
         const secondHalfMode = includeSecondHalf ? selection.secondHalfMode : null;
         const workSegments = [];
@@ -600,6 +648,12 @@ export default function MultiDateEntryModal({
             workSegments.push(payload);
           }
         }
+        const resolvedSecondHalfLeave = secondaryLeaveTypeOptions.some(([value]) => value === selection.secondHalfLeaveType)
+          ? selection.secondHalfLeaveType
+          : defaultSecondHalfLeaveType;
+        const primaryHalfType = isHalfDay
+          ? (selection.primaryHalfLeaveType === 'system_paid' ? 'system_paid' : 'employee_paid')
+          : null;
 
         try {
           const result = await saveLeaveDay({
@@ -613,9 +667,9 @@ export default function MultiDateEntryModal({
             halfDaySecondHalfMode: includeSecondHalf ? secondHalfMode : null,
             halfDayWorkSegments: includeSecondHalf && secondHalfMode === 'work' ? workSegments : [],
             halfDaySecondLeaveType: includeSecondHalf && secondHalfMode === 'leave'
-              ? selection.secondHalfLeaveType
+              ? resolvedSecondHalfLeave
               : null,
-            halfDayPrimaryLeaveType: isHalfDay ? selection.primaryHalfLeaveType : null,
+            halfDayPrimaryLeaveType: primaryHalfType,
             halfDayRemovedWorkIds: [],
           });
 
@@ -680,8 +734,11 @@ export default function MultiDateEntryModal({
     leaveSelections,
     createDefaultLeaveSelection,
     defaultLeaveType,
+    leaveTypeOptions,
+    secondaryLeaveTypeOptions,
     buildWorkSegmentPayload,
     createDefaultWorkRow,
+    defaultSecondHalfLeaveType,
     saveLeaveDay,
     formatConflictMessage,
     formatInvalidStartMessage,
@@ -904,18 +961,33 @@ export default function MultiDateEntryModal({
                             {sortedDates.map(dateValue => {
                               const dateStr = format(dateValue, 'yyyy-MM-dd');
                               const selection = perDateSelections[dateStr] || createDefaultLeaveSelection(emp, dateStr);
-                              const baseType = selection.leaveType || defaultLeaveType;
-                              const isHalfDay = baseType === 'half_day';
+                              const lastNonSystem = selection.lastNonSystemLeaveType;
+                              const normalizedLastNonSystem = leaveTypeOptions.some(([value]) => value === lastNonSystem)
+                                ? lastNonSystem
+                                : defaultLeaveType;
+                              const baseType = selection.leaveType || normalizedLastNonSystem;
+                              const isHalfDay = baseType === 'half_day'
+                                || (baseType === 'system_paid' && normalizedLastNonSystem === 'half_day');
                               const isSystemPaid = isHalfDay
                                 ? selection.primaryHalfLeaveType === 'system_paid'
                                 : baseType === 'system_paid';
-                              const selectValue = isHalfDay
+                              const visibleLeaveType = isHalfDay
                                 ? 'half_day'
-                                : (baseType === 'system_paid' ? 'employee_paid' : baseType);
+                                : (isSystemPaid ? normalizedLastNonSystem : baseType);
+                              const selectValue = leaveTypeOptions.some(([value]) => value === visibleLeaveType)
+                                ? visibleLeaveType
+                                : defaultLeaveType;
                               const includeSecondHalf = isHalfDay && selection.includeSecondHalf;
                               const secondHalfMode = selection.secondHalfMode || 'work';
                               const workRow = selection.workRow || createDefaultWorkRow(emp, dateStr);
                               const systemPaidDisabled = !isHalfDay && (getLeaveBaseKind(selectValue) === 'unpaid');
+                              const resolvedSecondHalfType = secondaryLeaveTypeOptions.some(([value]) => value === selection.secondHalfLeaveType)
+                                ? selection.secondHalfLeaveType
+                                : (
+                                  secondaryLeaveTypeOptions.some(([value]) => value === selection.secondHalfLastNonSystemLeaveType)
+                                    ? selection.secondHalfLastNonSystemLeaveType
+                                    : defaultSecondHalfLeaveType
+                                );
                               return (
                                 <div
                                   key={`${empId}-${dateStr}`}
@@ -1026,7 +1098,7 @@ export default function MultiDateEntryModal({
                                             <div className="space-y-2">
                                               <Label className="text-sm font-medium text-slate-700">סוג חופשה לחצי השני</Label>
                                               <Select
-                                                value={selection.secondHalfLeaveType || defaultSecondHalfLeaveType}
+                                                value={resolvedSecondHalfType}
                                                 onValueChange={value => setSecondHalfLeaveTypeForRow(empId, dateStr, value)}
                                               >
                                                 <SelectTrigger className="bg-white h-10 text-base leading-6">
