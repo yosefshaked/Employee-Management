@@ -1234,7 +1234,8 @@ export function useTimeEntry({
           totalPayment = (Number.isFinite(hoursValue) ? hoursValue : 0) * rateUsed;
         } else if (isGlobal) {
           try {
-            totalPayment = calculateGlobalDailyRate(employee, dayReference, rateUsed);
+            const dailyRate = calculateGlobalDailyRate(employee, dayReference, rateUsed);
+            totalPayment = shouldSaveWorkHalf ? dailyRate * 0.5 : dailyRate;
           } catch (error) {
             error.code = error.code || 'TIME_ENTRY_GLOBAL_RATE_FAILED';
             throw error;
@@ -1289,93 +1290,6 @@ export function useTimeEntry({
           workInserts.push(payloadBase);
         }
         duplicateReference.push({ ...payloadBase, id: segment.id || null });
-      }
-    }
-
-    const workPortionFraction = shouldSaveWorkHalf ? Math.max(0, 1 - normalizedLeaveFraction) : 0;
-    const effectiveDailyValueForWork = hasOverrideDailyValue
-      ? overrideDailyValueNumber
-      : (fallbackWasRequired ? fallbackDailyValue : 0);
-
-    if (
-      employee.employee_type === 'global'
-      && shouldSaveWorkHalf
-      && workPortionFraction > 0
-      && effectiveDailyValueForWork > 0
-    ) {
-      const fallbackWorkTotal = effectiveDailyValueForWork * workPortionFraction;
-      const workTargets = [];
-      workInserts.forEach(payload => {
-        if (payload) workTargets.push({ payload });
-      });
-      workUpdates.forEach(item => {
-        if (item && item.updates) {
-          workTargets.push({ payload: item.updates });
-        }
-      });
-
-      if (workTargets.length > 0) {
-        const globalDailyRate = employee.employee_type === 'global' && fallbackDailyValue > 0
-          ? fallbackDailyValue
-          : null;
-        const weights = workTargets.map(({ payload }) => {
-          if (!payload) return 0;
-          if (payload.entry_type === 'hours') {
-            const hoursValue = Number(payload.hours);
-            return Number.isFinite(hoursValue) && hoursValue > 0 ? hoursValue : 0;
-          }
-          if (payload.entry_type === 'session') {
-            const sessionsValue = Number(payload.sessions_count);
-            return Number.isFinite(sessionsValue) && sessionsValue > 0 ? sessionsValue : 1;
-          }
-          return 1;
-        });
-
-        let totalWeight = weights.reduce((sum, weight) => sum + (Number.isFinite(weight) && weight > 0 ? weight : 0), 0);
-        if (!(totalWeight > 0)) {
-          totalWeight = workTargets.length;
-          for (let index = 0; index < weights.length; index += 1) {
-            weights[index] = 1;
-          }
-        }
-
-        let remaining = fallbackWorkTotal;
-        workTargets.forEach(({ payload }, index) => {
-          if (!payload) return;
-          const weight = weights[index] || 0;
-          const ratio = totalWeight > 0 ? weight / totalWeight : 0;
-          let value = ratio > 0
-            ? fallbackWorkTotal * ratio
-            : (fallbackWorkTotal / workTargets.length);
-          if (!Number.isFinite(value) || value < 0) {
-            value = 0;
-          }
-          if (index === workTargets.length - 1) {
-            value = remaining;
-          } else {
-            if (value > remaining) {
-              value = remaining;
-            }
-            remaining -= value;
-          }
-          payload.total_payment = value;
-
-          if (globalDailyRate) {
-            payload.rate_used = globalDailyRate;
-          } else if (payload.entry_type === 'hours') {
-            const hoursValue = Number(payload.hours);
-            if (Number.isFinite(hoursValue) && hoursValue > 0) {
-              payload.rate_used = value / hoursValue;
-            }
-          } else if (payload.entry_type === 'session') {
-            const sessionsValue = Number(payload.sessions_count);
-            if (Number.isFinite(sessionsValue) && sessionsValue > 0) {
-              payload.rate_used = value / sessionsValue;
-            }
-          } else if (!Number.isFinite(payload.rate_used) || payload.rate_used === null) {
-            payload.rate_used = value;
-          }
-        });
       }
     }
 
