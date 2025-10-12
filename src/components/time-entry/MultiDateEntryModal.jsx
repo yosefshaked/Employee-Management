@@ -14,10 +14,8 @@ import { useTimeEntry } from './useTimeEntry.js';
 import { ChevronUp } from 'lucide-react';
 import { toast } from 'sonner';
 import he from '@/i18n/he.json';
-import { calculateGlobalDailyRate, createLeaveDayValueResolver } from '@/lib/payroll.js';
-import { collectGlobalDayAggregates } from '@/lib/global-day-aggregator.js';
+import { createLeaveDayValueResolver } from '@/lib/payroll.js';
 import {
-  isLeaveEntryType,
   LEAVE_TYPE_OPTIONS,
   DEFAULT_MIXED_SUBTYPE,
   normalizeMixedSubtype,
@@ -27,33 +25,6 @@ import { Switch } from '@/components/ui/switch';
 import { selectLeaveDayValue } from '@/selectors.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
-
-function validateRow(row, employee, services, getRateForDate) {
-  const errors = {};
-  if (!row.date) errors.date = 'חסר תאריך';
-  const isHourlyOrGlobal = employee.employee_type === 'hourly' || employee.employee_type === 'global';
-  const { rate } = getRateForDate(employee.id, row.date, isHourlyOrGlobal ? null : row.service_id);
-  if (!rate) errors.entry_type = 'אין תעריף';
-  if (employee.employee_type === 'instructor') {
-    if (!row.service_id) errors.service_id = 'חסר שירות';
-    if (!row.sessions_count) errors.sessions_count = 'חסר מספר מפגשים';
-    const service = services.find(s => s.id === row.service_id);
-    if (service && service.payment_model === 'per_student' && !row.students_count) {
-      errors.students_count = 'חסר מספר תלמידים';
-    }
-  } else if (employee.employee_type === 'hourly') {
-    if (!row.hours) errors.hours = 'חסרות שעות';
-  } else if (employee.employee_type === 'global') {
-    try {
-      calculateGlobalDailyRate(employee, row.date, rate);
-    } catch {
-      errors.hours = 'אין ימי עבודה בחודש';
-    }
-  } else if (isLeaveEntryType(row.entry_type)) {
-    errors.entry_type = 'סוג יום לא נתמך';
-  }
-  return { valid: Object.keys(errors).length === 0, errors };
-}
 
 export default function MultiDateEntryModal({
   open,
@@ -100,7 +71,7 @@ export default function MultiDateEntryModal({
   const { session, dataClient } = useSupabase();
   const { activeOrgId } = useOrg();
 
-  const { saveRows, saveMixedLeave, saveAdjustments } = useTimeEntry({
+  const { saveWorkDay, saveMixedLeave, saveAdjustments } = useTimeEntry({
     employees,
     services,
     getRateForDate,
@@ -252,48 +223,18 @@ export default function MultiDateEntryModal({
     return { filled, total, sum };
   }, [adjustmentValues, selectedEmployees, sortedDates]);
 
-  const validation = useMemo(
-    () => rows.map(r => validateRow(r, employeesById[r.employee_id], services, getRateForDate)),
-    [rows, employeesById, services, getRateForDate]
-  );
-  const payments = useMemo(
-    () => rows.map(r => computeRowPayment(r, employeesById[r.employee_id], services, getRateForDate, { leaveValueResolver })),
-    [rows, employeesById, services, getRateForDate, leaveValueResolver]
-  );
-  const globalAgg = useMemo(() => {
-    const withPay = rows.map((r, i) => ({
-      ...r,
-      entry_type: employeesById[r.employee_id].employee_type === 'global'
-        ? 'hours'
-        : r.entry_type,
-      total_payment: payments[i]
-    }));
-    return collectGlobalDayAggregates(withPay, employeesById);
-  }, [rows, payments, employeesById]);
-  const duplicateMap = useMemo(() => {
-    const map = {};
-    globalAgg.forEach(val => {
-      val.indices.forEach((idx, i) => { map[idx] = i > 0; });
-    });
-    return map;
-  }, [globalAgg]);
-  const summaryTotal = useMemo(() => {
-    let nonGlobal = 0;
-    rows.forEach((r, i) => {
-      const emp = employeesById[r.employee_id];
-      if (emp.employee_type === 'global') return;
-      nonGlobal += payments[i];
-    });
-    let globalSum = 0;
-    globalAgg.forEach(v => { globalSum += v.dailyAmount; });
-    return nonGlobal + globalSum;
-  }, [rows, payments, employeesById, globalAgg]);
+  const summaryTotal = useMemo(() => rows.reduce((sum, row) => {
+    const employee = employeesById[row.employee_id];
+    if (!employee) return sum;
+    const value = computeRowPayment(row, employee, services, getRateForDate, { leaveValueResolver });
+    return sum + (Number.isFinite(value) ? value : 0);
+  }, 0), [rows, employeesById, services, getRateForDate, leaveValueResolver]);
+
   const filledCount = useMemo(
     () => rows.filter(r => isRowCompleteForProgress(r, employeesById[r.employee_id])).length,
     [rows, employeesById]
   );
-  const [showErrors, setShowErrors] = useState(false);
-  const [showBanner, setShowBanner] = useState(false);
+
   const [flash, setFlash] = useState(null);
 
   const formatConflictMessage = useCallback((items = []) => {
@@ -350,13 +291,6 @@ export default function MultiDateEntryModal({
     if (!lines.some(Boolean)) return null;
     return `לא ניתן לשמור חופשה לפני תאריך תחילת העבודה:\n${lines.join('\n')}`;
   }, [employeesById]);
-
-  useEffect(() => {
-    if (mode !== 'regular') {
-      setShowBanner(false);
-      setShowErrors(false);
-    }
-  }, [mode]);
 
   const updateMixedSelection = useCallback((empId, dateStr, updater) => {
     setMixedSelections(prev => {
@@ -488,65 +422,90 @@ export default function MultiDateEntryModal({
   const [collapsed, setCollapsed] = useState({});
   const toggleEmp = (id) => setCollapsed(prev => ({ ...prev, [id]: !prev[id] }));
 
-  const handleRegularSave = async () => {
-    const invalidIndex = validation.findIndex(v => !v.valid);
-    if (invalidIndex !== -1) {
-      setShowErrors(true);
-      setShowBanner(true);
-      const el = document.getElementById(`row-${invalidIndex}`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      return;
+  const saveRegularBatches = useCallback(async () => {
+    if (!rows.length) {
+      toast.error('נא להזין לפחות רישום אחד.');
+      return false;
     }
-    try {
-      const result = await saveRows(rows);
-      if (result?.conflicts?.length) {
-        const message = formatRegularConflictMessage(result.conflicts);
-        if (message) {
-          toast.error(message, { duration: 15000 });
-        }
-      }
-      const insertedCount = Array.isArray(result?.inserted) ? result.inserted.length : rows.length;
-      toast.success(`נשמרו ${insertedCount}`);
-      onSaved();
-      onClose();
-    } catch (e) {
-      if (e?.code === 'TIME_ENTRY_REGULAR_CONFLICT') {
-        const message = formatRegularConflictMessage(e.conflicts);
-        if (message) {
-          toast.error(message, { duration: 15000 });
-        }
+
+    const grouped = new Map();
+    rows.forEach(row => {
+      if (!row || !row.employee_id || !row.date) {
         return;
       }
-      toast.error(e.message);
-    }
-  };
-
-  const saveValidOnly = async () => {
-    const validRows = rows.filter((_, i) => validation[i].valid);
-    try {
-      const result = await saveRows(validRows);
-      if (result?.conflicts?.length) {
-        const message = formatRegularConflictMessage(result.conflicts);
-        if (message) {
-          toast.error(message, { duration: 15000 });
-        }
+      const key = `${row.employee_id}|${row.date}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, []);
       }
-      const insertedCount = Array.isArray(result?.inserted) ? result.inserted.length : validRows.length;
-      toast.success(`נשמרו ${insertedCount} / נדחו ${validRows.length - insertedCount}`);
-      setShowBanner(false);
-    } catch (e) {
-      if (e?.code === 'TIME_ENTRY_REGULAR_CONFLICT') {
-        const message = formatRegularConflictMessage(e.conflicts);
-        if (message) {
-          toast.error(message, { duration: 15000 });
-        }
-        return;
-      }
-      toast.error(e.message);
-    }
-  };
+      grouped.get(key).push({ ...row });
+    });
 
-  const handleSaveMixed = async () => {
+    if (grouped.size === 0) {
+      toast.error('לא נמצאו רישומים תקינים לשמירה.');
+      return false;
+    }
+
+    let savedCount = 0;
+
+    for (const [key, segments] of grouped.entries()) {
+      const [employeeId, date] = key.split('|');
+      const employee = employeesById[employeeId];
+      if (!employee) {
+        continue;
+      }
+
+      const dayReference = new Date(`${date}T00:00:00`);
+      const normalizedDay = Number.isNaN(dayReference.getTime()) ? undefined : dayReference;
+
+      const segmentPayload = segments.map(segment => ({
+        id: segment.id || null,
+        hours: segment.hours ?? null,
+        service_id: segment.service_id || null,
+        sessions_count: segment.sessions_count || null,
+        students_count: segment.students_count || null,
+        notes: segment.notes || null,
+        entry_type: segment.entry_type || null,
+      }));
+
+      try {
+        const result = await saveWorkDay({
+          employee,
+          segments: segmentPayload,
+          date,
+          day: normalizedDay,
+          dayType: 'work',
+          source: 'multi_date',
+        });
+        const inserted = result?.insertedCount || 0;
+        const updated = result?.updatedCount || 0;
+        savedCount += inserted + updated;
+      } catch (error) {
+        if (error?.code === 'TIME_ENTRY_LEAVE_CONFLICT') {
+          const message = formatRegularConflictMessage(error.conflicts);
+          if (message) {
+            toast.error(message, { duration: 15000 });
+          }
+        } else if (error?.message) {
+          toast.error(error.message);
+        } else {
+          toast.error('השמירה נכשלה.');
+        }
+        return false;
+      }
+    }
+
+    if (savedCount === 0) {
+      toast.error('לא נמצאו רישומים לשמירה.');
+      return false;
+    }
+
+    toast.success(`נשמרו ${savedCount} רישומים`);
+    onSaved();
+    onClose();
+    return true;
+  }, [rows, employeesById, saveWorkDay, formatRegularConflictMessage, onSaved, onClose]);
+
+  const handleSaveMixed = useCallback(async () => {
     if (selectedLeaveType !== 'mixed') {
       toast.error('סוג חופשה לא נתמך');
       return;
@@ -615,11 +574,22 @@ export default function MultiDateEntryModal({
       }
       toast.error(e.message);
     }
-  };
+  }, [
+    selectedLeaveType,
+    selectedEmployees,
+    sortedDates,
+    mixedSelections,
+    ensureMixedSelection,
+    saveMixedLeave,
+    formatConflictMessage,
+    formatInvalidStartMessage,
+    onSaved,
+    onClose,
+  ]);
 
   const regularSaveDisabled = mode === 'regular' && rows.length === 0;
   const leaveSaveDisabled = mode === 'leave' && (!selectedEmployees.length || !sortedDates.length);
-  const handleAdjustmentSave = async () => {
+  const handleAdjustmentSave = useCallback(async () => {
     const entries = [];
     const errors = {};
     let hasError = false;
@@ -672,14 +642,31 @@ export default function MultiDateEntryModal({
     } catch (error) {
       toast.error(error.message);
     }
-  };
+  }, [
+    adjustmentValues,
+    selectedEmployees,
+    sortedDates,
+    setAdjustmentErrors,
+    saveAdjustments,
+    onSaved,
+    onClose,
+  ]);
   const adjustmentSaveDisabled = mode === 'adjustment' && adjustmentStats.filled === 0;
   const primaryDisabled = mode === 'leave'
     ? leaveSaveDisabled
     : (mode === 'adjustment' ? adjustmentSaveDisabled : regularSaveDisabled);
-  const handlePrimarySave = mode === 'leave'
-    ? handleSaveMixed
-    : (mode === 'adjustment' ? handleAdjustmentSave : handleRegularSave);
+
+  const handlePrimarySave = useCallback(async () => {
+    if (mode === 'leave') {
+      await handleSaveMixed();
+      return;
+    }
+    if (mode === 'adjustment') {
+      await handleAdjustmentSave();
+      return;
+    }
+    await saveRegularBatches();
+  }, [mode, handleSaveMixed, handleAdjustmentSave, saveRegularBatches]);
 
   return (
       <Dialog open={open} onOpenChange={onClose}>
@@ -748,15 +735,6 @@ export default function MultiDateEntryModal({
                     <span className="ml-auto">מולאו {filledCount} מתוך {rows.length} שורות</span>
                   </div>
                   <div className="text-right font-medium text-slate-700">סיכום כולל לרישומים: ₪{summaryTotal.toFixed(2)}</div>
-                  {showBanner && (
-                    <div className="bg-amber-50 border border-amber-200 p-4 flex justify-between items-center text-sm">
-                      <span>חלק מהשורות מכילות שגיאות.</span>
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm" onClick={() => setShowBanner(false)}>חזור לתיקון</Button>
-                        <Button size="sm" onClick={saveValidOnly}>שמור רק תקינים</Button>
-                      </div>
-                    </div>
-                  )}
                   {groupedRows.map(([empId, items], idx) => {
                     const emp = employeesById[empId];
                     const isCollapsed = collapsed[empId];
@@ -787,8 +765,6 @@ export default function MultiDateEntryModal({
                                   readOnlyDate
                                   rowId={`row-${index}`}
                                   flashField={flash && flash.index === index ? flash.field : null}
-                                  errors={showErrors ? validation[index].errors : {}}
-                                  isDuplicate={!!duplicateMap[index]}
                                   hideDayType={emp.employee_type === 'global'}
                                   allowRemove
                                   onRemove={() => removeRow(index)}

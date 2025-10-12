@@ -407,8 +407,9 @@ export function useTimeEntry({
     );
 
     let hasPaidGlobalSegment = false;
-    let preferExistingGlobalSegments = submittedSegmentIds.size > 0;
+    let preferExistingGlobalSegments = false;
     let remainingGlobalDailyPortion = 1;
+    const pendingPaidGlobalSegmentIds = new Set();
 
     if (employee.employee_type === 'global') {
       let existingSessionsResponse;
@@ -468,6 +469,19 @@ export function useTimeEntry({
         && session.entry_type !== 'adjustment'
       ));
 
+      existingWorkSegments.forEach(session => {
+        const sessionId = session?.id ? String(session.id) : null;
+        if (!sessionId) {
+          return;
+        }
+        const paymentValue = typeof session?.total_payment === 'number'
+          ? session.total_payment
+          : Number.parseFloat(session?.total_payment);
+        if (Number.isFinite(paymentValue) && paymentValue > 0 && submittedSegmentIds.has(sessionId)) {
+          pendingPaidGlobalSegmentIds.add(sessionId);
+        }
+      });
+
       const persistedOtherSegments = existingWorkSegments.filter(session => {
         const sessionId = session?.id ? String(session.id) : null;
         if (!sessionId) {
@@ -487,8 +501,6 @@ export function useTimeEntry({
         hasPaidGlobalSegment = true;
         preferExistingGlobalSegments = true;
         remainingGlobalDailyPortion = 0;
-      } else if (persistedOtherSegments.length > 0) {
-        preferExistingGlobalSegments = true;
       }
     }
 
@@ -547,12 +559,19 @@ export function useTimeEntry({
       if (isHourly) {
         totalPayment = (Number.isFinite(hoursValue) ? hoursValue : 0) * rateUsed;
       } else if (isGlobal) {
+        const segmentId = segment?.id ? String(segment.id) : null;
+        const segmentWasPaidBefore = segmentId ? pendingPaidGlobalSegmentIds.has(segmentId) : false;
         let shouldAssignFullDailyRate = false;
+
         if (!hasPaidGlobalSegment) {
-          const isExistingSegment = Boolean(segment.id);
-          const allowFullRateForNewSegment = !preferExistingGlobalSegments;
-          if (isExistingSegment || allowFullRateForNewSegment) {
+          if (segmentWasPaidBefore) {
             shouldAssignFullDailyRate = true;
+            pendingPaidGlobalSegmentIds.delete(segmentId);
+          } else if (pendingPaidGlobalSegmentIds.size === 0) {
+            const isExistingSegment = Boolean(segmentId);
+            if (!preferExistingGlobalSegments || isExistingSegment) {
+              shouldAssignFullDailyRate = true;
+            }
           }
         }
 
@@ -570,8 +589,8 @@ export function useTimeEntry({
           }
         } else {
           totalPayment = 0;
-          if (!preferExistingGlobalSegments) {
-            preferExistingGlobalSegments = Boolean(segment.id);
+          if (!preferExistingGlobalSegments && segmentId) {
+            preferExistingGlobalSegments = true;
           }
         }
       } else {
