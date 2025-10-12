@@ -21,30 +21,24 @@ function LoadingTimelineSkeleton() {
         <div key={`timeline-skeleton-${index}`} className="relative ps-12">
           <div className="absolute left-5 top-0 bottom-0 flex flex-col items-center">
             <span className="relative z-10 mt-2 flex h-3 w-3 items-center justify-center">
-              <span
-                className="h-3 w-3 rounded-full bg-slate-200/80"
-                aria-hidden
-              />
-              <span
-                className="absolute inset-0 rounded-full bg-slate-200/60 blur-[1px]"
-                aria-hidden
-              />
+              <span className="h-3 w-3 rounded-full bg-slate-200/80" aria-hidden />
+              <span className="absolute inset-0 rounded-full bg-slate-200/50 blur-[1px]" aria-hidden />
             </span>
             {index < arr.length - 1 && (
               <span className="mt-1 w-px flex-1 bg-slate-200/60" aria-hidden />
             )}
           </div>
-          <div className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white/60 p-4 shadow-sm">
-            <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
-              <span className="relative flex h-12 w-12 items-center justify-center rounded-full border border-slate-200/70 bg-white">
+          <div className="overflow-hidden rounded-3xl border border-slate-200/70 bg-white/60 p-5 shadow-sm">
+            <div className="flex items-center gap-6">
+              <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-slate-200/70 bg-white">
                 <span className="h-6 w-6 rounded-full bg-slate-200/70" aria-hidden />
                 <span className="absolute inset-0 animate-pulse rounded-full bg-slate-100/60" aria-hidden />
               </span>
-              <div className="space-y-3">
-                <Skeleton className="h-4 w-32" />
-                <Skeleton className="h-3 w-40" />
+              <div className="min-w-0 flex-1 space-y-3">
+                <Skeleton className="h-4 w-36" />
+                <Skeleton className="h-3 w-48" />
               </div>
-              <div className="flex flex-col items-end gap-2">
+              <div className="flex w-40 shrink-0 flex-col items-end gap-2 text-right">
                 <Skeleton className="h-5 w-24" />
                 <Skeleton className="h-3 w-20" />
               </div>
@@ -239,6 +233,10 @@ function formatRate(activity) {
     return null;
   }
 
+  if (activity?.entry_type === 'work_global') {
+    return null;
+  }
+
   const { display } = formatCurrency(numeric, { includeSign: false }) || {};
   if (!display) {
     return null;
@@ -270,6 +268,29 @@ function buildScopeDescriptor(activity) {
   }
 
   return `היקף: ${parts.join(' · ')}`;
+}
+
+function buildSubMetrics(activity, paymentNumeric) {
+  if (paymentNumeric === 0) {
+    return [];
+  }
+
+  const metrics = [];
+  const hours = formatHours(activity?.hours);
+  const sessions = formatSessionsCount(activity?.sessions_count);
+  const rate = formatRate(activity);
+
+  if (hours) {
+    metrics.push(hours);
+  }
+  if (sessions) {
+    metrics.push(sessions);
+  }
+  if (rate) {
+    metrics.push(rate);
+  }
+
+  return metrics;
 }
 
 function extractNotes(activity) {
@@ -460,11 +481,7 @@ export default function RecentActivityTimeline() {
           const paymentColor = payment
             ? determinePaymentColor(payment.numeric)
             : NEUTRAL_PAYMENT_COLOR;
-          const subMetrics = [
-            formatHours(activity?.hours),
-            formatSessionsCount(activity?.sessions_count),
-            formatRate(activity),
-          ].filter(Boolean);
+          const subMetrics = buildSubMetrics(activity, payment?.numeric ?? null);
           const contextParts = buildContextLine(activity);
 
           return (
@@ -485,8 +502,8 @@ export default function RecentActivityTimeline() {
                 )}
               </div>
 
-              <article className="relative grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-4 rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm transition-shadow duration-200 hover:shadow-lg">
-                <div className="flex items-center justify-center">
+              <article className="relative flex items-stretch gap-6 rounded-3xl border border-slate-200/80 bg-white/90 p-5 shadow-sm transition-shadow duration-200 hover:shadow-lg">
+                <div className="flex w-14 shrink-0 items-center justify-center">
                   <span
                     className="flex h-12 w-12 items-center justify-center rounded-full border-2"
                     style={{
@@ -498,9 +515,9 @@ export default function RecentActivityTimeline() {
                   </span>
                 </div>
 
-                <div className="min-w-0 space-y-2">
+                <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="max-w-[12rem] truncate text-sm font-semibold text-slate-900 sm:max-w-[16rem]">
+                    <span className="max-w-[12rem] truncate text-sm font-semibold text-slate-900 sm:max-w-[18rem]">
                       {employeeName}
                     </span>
                     <span
@@ -546,24 +563,22 @@ export default function RecentActivityTimeline() {
                   )}
                 </div>
 
-                <div className="flex min-w-[160px] flex-col items-end gap-2 text-right">
+                <div className="flex w-40 shrink-0 flex-col items-end gap-2 text-right">
                   <span
                     className="text-lg font-semibold"
                     style={{ color: paymentColor }}
                   >
                     {payment?.display || '—'}
                   </span>
-                  <div className="flex flex-col items-end gap-1 text-xs text-slate-500">
-                    {subMetrics.length ? (
-                      subMetrics.map((metric, metricIndex) => (
+                  {subMetrics.length > 0 && (
+                    <div className="flex flex-col items-end gap-1 text-xs text-slate-500">
+                      {subMetrics.map((metric, metricIndex) => (
                         <span key={`${activity.id || index}-metric-${metricIndex}`}>
                           {metric}
                         </span>
-                      ))
-                    ) : (
-                      <span>—</span>
-                    )}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </article>
             </li>

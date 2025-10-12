@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.7.4**
-**Last Updated: 2025-10-12**
+**Version: 1.7.5**
+**Last Updated: 2025-10-13**
 
 ## 1. Vision & Purpose
 
@@ -717,6 +717,7 @@ The leave module centralizes all holiday rules, quotas, and ledger actions so em
 - Monthly Report totals now track a dedicated “תשלום חופשה” (Leave Pay) column, populated from the per-employee leave payment accumulator.
 - Dashboard now includes `RecentActivityTimeline`, a standalone card that fetches the five latest `WorkSessions` and pairs them with employee records using the centralized `getActivityTypeDetails` helper for icon, color, and Hebrew labels.
 - Recent activity timeline now features a timeline skeleton loader and illustrated empty state to match the approved UX specification and keep admins oriented during data fetches.
+- Recent activity timeline card rebuilt with the three-column hierarchy, timeline rail, and contextual metric rules from the approved design so employee, badge, and payment data stay perfectly aligned.
 
 ## 8. UX Review – Unified Time Entry
 
