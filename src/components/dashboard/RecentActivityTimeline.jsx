@@ -541,16 +541,16 @@ export default function RecentActivityTimeline() {
 
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
                     {contextParts.length ? (
-                      contextParts.map((part, partIndex) => (
-                        <React.Fragment key={`${activity.id || index}-context-${partIndex}`}>
+                      contextParts.map((part, idx) => (
+                        <React.Fragment key={idx}>
                           <span className="truncate">{part}</span>
-                          {partIndex < contextParts.length - 1 && (
+                          {idx < contextParts.length - 1 && (
                             <span aria-hidden>·</span>
                           )}
                         </React.Fragment>
                       ))
                     ) : (
-                      <span>—</span>
+                      <span className="truncate">—</span>
                     )}
                   </div>
 
@@ -572,10 +572,8 @@ export default function RecentActivityTimeline() {
                   </span>
                   {subMetrics.length > 0 && (
                     <div className="flex flex-col items-end gap-1 text-xs text-slate-500">
-                      {subMetrics.map((metric, metricIndex) => (
-                        <span key={`${activity.id || index}-metric-${metricIndex}`}>
-                          {metric}
-                        </span>
+                      {subMetrics.map((metric, idx) => (
+                        <span key={idx}>{metric}</span>
                       ))}
                     </div>
                   )}
