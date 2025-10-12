@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.7.0**
-**Last Updated: 2025-10-12**
+**Version: 1.7.1**
+**Last Updated: 2025-10-13**
 
 ## 1. Vision & Purpose
 
@@ -715,7 +715,15 @@ The leave module centralizes all holiday rules, quotas, and ledger actions so em
 - Global payroll aggregation now sums `total_payment` snapshots per employee-day to prevent double-paying segmented workdays.
 - Monthly Report totals now track a dedicated “תשלום חופשה” (Leave Pay) column, populated from the per-employee leave payment accumulator.
 
-## 8. Reports CSV Export
+## 8. UX Review – Unified Time Entry
+
+- Align layout affordances between the single-day form and multi-date modal (shared section headings, button ordering, and field grouping) so administrators immediately recognize the same workflow regardless of entry surface.
+- Add inline explanations when a global segment resolves to ₪0 (e.g., tooltip or helper text near the total) to clarify that the day already received its full payment from another segment or paid leave.
+- Surface a consolidated mixed-day summary that shows remaining payable portion after leave selection in both flows, reducing guesswork before saving combined leave/work scenarios.
+- Improve the multi-date checklist to call out incomplete rows and provide quick navigation, lowering the effort required to review large batches before submission.
+- Show post-save feedback that distinguishes successes from skips/zero-pay rows to avoid confusion when large batches include unpaid segments.
+
+## 9. Reports CSV Export
 
 ### 8.1 Detailed Entries CSV Schema (Desktop Export)
 
