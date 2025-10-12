@@ -19,7 +19,7 @@ function LoadingTimelineSkeleton() {
     <div className="space-y-6">
       {Array.from({ length: MAX_RECENT_ITEMS }).map((_, index, arr) => (
         <div key={`timeline-skeleton-${index}`} className="relative ps-12">
-          <div className="absolute left-5 top-0 bottom-0 flex flex-col items-center">
+          <div className="absolute ltr:left-5 rtl:right-5 top-0 bottom-0 flex flex-col items-center">
             <span className="relative z-10 mt-2 flex h-3 w-3 items-center justify-center">
               <span className="h-3 w-3 rounded-full bg-slate-200/80" aria-hidden />
               <span className="absolute inset-0 rounded-full bg-slate-200/50 blur-[1px]" aria-hidden />
@@ -489,7 +489,7 @@ export default function RecentActivityTimeline() {
               key={activity.id || `${activity.employee_id}-${activity.date}-${activity.entry_type}`}
               className="relative ps-12"
             >
-              <div className="absolute left-5 top-0 bottom-0 flex flex-col items-center">
+              <div className="absolute ltr:left-5 rtl:right-5 top-0 bottom-0 flex flex-col items-center">
                 <span className="relative z-10 mt-2 flex h-3 w-3 items-center justify-center">
                   <span
                     className="h-3 w-3 rounded-full"
