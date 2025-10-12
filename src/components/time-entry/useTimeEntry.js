@@ -411,6 +411,15 @@ export function useTimeEntry({
     let remainingGlobalDailyPortion = 1;
     const pendingPaidGlobalSegmentIds = new Set();
 
+    /*
+     * Authoritative payment calculation for global employees.
+     * This block ensures that a global employee is paid exactly once per day,
+     * correctly handling mixed leave/work days and segmented work entries.
+     * - `hasPaidGlobalSegment`: Checks if a work segment has already been paid for this day in the database.
+     * - `pendingPaidGlobalSegmentIds`: Tracks work segments paid within the current batch to handle segmented days.
+     * - `remainingGlobalDailyPortion`: Calculates the payable portion of a workday
+     *   that has not already been covered by paid leave.
+     */
     if (employee.employee_type === 'global') {
       let existingSessionsResponse;
       try {
