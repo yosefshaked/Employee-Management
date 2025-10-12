@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.7.1**
-**Last Updated: 2025-10-13**
+**Version: 1.7.2**
+**Last Updated: 2025-10-12**
 
 ## 1. Vision & Purpose
 
@@ -705,6 +705,7 @@ The leave module centralizes all holiday rules, quotas, and ledger actions so em
 
 ## Recent Updates
 
+- Multi-date leave entry now mirrors the single-day form, supporting all leave types, half-day second-half options, and delegating validation/saving to the unified `useTimeEntry` hook.
 - Centralized leave policy management via the new Settings screen, including holiday tagging and negative balance controls.
 - Employee leave balances now rely on the `LeaveBalances` ledger with annual quota proration and carry-over enforcement.
 - Payroll and reports consume the shared leave selectors so paid holidays and remaining days stay aligned across the app.

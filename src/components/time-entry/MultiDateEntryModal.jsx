@@ -17,9 +17,9 @@ import he from '@/i18n/he.json';
 import { createLeaveDayValueResolver } from '@/lib/payroll.js';
 import {
   LEAVE_TYPE_OPTIONS,
-  DEFAULT_MIXED_SUBTYPE,
-  normalizeMixedSubtype,
   SYSTEM_PAID_ALERT_TEXT,
+  formatLeaveTypeLabel,
+  getLeaveBaseKind,
 } from '@/lib/leave.js';
 import { Switch } from '@/components/ui/switch';
 import { selectLeaveDayValue } from '@/selectors.js';
@@ -71,7 +71,7 @@ export default function MultiDateEntryModal({
   const { session, dataClient } = useSupabase();
   const { activeOrgId } = useOrg();
 
-  const { saveWorkDay, saveMixedLeave, saveAdjustments } = useTimeEntry({
+  const { saveWorkDay, saveLeaveDay, saveAdjustments } = useTimeEntry({
     employees,
     services,
     getRateForDate,
@@ -107,45 +107,92 @@ export default function MultiDateEntryModal({
       setAdjustmentErrors({});
     }
   }, []);
-  const defaultMixedSubtype = DEFAULT_MIXED_SUBTYPE;
-  const ensureMixedSelection = useCallback((value = {}) => {
-    const paid = value && value.paid !== false;
-    const subtype = normalizeMixedSubtype(value?.subtype) || defaultMixedSubtype;
-    const halfDay = allowHalfDay && paid ? Boolean(value?.halfDay) : false;
-    return { paid, subtype, halfDay };
-  }, [allowHalfDay, defaultMixedSubtype]);
-  const leaveTypeOptions = useMemo(
-    () => LEAVE_TYPE_OPTIONS.filter(option => option.value === 'mixed'),
-    []
+  const createDefaultWorkRow = useCallback((employee, dateStr) => {
+    if (!employee) {
+      return {
+        id: null,
+        employee_id: null,
+        date: dateStr,
+        entry_type: 'hours',
+        service_id: null,
+        hours: '',
+        sessions_count: '',
+        students_count: '',
+        notes: '',
+      };
+    }
+    let entryType = 'hours';
+    if (employee.employee_type === 'instructor') {
+      entryType = 'session';
+    }
+    return {
+      id: null,
+      employee_id: employee.id,
+      date: dateStr,
+      entry_type: entryType,
+      service_id: null,
+      hours: '',
+      sessions_count: '',
+      students_count: '',
+      notes: '',
+    };
+  }, []);
+
+  const leaveTypeOptions = useMemo(() => (
+    LEAVE_TYPE_OPTIONS
+      .filter(option => option.value !== 'mixed' && option.value !== 'system_paid' && option.value !== 'holiday_unpaid')
+      .filter(option => allowHalfDay || option.value !== 'half_day')
+      .map(option => [option.value, formatLeaveTypeLabel(option.value, option.label)])
+  ), [allowHalfDay]);
+
+  const defaultLeaveType = useMemo(() => leaveTypeOptions[0]?.[0] || 'employee_paid', [leaveTypeOptions]);
+
+  const secondaryLeaveTypeOptions = useMemo(() => (
+    LEAVE_TYPE_OPTIONS
+      .filter(option => option.value !== 'mixed' && option.value !== 'half_day' && option.value !== 'system_paid' && option.value !== 'holiday_unpaid')
+      .map(option => [option.value, formatLeaveTypeLabel(option.value, option.label)])
+  ), []);
+
+  const defaultSecondHalfLeaveType = useMemo(
+    () => secondaryLeaveTypeOptions[0]?.[0] || 'employee_paid',
+    [secondaryLeaveTypeOptions],
   );
-  const [selectedLeaveType, setSelectedLeaveType] = useState(
-    () => leaveTypeOptions[0]?.value || 'mixed'
-  );
-  useEffect(() => {
-    setSelectedLeaveType(leaveTypeOptions[0]?.value || 'mixed');
-  }, [leaveTypeOptions]);
 
   const sortedDates = useMemo(
     () => [...selectedDates].sort((a, b) => a - b),
     [selectedDates]
   );
-  const [globalMixedSubtype, setGlobalMixedSubtype] = useState(DEFAULT_MIXED_SUBTYPE);
-  const defaultMixedSelections = useMemo(() => {
+
+  const createDefaultLeaveSelection = useCallback((employee, dateStr) => ({
+    leaveType: defaultLeaveType,
+    systemPaid: false,
+    notes: '',
+    includeSecondHalf: false,
+    secondHalfMode: 'work',
+    secondHalfLeaveType: defaultSecondHalfLeaveType,
+    workRow: createDefaultWorkRow(employee, dateStr),
+    primaryHalfLeaveType: 'employee_paid',
+  }), [defaultLeaveType, defaultSecondHalfLeaveType, createDefaultWorkRow]);
+
+  const defaultLeaveSelections = useMemo(() => {
     const base = {};
     selectedEmployees.forEach(empId => {
+      const employee = employeesById[empId];
+      if (!employee) return;
       const inner = {};
       sortedDates.forEach(d => {
-        inner[format(d, 'yyyy-MM-dd')] = ensureMixedSelection();
+        const dateStr = format(d, 'yyyy-MM-dd');
+        inner[dateStr] = createDefaultLeaveSelection(employee, dateStr);
       });
       base[empId] = inner;
     });
     return base;
-  }, [selectedEmployees, sortedDates, ensureMixedSelection]);
-  const [mixedSelections, setMixedSelections] = useState(defaultMixedSelections);
+  }, [selectedEmployees, sortedDates, employeesById, createDefaultLeaveSelection]);
+
+  const [leaveSelections, setLeaveSelections] = useState(defaultLeaveSelections);
   useEffect(() => {
-    setMixedSelections(defaultMixedSelections);
-    setGlobalMixedSubtype(DEFAULT_MIXED_SUBTYPE);
-  }, [defaultMixedSelections]);
+    setLeaveSelections(defaultLeaveSelections);
+  }, [defaultLeaveSelections]);
 
   const defaultAdjustmentValues = useMemo(() => {
     const base = {};
@@ -292,107 +339,115 @@ export default function MultiDateEntryModal({
     return `לא ניתן לשמור חופשה לפני תאריך תחילת העבודה:\n${lines.join('\n')}`;
   }, [employeesById]);
 
-  const updateMixedSelection = useCallback((empId, dateStr, updater) => {
-    setMixedSelections(prev => {
+  const updateLeaveSelection = useCallback((empId, dateStr, updater) => {
+    setLeaveSelections(prev => {
       const next = { ...prev };
-      const current = { ...(next[empId] || {}) };
-      const existing = ensureMixedSelection(current[dateStr]);
+      const inner = { ...(next[empId] || {}) };
+      const employee = employeesById[empId];
+      const current = inner[dateStr] || createDefaultLeaveSelection(employee, dateStr);
       const updated = typeof updater === 'function'
-        ? ensureMixedSelection(updater(existing))
-        : ensureMixedSelection({ ...existing, ...updater });
-      current[dateStr] = updated;
-      next[empId] = current;
+        ? updater(current)
+        : { ...current, ...updater };
+      inner[dateStr] = updated;
+      next[empId] = inner;
       return next;
     });
-  }, [ensureMixedSelection]);
+  }, [employeesById, createDefaultLeaveSelection]);
 
-  const applySubtypeToAll = useCallback((subtype) => {
-    const normalized = normalizeMixedSubtype(subtype) || DEFAULT_MIXED_SUBTYPE;
-    setMixedSelections(prev => {
-      const next = {};
-      selectedEmployees.forEach(empId => {
-        const inner = { ...(prev[empId] || {}) };
-        sortedDates.forEach(d => {
-          const dateStr = format(d, 'yyyy-MM-dd');
-          const current = ensureMixedSelection(inner[dateStr]);
-          inner[dateStr] = { ...current, subtype: normalized };
-        });
-        next[empId] = inner;
-      });
+  const updateLeaveWorkRow = useCallback((empId, dateStr, patch) => {
+    const employee = employeesById[empId];
+    updateLeaveSelection(empId, dateStr, current => {
+      const baseRow = current.workRow || createDefaultWorkRow(employee, dateStr);
+      return { ...current, workRow: { ...baseRow, ...patch } };
+    });
+  }, [employeesById, updateLeaveSelection, createDefaultWorkRow]);
+
+  const setLeaveTypeForRow = useCallback((empId, dateStr, value) => {
+    updateLeaveSelection(empId, dateStr, current => {
+      const normalized = value || defaultLeaveType;
+      const baseKind = getLeaveBaseKind(normalized) || normalized;
+      const next = { ...current, leaveType: normalized };
+      if (normalized === 'system_paid') {
+        next.systemPaid = true;
+      } else if (normalized !== 'half_day') {
+        next.systemPaid = false;
+      }
+      if (normalized !== 'half_day') {
+        next.includeSecondHalf = false;
+        next.secondHalfMode = 'work';
+        next.secondHalfLeaveType = defaultSecondHalfLeaveType;
+        next.primaryHalfLeaveType = 'employee_paid';
+      } else if (baseKind === 'half_day' && !allowHalfDay) {
+        next.leaveType = defaultLeaveType;
+      }
+      if (normalized === 'half_day') {
+        const employee = employeesById[empId];
+        next.workRow = current.workRow || createDefaultWorkRow(employee, dateStr);
+      }
       return next;
     });
-  }, [ensureMixedSelection, selectedEmployees, sortedDates]);
+  }, [updateLeaveSelection, defaultLeaveType, defaultSecondHalfLeaveType, allowHalfDay, employeesById, createDefaultWorkRow]);
 
-  const toggleMixedSelection = (empId, dateStr, paid) => {
-    updateMixedSelection(empId, dateStr, current => ({
+  const toggleSystemPaidForRow = useCallback((empId, dateStr, checked) => {
+    updateLeaveSelection(empId, dateStr, current => {
+      const baseKind = getLeaveBaseKind(current.leaveType) || current.leaveType;
+      if (current.leaveType === 'half_day') {
+        return {
+          ...current,
+          primaryHalfLeaveType: checked ? 'system_paid' : 'employee_paid',
+        };
+      }
+      if (baseKind === 'unpaid') {
+        return current;
+      }
+      if (checked) {
+        return { ...current, leaveType: 'system_paid', systemPaid: true };
+      }
+      if (current.leaveType === 'system_paid') {
+        return { ...current, leaveType: 'employee_paid', systemPaid: false };
+      }
+      return { ...current, systemPaid: checked };
+    });
+  }, [updateLeaveSelection]);
+
+  const setIncludeSecondHalf = useCallback((empId, dateStr, checked) => {
+    updateLeaveSelection(empId, dateStr, current => ({
       ...current,
-      paid,
-      halfDay: paid ? current.halfDay : false,
+      includeSecondHalf: checked,
+      secondHalfMode: checked ? current.secondHalfMode || 'work' : 'work',
     }));
-  };
+  }, [updateLeaveSelection]);
 
-  const handleDefaultSystemPaidToggle = useCallback((checked) => {
-    const nextSubtype = checked ? 'holiday' : 'vacation';
-    setGlobalMixedSubtype(nextSubtype);
-    applySubtypeToAll(nextSubtype);
-  }, [applySubtypeToAll]);
+  const setSecondHalfModeForRow = useCallback((empId, dateStr, mode) => {
+    updateLeaveSelection(empId, dateStr, current => ({
+      ...current,
+      secondHalfMode: mode === 'leave' ? 'leave' : 'work',
+    }));
+  }, [updateLeaveSelection]);
 
-  const markAllMixed = (paid) => {
-    setMixedSelections(prev => {
-      const next = {};
-      selectedEmployees.forEach(empId => {
-        const inner = { ...(prev[empId] || {}) };
-        sortedDates.forEach(d => {
-          const dateStr = format(d, 'yyyy-MM-dd');
-          const current = ensureMixedSelection(inner[dateStr]);
-          inner[dateStr] = ensureMixedSelection({
-            ...current,
-            paid,
-            halfDay: paid ? current.halfDay : false,
-          });
-        });
-        next[empId] = inner;
-      });
-      return next;
-    });
-  };
+  const setSecondHalfLeaveTypeForRow = useCallback((empId, dateStr, value) => {
+    updateLeaveSelection(empId, dateStr, current => ({
+      ...current,
+      secondHalfLeaveType: value || defaultSecondHalfLeaveType,
+    }));
+  }, [updateLeaveSelection, defaultSecondHalfLeaveType]);
 
-  const applyHalfDayToPaid = () => {
-    if (!allowHalfDay) return;
-    setMixedSelections(prev => {
-      let shouldEnableHalfDay = false;
-      selectedEmployees.forEach(empId => {
-        const inner = prev[empId] || {};
-        sortedDates.forEach(d => {
-          if (shouldEnableHalfDay) return;
-          const dateStr = format(d, 'yyyy-MM-dd');
-          const current = ensureMixedSelection(inner[dateStr]);
-          if (current.paid && !current.halfDay) {
-            shouldEnableHalfDay = true;
-          }
-        });
-      });
+  const updateLeaveNotes = useCallback((empId, dateStr, value) => {
+    updateLeaveSelection(empId, dateStr, { notes: value });
+  }, [updateLeaveSelection]);
 
-      const next = {};
-      selectedEmployees.forEach(empId => {
-        const inner = { ...(prev[empId] || {}) };
-        sortedDates.forEach(d => {
-          const dateStr = format(d, 'yyyy-MM-dd');
-          const current = ensureMixedSelection(inner[dateStr]);
-          if (!current.paid) {
-            inner[dateStr] = current;
-            return;
-          }
-          inner[dateStr] = {
-            ...current,
-            halfDay: shouldEnableHalfDay ? true : false,
-          };
-        });
-        next[empId] = inner;
-      });
-      return next;
-    });
-  };
+  const buildWorkSegmentPayload = useCallback((segment) => {
+    if (!segment) return null;
+    return {
+      id: segment.id || null,
+      hours: segment.hours ?? null,
+      service_id: segment.service_id || null,
+      sessions_count: segment.sessions_count ?? null,
+      students_count: segment.students_count ?? null,
+      notes: segment.notes || null,
+      entry_type: segment.entry_type || null,
+    };
+  }, []);
 
   const updateRow = (index, patch) => setRows(prev => prev.map((r, i) => i === index ? { ...r, ...patch } : r));
   const handleCopy = (index, field) => {
@@ -505,82 +560,127 @@ export default function MultiDateEntryModal({
     return true;
   }, [rows, employeesById, saveWorkDay, formatRegularConflictMessage, onSaved, onClose]);
 
-  const handleSaveMixed = useCallback(async () => {
-    if (selectedLeaveType !== 'mixed') {
-      toast.error('סוג חופשה לא נתמך');
-      return;
-    }
+  const handleSaveLeaveMode = useCallback(async () => {
     if (!selectedEmployees.length || !sortedDates.length) {
-      toast.error('בחרו עובדים ותאריכים לחופשה');
+      toast.error('בחרו עובדים ותאריכים להזנת חופשה');
       return;
     }
-    const selections = [];
-    selectedEmployees.forEach(empId => {
-      const map = mixedSelections[empId] || {};
-      sortedDates.forEach(d => {
-        const dateStr = format(d, 'yyyy-MM-dd');
-        const entry = ensureMixedSelection(map[dateStr]);
-        selections.push({
-          employee_id: empId,
-          date: dateStr,
-          paid: entry.paid,
-          subtype: entry.subtype,
-          half_day: entry.paid ? entry.halfDay : false,
-        });
-      });
-    });
-    if (!selections.length) {
-      toast.error('לא נבחרו תאריכים לחופשה');
+
+    let processedCount = 0;
+    let fallbackCount = 0;
+    let overrideCount = 0;
+
+    for (const empId of selectedEmployees) {
+      const employee = employeesById[empId];
+      if (!employee) continue;
+      const perDateSelections = leaveSelections[empId] || {};
+
+      for (const dateValue of sortedDates) {
+        const dateStr = format(dateValue, 'yyyy-MM-dd');
+        const selection = perDateSelections[dateStr] || createDefaultLeaveSelection(employee, dateStr);
+        const dayReference = new Date(`${dateStr}T00:00:00`);
+        if (Number.isNaN(dayReference.getTime())) continue;
+
+        let resolvedLeaveType = selection.leaveType || defaultLeaveType;
+        if (resolvedLeaveType !== 'half_day' && resolvedLeaveType !== 'system_paid') {
+          if (selection.systemPaid && resolvedLeaveType === 'employee_paid') {
+            resolvedLeaveType = 'system_paid';
+          }
+        }
+
+        const isHalfDay = resolvedLeaveType === 'half_day';
+        const includeSecondHalf = isHalfDay && selection.includeSecondHalf;
+        const secondHalfMode = includeSecondHalf ? selection.secondHalfMode : null;
+        const workSegments = [];
+        if (includeSecondHalf && secondHalfMode === 'work') {
+          const payload = buildWorkSegmentPayload(selection.workRow || createDefaultWorkRow(employee, dateStr));
+          if (payload) {
+            workSegments.push(payload);
+          }
+        }
+
+        try {
+          const result = await saveLeaveDay({
+            employee,
+            date: dateStr,
+            day: dayReference,
+            leaveType: resolvedLeaveType,
+            paidLeaveNotes: selection.notes || null,
+            source: 'multi_date',
+            includeHalfDaySecondHalf: includeSecondHalf,
+            halfDaySecondHalfMode: includeSecondHalf ? secondHalfMode : null,
+            halfDayWorkSegments: includeSecondHalf && secondHalfMode === 'work' ? workSegments : [],
+            halfDaySecondLeaveType: includeSecondHalf && secondHalfMode === 'leave'
+              ? selection.secondHalfLeaveType
+              : null,
+            halfDayPrimaryLeaveType: isHalfDay ? selection.primaryHalfLeaveType : null,
+            halfDayRemovedWorkIds: [],
+          });
+
+          if (result?.needsConfirmation) {
+            toast.error('נדרש לאשר ידנית את שווי יום החופשה. אנא השתמשו בטופס ליום בודד עבור תאריך זה.', { duration: 15000 });
+            return;
+          }
+
+          processedCount += 1;
+          if (result?.usedFallbackRate) {
+            fallbackCount += 1;
+          }
+          if (result?.overrideApplied) {
+            overrideCount += 1;
+          }
+        } catch (error) {
+          if (error?.message === 'אין שינויים לשמירה.') {
+            continue;
+          }
+          if (error?.code === 'TIME_ENTRY_LEAVE_CONFLICT') {
+            let handled = false;
+            if (Array.isArray(error.conflicts) && error.conflicts.length) {
+              const message = formatConflictMessage(error.conflicts);
+              if (message) {
+                toast.error(message, { duration: 15000 });
+                handled = true;
+              }
+            }
+            if (Array.isArray(error.invalidStartDates) && error.invalidStartDates.length) {
+              const invalidMessage = formatInvalidStartMessage(error.invalidStartDates);
+              if (invalidMessage) {
+                toast.error(invalidMessage, { duration: 15000 });
+                handled = true;
+              }
+            }
+            if (handled) return;
+          }
+          toast.error(error?.message || 'שמירת החופשה נכשלה.', { duration: 15000 });
+          return;
+        }
+      }
+    }
+
+    if (processedCount === 0) {
+      toast.error('לא נמצאו ימי חופשה לשמירה.');
       return;
     }
-    try {
-      const result = await saveMixedLeave(selections, { leaveType: selectedLeaveType });
-      if (result?.conflicts?.length) {
-        const message = formatConflictMessage(result.conflicts);
-        if (message) {
-          toast.error(message, { duration: 15000 });
-        }
-      }
-      if (result?.invalidStartDates?.length) {
-        const invalidMessage = formatInvalidStartMessage(result.invalidStartDates);
-        if (invalidMessage) {
-          toast.error(invalidMessage, { duration: 15000 });
-        }
-      }
-      const insertedCount = Array.isArray(result?.inserted) ? result.inserted.length : 0;
-      if (insertedCount > 0) {
-        toast.success(`נשמרו ${insertedCount} ימי חופשה`);
-        onSaved();
-        onClose();
-      }
-    } catch (e) {
-      if (e?.code === 'TIME_ENTRY_LEAVE_CONFLICT') {
-        let handled = false;
-        if (Array.isArray(e.conflicts) && e.conflicts.length) {
-          const message = formatConflictMessage(e.conflicts);
-          if (message) {
-            toast.error(message, { duration: 15000 });
-            handled = true;
-          }
-        }
-        if (Array.isArray(e.invalidStartDates) && e.invalidStartDates.length) {
-          const invalidMessage = formatInvalidStartMessage(e.invalidStartDates);
-          if (invalidMessage) {
-            toast.error(invalidMessage, { duration: 15000 });
-            handled = true;
-          }
-        }
-        if (handled) return;
-      }
-      toast.error(e.message);
+
+    toast.success(`נשמרו ${processedCount} ימי חופשה`);
+    if (fallbackCount > 0) {
+      toast.info(`הערה: עבור ${fallbackCount} ימי חופשה חושב שווי יומי חלופי.`);
     }
+    if (overrideCount > 0) {
+      toast.info(`הערה: ${overrideCount} ימי חופשה נשמרו עם ערך מאושר ידנית.`);
+    }
+    onSaved();
+    onClose();
   }, [
-    selectedLeaveType,
     selectedEmployees,
     sortedDates,
-    mixedSelections,
-    ensureMixedSelection,
-    saveMixedLeave,
+    employeesById,
+    leaveSelections,
+    createDefaultLeaveSelection,
+    defaultLeaveType,
+    buildWorkSegmentPayload,
+    createDefaultWorkRow,
+    saveLeaveDay,
     formatConflictMessage,
     formatInvalidStartMessage,
     onSaved,
@@ -658,7 +758,7 @@ export default function MultiDateEntryModal({
 
   const handlePrimarySave = useCallback(async () => {
     if (mode === 'leave') {
-      await handleSaveMixed();
+      await handleSaveLeaveMode();
       return;
     }
     if (mode === 'adjustment') {
@@ -666,7 +766,7 @@ export default function MultiDateEntryModal({
       return;
     }
     await saveRegularBatches();
-  }, [mode, handleSaveMixed, handleAdjustmentSave, saveRegularBatches]);
+  }, [mode, handleSaveLeaveMode, handleAdjustmentSave, saveRegularBatches]);
 
   return (
       <Dialog open={open} onOpenChange={onClose}>
@@ -780,155 +880,176 @@ export default function MultiDateEntryModal({
                 </>
               ) : mode === 'leave' ? (
                 <div className="space-y-4">
-                  <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:items-end">
-                    <div className="space-y-1">
-                      <Label className="text-sm font-medium text-slate-700">סוג חופשה</Label>
-                      <Select value={selectedLeaveType} onValueChange={setSelectedLeaveType}>
-                        <SelectTrigger className="bg-white h-10 text-base leading-6">
-                          <SelectValue placeholder="בחר סוג חופשה" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {leaveTypeOptions.map(option => (
-                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex flex-wrap gap-2 justify-end">
-                      <Button type="button" onClick={() => markAllMixed(true)}>סמן הכל כבתשלום</Button>
-                      <Button type="button" variant="outline" onClick={() => markAllMixed(false)}>סמן הכל כלא בתשלום</Button>
-                    </div>
+                  <div className="text-sm text-slate-600">
+                    בחרו סוג חופשה לכל תאריך. ניתן להגדיר חצי יום ולהוסיף רישום לחצי השני של היום בעת הצורך.
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:items-end">
-                    <div className="space-y-2">
-                      <Label className="text-sm font-medium text-slate-700">סוג חופשה (ברירת מחדל)</Label>
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-medium text-slate-700">על חשבון המערכת</span>
-                        <Switch
-                          checked={globalMixedSubtype === 'holiday'}
-                          onCheckedChange={handleDefaultSystemPaidToggle}
-                          aria-label="על חשבון המערכת"
-                        />
-                      </div>
-                      {globalMixedSubtype === 'holiday' ? (
-                        <div
-                          role="alert"
-                          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
-                        >
-                          {SYSTEM_PAID_ALERT_TEXT}
+                  {selectedEmployees.length === 0 ? (
+                    <div className="text-sm text-slate-600">בחרו לפחות עובד אחד להזנת חופשה.</div>
+                  ) : null}
+                  {selectedEmployees.map(empId => {
+                    const emp = employeesById[empId];
+                    const perDateSelections = leaveSelections[empId] || {};
+                    return (
+                      <div key={empId} className="space-y-4 rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[17px] font-semibold truncate max-w-[60%]">{emp?.name || 'עובד'}</span>
+                          <span className="text-sm text-slate-600">{formatDatesCount(sortedDates.length)}</span>
                         </div>
-                      ) : null}
-                      <p className="text-xs text-slate-500">ניתן לשנות לכל יום בנפרד ברשימה למטה.</p>
-                    </div>
-                    <div className="flex flex-wrap gap-2 justify-end">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={applyHalfDayToPaid}
-                        disabled={!allowHalfDay}
-                      >
-                        סמן חצי יום לכל הימים בתשלום
-                      </Button>
-                      {!allowHalfDay ? (
-                        <p className="text-xs text-slate-500">
-                          חצי יום מושבת במדיניות החופשות.
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="space-y-4">
-                    {selectedEmployees.length === 0 && (
-                      <div className="text-sm text-slate-600">בחרו לפחות עובד אחד להזנת חופשה.</div>
-                    )}
-                    {selectedEmployees.map(empId => {
-                      const emp = employeesById[empId];
-                      const map = mixedSelections[empId] || {};
-                      return (
-                        <div key={empId} className="space-y-3 rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[17px] font-semibold truncate max-w-[60%]">{emp?.name || 'עובד'}</span>
-                            <span className="text-sm text-slate-600">{formatDatesCount(sortedDates.length)}</span>
-                          </div>
-                          <div className="space-y-2">
-                            <div className="text-sm font-medium text-slate-700">תאריכים שנבחרו</div>
-                            <div className="space-y-2">
-                              {sortedDates.length === 0 && (
-                                <div className="text-sm text-slate-600">בחרו תאריכים להזנת חופשה.</div>
-                              )}
-                              {sortedDates.map(d => {
-                                const dateStr = format(d, 'yyyy-MM-dd');
-                                const entry = ensureMixedSelection(map[dateStr]);
-                                const paid = entry.paid;
-                                const subtypeValue = entry.subtype;
-                                const halfDay = entry.halfDay;
-                                return (
-                                  <div
-                                    key={`${empId}-${dateStr}`}
-                                    className="space-y-2 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200"
-                                  >
-                                    <div className="flex flex-wrap items-center justify-between gap-3">
-                                      <span className="text-sm font-medium text-slate-700">{format(d, 'dd/MM/yyyy')}</span>
-                                      <div className="flex gap-2" role="radiogroup" aria-label={`האם ${format(d, 'dd/MM/yyyy')} בתשלום?`}>
-                                        <Button
-                                          type="button"
-                                          variant={paid ? 'default' : 'ghost'}
-                                          className="h-9"
-                                          onClick={() => toggleMixedSelection(empId, dateStr, true)}
-                                        >
-                                          בתשלום
-                                        </Button>
-                                        <Button
-                                          type="button"
-                                          variant={!paid ? 'default' : 'ghost'}
-                                          className="h-9"
-                                          onClick={() => toggleMixedSelection(empId, dateStr, false)}
-                                        >
-                                          ללא תשלום
-                                        </Button>
-                                      </div>
-                                    </div>
-                                    <div className="flex flex-wrap items-start justify-between gap-3">
-                                      <div className="flex flex-col gap-1">
-                                        <div className="flex items-center gap-2">
-                                          <span className={`text-xs font-medium ${paid ? 'text-slate-600' : 'text-slate-400'}`}>
-                                            על חשבון המערכת
-                                          </span>
-                                          <Switch
-                                            checked={subtypeValue === 'holiday'}
-                                            onCheckedChange={checked => updateMixedSelection(empId, dateStr, {
-                                              subtype: checked ? 'holiday' : 'vacation',
-                                            })}
-                                            aria-label="על חשבון המערכת"
-                                          />
-                                        </div>
-                                        {paid && subtypeValue === 'holiday' ? (
-                                          <div
-                                            role="alert"
-                                            className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900"
-                                          >
-                                            {SYSTEM_PAID_ALERT_TEXT}
-                                          </div>
-                                        ) : null}
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        <span className={`text-xs font-medium ${paid ? 'text-slate-600' : 'text-slate-400'}`}>חצי יום</span>
-                                        <Switch
-                                          checked={allowHalfDay && paid ? halfDay : false}
-                                          disabled={!paid || !allowHalfDay}
-                                          onCheckedChange={checked => updateMixedSelection(empId, dateStr, { halfDay: checked })}
-                                          aria-label="חצי יום"
-                                        />
-                                      </div>
+                        {sortedDates.length === 0 ? (
+                          <div className="text-sm text-slate-600">בחרו תאריכים להזנת חופשה.</div>
+                        ) : (
+                          <div className="space-y-3">
+                            {sortedDates.map(dateValue => {
+                              const dateStr = format(dateValue, 'yyyy-MM-dd');
+                              const selection = perDateSelections[dateStr] || createDefaultLeaveSelection(emp, dateStr);
+                              const baseType = selection.leaveType || defaultLeaveType;
+                              const isHalfDay = baseType === 'half_day';
+                              const isSystemPaid = isHalfDay
+                                ? selection.primaryHalfLeaveType === 'system_paid'
+                                : baseType === 'system_paid';
+                              const selectValue = isHalfDay
+                                ? 'half_day'
+                                : (baseType === 'system_paid' ? 'employee_paid' : baseType);
+                              const includeSecondHalf = isHalfDay && selection.includeSecondHalf;
+                              const secondHalfMode = selection.secondHalfMode || 'work';
+                              const workRow = selection.workRow || createDefaultWorkRow(emp, dateStr);
+                              const systemPaidDisabled = !isHalfDay && (getLeaveBaseKind(selectValue) === 'unpaid');
+                              return (
+                                <div
+                                  key={`${empId}-${dateStr}`}
+                                  className="space-y-3 rounded-xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200"
+                                >
+                                  <div className="flex flex-wrap items-center justify-between gap-3">
+                                    <span className="text-sm font-medium text-slate-700">{format(dateValue, 'dd/MM/yyyy')}</span>
+                                    <div className="flex items-center gap-2">
+                                      <Label className="text-xs font-medium text-slate-600" htmlFor={`system-paid-${empId}-${dateStr}`}>
+                                        על חשבון המערכת
+                                      </Label>
+                                      <Switch
+                                        id={`system-paid-${empId}-${dateStr}`}
+                                        checked={isSystemPaid}
+                                        disabled={systemPaidDisabled}
+                                        onCheckedChange={checked => toggleSystemPaidForRow(empId, dateStr, checked)}
+                                        aria-label="על חשבון המערכת"
+                                      />
                                     </div>
                                   </div>
-                                );
-                              })}
-                            </div>
+                                  <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] sm:items-end">
+                                    <div className="space-y-1">
+                                      <Label className="text-sm font-medium text-slate-700">סוג חופשה</Label>
+                                      <Select
+                                        value={selectValue}
+                                        onValueChange={value => setLeaveTypeForRow(empId, dateStr, value)}
+                                      >
+                                        <SelectTrigger className="bg-white h-10 text-base leading-6">
+                                          <SelectValue placeholder="בחר סוג חופשה" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {leaveTypeOptions.map(([value, label]) => (
+                                            <SelectItem key={value} value={value}>{label}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label className="text-sm font-medium text-slate-700">הערות</Label>
+                                      <Textarea
+                                        value={selection.notes || ''}
+                                        onChange={event => updateLeaveNotes(empId, dateStr, event.target.value)}
+                                        rows={2}
+                                        className="bg-white text-base leading-6"
+                                        placeholder="הערה חופשית (לא חובה)"
+                                      />
+                                    </div>
+                                  </div>
+                                  {isSystemPaid ? (
+                                    <div
+                                      role="alert"
+                                      className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-900"
+                                    >
+                                      {SYSTEM_PAID_ALERT_TEXT}
+                                    </div>
+                                  ) : null}
+                                  {isHalfDay ? (
+                                    <div className="space-y-3 rounded-xl bg-white px-3 py-3 ring-1 ring-slate-200">
+                                      <div className="flex items-center justify-between gap-3">
+                                        <span className="text-sm font-medium text-slate-700">חצי היום השני</span>
+                                        <Switch
+                                          checked={includeSecondHalf}
+                                          onCheckedChange={checked => setIncludeSecondHalf(empId, dateStr, checked)}
+                                          aria-label="הוסף רישום לחצי היום השני"
+                                        />
+                                      </div>
+                                      <div className="text-xs text-slate-600">
+                                        חצי היום הראשון נשמר כ{isSystemPaid ? 'על חשבון המערכת' : 'חופשה בתשלום מהמקצה'}.
+                                      </div>
+                                      {includeSecondHalf ? (
+                                        <div className="space-y-3">
+                                          <div className="flex gap-2">
+                                            <Button
+                                              type="button"
+                                              variant={secondHalfMode === 'work' ? 'default' : 'outline'}
+                                              onClick={() => setSecondHalfModeForRow(empId, dateStr, 'work')}
+                                            >
+                                              עבודה
+                                            </Button>
+                                            <Button
+                                              type="button"
+                                              variant={secondHalfMode === 'leave' ? 'default' : 'outline'}
+                                              onClick={() => setSecondHalfModeForRow(empId, dateStr, 'leave')}
+                                            >
+                                              חופשה
+                                            </Button>
+                                          </div>
+                                          {secondHalfMode === 'work' ? (
+                                            <div className="space-y-2 rounded-xl bg-slate-50 px-2 py-2 ring-1 ring-slate-200">
+                                              <EntryRow
+                                                value={workRow}
+                                                employee={emp}
+                                                services={services}
+                                                getRateForDate={getRateForDate}
+                                                leaveValueResolver={leaveValueResolver}
+                                                onChange={patch => updateLeaveWorkRow(empId, dateStr, patch)}
+                                                showSummary={true}
+                                                readOnlyDate
+                                                rowId={`half-work-${empId}-${dateStr}`}
+                                                hideDayType={emp?.employee_type === 'global'}
+                                                allowRemove={false}
+                                              />
+                                              <p className="text-xs text-slate-600 text-right">
+                                                מלאו את פרטי העבודה לחצי היום השני.
+                                              </p>
+                                            </div>
+                                          ) : (
+                                            <div className="space-y-2">
+                                              <Label className="text-sm font-medium text-slate-700">סוג חופשה לחצי השני</Label>
+                                              <Select
+                                                value={selection.secondHalfLeaveType || defaultSecondHalfLeaveType}
+                                                onValueChange={value => setSecondHalfLeaveTypeForRow(empId, dateStr, value)}
+                                              >
+                                                <SelectTrigger className="bg-white h-10 text-base leading-6">
+                                                  <SelectValue placeholder="בחר סוג לחצי השני" />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                  {secondaryLeaveTypeOptions.map(([value, label]) => (
+                                                    <SelectItem key={value} value={value}>{label}</SelectItem>
+                                                  ))}
+                                                </SelectContent>
+                                              </Select>
+                                            </div>
+                                          )}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <div className="space-y-4">
