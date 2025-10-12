@@ -6,7 +6,6 @@ import {
   softDeleteWorkSession,
 } from '@/api/work-sessions.js';
 import { createLeaveBalanceEntry, deleteLeaveBalanceEntries } from '@/api/leave-balances.js';
-import { hasDuplicateSession } from '@/lib/workSessionsUtils.js';
 import { calculateGlobalDailyRate } from '../../lib/payroll.js';
 import {
   getEntryTypeForLeaveKind,
@@ -645,15 +644,6 @@ export function useTimeEntry({
         payloadBase.students_count = parseInt(segment.students_count, 10) || null;
       }
 
-      if (hasDuplicateSession(Array.isArray(workSessions) ? workSessions : [], {
-        ...payloadBase,
-        id: segment.id || null,
-      })) {
-        const error = new Error('רישום זה כבר קיים.');
-        error.code = 'TIME_ENTRY_DUPLICATE';
-        throw error;
-      }
-
       if (canWriteMetadata) {
         const metadata = buildSourceMetadata(source);
         if (metadata) {
@@ -772,6 +762,7 @@ export function useTimeEntry({
     }
 
     const duplicateReference = Array.isArray(workSessions) ? workSessions.slice() : [];
+    let reusedSecondLeave = null;
 
     const baseLeaveKind = getLeaveBaseKind(leaveType) || leaveType;
 
@@ -802,6 +793,11 @@ export function useTimeEntry({
       : 'employee_paid';
     const normalizedSecondaryHalfKind = shouldSaveLeaveHalf
       ? (getLeaveBaseKind(normalizedSecondLeaveInput) || normalizedSecondLeaveInput)
+      : null;
+    const secondHalfEntryType = shouldSaveLeaveHalf
+      ? (getEntryTypeForLeaveKind(normalizedSecondaryHalfKind)
+        || getEntryTypeForLeaveKind('employee_paid')
+        || null)
       : null;
     const secondHalfPayableCandidate = normalizedSecondaryHalfKind
       ? isPayableLeaveKind(normalizedSecondaryHalfKind)
@@ -896,6 +892,15 @@ export function useTimeEntry({
       }
     }
 
+    if (shouldSaveLeaveHalf) {
+      reusedSecondLeave = secondHalfEntryType
+        ? existingSecondLeaveSessions.find(session => session?.entry_type === secondHalfEntryType)
+        : null;
+      if (!reusedSecondLeave) {
+        reusedSecondLeave = existingSecondLeaveSessions.find(session => session?.id);
+      }
+    }
+
     const isMixed = baseLeaveKind === 'mixed';
     const resolvedMixedSubtype = isMixed
       ? (normalizeMixedSubtype(mixedSubtype) || DEFAULT_MIXED_SUBTYPE)
@@ -931,6 +936,71 @@ export function useTimeEntry({
     const normalizedLeaveFraction = Number.isFinite(leaveFraction) && leaveFraction > 0
       ? leaveFraction
       : 1;
+    const primaryLeavePortion = isPayable ? normalizedLeaveFraction : 0;
+    const secondHalfPortion = shouldSaveLeaveHalf && secondHalfPayableCandidate ? 0.5 : 0;
+
+    let existingLeaveSessionsResponse;
+    try {
+      existingLeaveSessionsResponse = await fetchWorkSessions({
+        session,
+        orgId,
+        query: {
+          start_date: normalizedDate,
+          end_date: normalizedDate,
+          employee_id: employee.id,
+        },
+      });
+    } catch (error) {
+      const fetchError = new Error('נכשל באימות החופשות הקיימות ליום זה. נסו שוב.');
+      fetchError.code = error?.code || 'TIME_ENTRY_LEAVE_EXISTING_FETCH_FAILED';
+      throw fetchError;
+    }
+
+    const existingLeaveSessions = Array.isArray(existingLeaveSessionsResponse?.sessions)
+      ? existingLeaveSessionsResponse.sessions
+      : [];
+
+    const excludedLeaveIds = new Set();
+    if (paidLeaveId) {
+      excludedLeaveIds.add(String(paidLeaveId));
+    }
+    secondaryLeaveRemovalSet.forEach(id => {
+      excludedLeaveIds.add(String(id));
+    });
+    if (reusedSecondLeave?.id) {
+      excludedLeaveIds.add(String(reusedSecondLeave.id));
+    }
+
+    const existingLeavePortion = existingLeaveSessions.reduce((sum, session) => {
+      if (!session || session.employee_id !== employee.id) {
+        return sum;
+      }
+      if (!isLeaveEntryType(session.entry_type) || session.payable === false) {
+        return sum;
+      }
+      const sessionId = session?.id ? String(session.id) : null;
+      if (sessionId && excludedLeaveIds.has(sessionId)) {
+        return sum;
+      }
+      if (isHalfDayLeaveSession(session)) {
+        return sum + 0.5;
+      }
+      const multiplierValue = typeof session?.multiplier === 'number'
+        ? session.multiplier
+        : Number.parseFloat(session?.multiplier);
+      if (Number.isFinite(multiplierValue) && multiplierValue > 0) {
+        return sum + multiplierValue;
+      }
+      return sum + 1;
+    }, 0);
+
+    const proposedLeavePortion = primaryLeavePortion + secondHalfPortion;
+    if ((existingLeavePortion + proposedLeavePortion) > 1.000001) {
+      const error = new Error('לא ניתן לרשום יותר מיום חופשה אחד לאותו תאריך.');
+      error.code = 'LEAVE_CAPACITY_EXCEEDED';
+      error.details = { existingLeavePortion, proposedLeavePortion };
+      throw error;
+    }
 
     const ledgerDelta = baseLeaveKind === 'half_day'
       ? (isPayableLeaveKind(normalizedPrimaryHalfKind) ? -0.5 : 0)
@@ -1051,12 +1121,6 @@ export function useTimeEntry({
       students_count: null,
       payable: Boolean(isPayable),
     };
-
-    if (hasDuplicateSession(duplicateReference, { ...leaveRow, id: paidLeaveId || null })) {
-      const error = new Error('רישום זה כבר קיים.');
-      error.code = 'TIME_ENTRY_DUPLICATE';
-      throw error;
-    }
 
     if (canWriteMetadata) {
       const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
@@ -1345,8 +1409,6 @@ export function useTimeEntry({
         students_count: null,
         payable: Boolean(secondLeavePayable),
       };
-      const reusedSecondLeave = existingSecondLeaveSessions.find(session => session?.entry_type === secondEntryType)
-        || existingSecondLeaveSessions.find(session => session?.id);
       if (reusedSecondLeave?.id) {
         secondLeaveRow.id = reusedSecondLeave.id;
         secondaryLeaveRemovalSet.delete(String(reusedSecondLeave.id));
@@ -1358,11 +1420,6 @@ export function useTimeEntry({
             duplicateReference.splice(idx, 1);
           }
         }
-      }
-      if (hasDuplicateSession(duplicateReference, { ...secondLeaveRow, id: secondLeaveRow.id || null })) {
-        const error = new Error('רישום זה כבר קיים.');
-        error.code = 'TIME_ENTRY_DUPLICATE';
-        throw error;
       }
       if (canWriteMetadata) {
         const payContext = resolveLeavePayMethodContext(employee, leavePayPolicy);
