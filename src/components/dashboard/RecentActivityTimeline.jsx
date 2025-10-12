@@ -227,6 +227,34 @@ function formatSessionsCount(count) {
   return `${numeric} מפגשים`;
 }
 
+function isSalariedEmployee(employee) {
+  if (!employee || typeof employee !== 'object') {
+    return false;
+  }
+
+  const normalizedType = typeof employee.employee_type === 'string'
+    ? employee.employee_type.trim().toLowerCase()
+    : '';
+
+  if (!normalizedType) {
+    // fall through to employment scope heuristics when type is missing
+  } else if (normalizedType === 'global'
+    || normalizedType === 'salary'
+    || normalizedType === 'salaried'
+    || (normalizedType !== 'hourly' && normalizedType !== 'instructor')) {
+    return true;
+  }
+
+  const employmentScopeCandidates = [
+    employee.employment_scope,
+    employee.employmentScope,
+    employee?.metadata?.employment_scope,
+    employee?.metadata?.employmentScope,
+  ];
+
+  return employmentScopeCandidates.some((value) => typeof value === 'string' && value.trim() !== '');
+}
+
 function formatRate(activity) {
   const numeric = toNumber(activity?.rate_used);
   if (numeric === null || numeric <= 0) {
@@ -234,6 +262,10 @@ function formatRate(activity) {
   }
 
   if (activity?.entry_type === 'work_global') {
+    return null;
+  }
+
+  if (isSalariedEmployee(activity?.employee)) {
     return null;
   }
 
