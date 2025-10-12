@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.6.8**
-**Last Updated: 2025-10-10**
+**Version: 1.7.2**
+**Last Updated: 2025-10-12**
 
 ## 1. Vision & Purpose
 
@@ -705,6 +705,7 @@ The leave module centralizes all holiday rules, quotas, and ledger actions so em
 
 ## Recent Updates
 
+- Multi-date leave entry now mirrors the single-day form, supporting all leave types, half-day second-half options, and delegating validation/saving to the unified `useTimeEntry` hook.
 - Centralized leave policy management via the new Settings screen, including holiday tagging and negative balance controls.
 - Employee leave balances now rely on the `LeaveBalances` ledger with annual quota proration and carry-over enforcement.
 - Payroll and reports consume the shared leave selectors so paid holidays and remaining days stay aligned across the app.
@@ -712,8 +713,18 @@ The leave module centralizes all holiday rules, quotas, and ledger actions so em
 - Date filters in reports accept manual input or calendar selection and support multiple formats.
 - Hours KPI counts time for hourly employees only; employee type filter now includes global staff.
 - Detailed entries report can group by employee type with subtotals.
+- Global payroll aggregation now sums `total_payment` snapshots per employee-day to prevent double-paying segmented workdays.
+- Monthly Report totals now track a dedicated “תשלום חופשה” (Leave Pay) column, populated from the per-employee leave payment accumulator.
 
-## 8. Reports CSV Export
+## 8. UX Review – Unified Time Entry
+
+- Align layout affordances between the single-day form and multi-date modal (shared section headings, button ordering, and field grouping) so administrators immediately recognize the same workflow regardless of entry surface.
+- Add inline explanations when a global segment resolves to ₪0 (e.g., tooltip or helper text near the total) to clarify that the day already received its full payment from another segment or paid leave.
+- Surface a consolidated mixed-day summary that shows remaining payable portion after leave selection in both flows, reducing guesswork before saving combined leave/work scenarios.
+- Improve the multi-date checklist to call out incomplete rows and provide quick navigation, lowering the effort required to review large batches before submission.
+- Show post-save feedback that distinguishes successes from skips/zero-pay rows to avoid confusion when large batches include unpaid segments.
+
+## 9. Reports CSV Export
 
 ### 8.1 Detailed Entries CSV Schema (Desktop Export)
 

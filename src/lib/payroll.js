@@ -21,47 +21,6 @@ export function calculateGlobalDailyRate(employee, date, monthlyRate) {
   return monthlyRate / days;
 }
 
-export function aggregateGlobalDays(rows, employeesById) {
-  const map = new Map();
-  rows.forEach((row, index) => {
-    if (!row || row.deleted) return;
-    const emp = employeesById[row.employee_id];
-    if (!emp || emp.employee_type !== 'global') return;
-    if (emp.start_date && row.date < emp.start_date) return;
-    if (row.entry_type !== 'hours' && !isLeaveEntryType(row.entry_type)) return;
-    if (isLeaveEntryType(row.entry_type) && row.payable === false) return;
-    const key = `${row.employee_id}|${row.date}`;
-    const existing = map.get(key);
-    if (!existing) {
-      const amount = row.total_payment != null
-        ? row.total_payment
-        : (row.rate_used != null ? calculateGlobalDailyRate(emp, row.date, row.rate_used) : 0);
-      const multiplier = isLeaveEntryType(row.entry_type)
-        ? getLeaveValueMultiplier({
-          entry_type: row.entry_type,
-          metadata: row.metadata,
-          leave_type: row.leave_type,
-          leave_kind: row.leave_kind,
-        })
-        : 1;
-      map.set(key, {
-        dayType: row.entry_type,
-        indices: [index],
-        rateUsed: row.rate_used,
-        dailyAmount: amount,
-        payable: row.payable !== false,
-        multiplier: Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1,
-      });
-    } else {
-      existing.indices.push(index);
-      if (existing.dayType && row.entry_type && existing.dayType !== row.entry_type) {
-        existing.conflict = true;
-      }
-    }
-  });
-  return map;
-}
-
 export function aggregateGlobalDayForDate(rows, employeesById) {
   const byKey = new Map();
   let total = 0;
@@ -176,17 +135,13 @@ export function resolveLeaveSessionValue(session, resolver, options = {}) {
 export function computePeriodTotals({
   workSessions = [],
   employees = [],
-  services = [],
   startDate,
   endDate,
   serviceFilter = 'all',
   employeeFilter = '',
   employeeTypeFilter = 'all',
   employmentScopeFilter = [],
-  leavePayPolicy = null,
-  settings = null,
-  leaveDayValueSelector = null,
-}) {
+} = {}) {
   const employeesById = Object.fromEntries(employees.map(e => [e.id, e]));
   const start = new Date(startDate);
   const end = new Date(endDate);
@@ -222,101 +177,73 @@ export function computePeriodTotals({
   };
 
   const perEmp = {};
-  const processedLeave = new Map();
-  const resolveLeaveValue = createLeaveDayValueResolver({
-    employees,
-    workSessions: baseSessions,
-    services,
-    leavePayPolicy,
-    settings,
-    leaveDayValueSelector,
-  });
-
-  const globalAgg = aggregateGlobalDays(filtered, employeesById);
-  globalAgg.forEach((val, key) => {
-    const [empId] = key.split('|');
-    result.totalPay += val.dailyAmount;
-    result.diagnostics.uniquePaidDays++;
-    const leaveCredit = isLeaveEntryType(val.dayType) && val.payable
-      ? (Number.isFinite(val.multiplier) && val.multiplier > 0 ? val.multiplier : 1)
-      : 0;
-    if (leaveCredit) result.diagnostics.paidLeaveDays += leaveCredit;
-    if (!perEmp[empId]) perEmp[empId] = { employee_id: empId, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
-    perEmp[empId].pay += val.dailyAmount;
-    perEmp[empId].daysPaid += leaveCredit || 1;
-  });
+  const uniquePaidDays = new Set();
 
   filtered.forEach(row => {
     const emp = employeesById[row.employee_id];
     if (!emp) return;
     if (!perEmp[row.employee_id]) {
-      perEmp[row.employee_id] = { employee_id: row.employee_id, pay: 0, hours: 0, sessions: 0, daysPaid: 0, adjustments: 0 };
+      perEmp[row.employee_id] = {
+        employee_id: row.employee_id,
+        pay: 0,
+        hours: 0,
+        sessions: 0,
+        daysPaid: 0,
+        adjustments: 0,
+        leavePay: 0,
+      };
     }
     const bucket = perEmp[row.employee_id];
-    const isGlobal = emp.employee_type === 'global';
-    if (isGlobal && row.entry_type === 'hours') {
-      const hours = row.hours || 0;
+    const amount = Number(row.total_payment);
+    const payAmount = Number.isFinite(amount) ? amount : 0;
+    const hours = Number(row.hours) || 0;
+    const sessionsCount = Number(row.sessions_count) || 0;
+    const isLeave = isLeaveEntryType(row.entry_type);
+    const isPaidLeave = isLeave && row.payable !== false;
+
+    if (payAmount) {
+      result.totalPay += payAmount;
+      bucket.pay += payAmount;
+    }
+
+    if (row.entry_type === 'adjustment' && payAmount) {
+      result.diagnostics.adjustmentsSum += payAmount;
+      bucket.adjustments += payAmount;
+    }
+
+    if (row.entry_type === 'hours') {
       result.totalHours += hours;
       bucket.hours += hours;
-      return;
     }
-    if (isGlobal && isLeaveEntryType(row.entry_type)) {
-      return;
-    }
-    if (isGlobal && row.entry_type !== 'adjustment' && row.entry_type !== 'hours') {
-      return;
-    }
-    if (isLeaveEntryType(row.entry_type)) {
-      if (row.payable === false) return;
-      const key = `${row.employee_id}|${row.date}`;
-      const already = processedLeave.get(key) || 0;
-      if (already >= 1) return;
-      const sessionValue = resolveLeaveSessionValue(row, resolveLeaveValue, { employee: emp });
-      if (sessionValue.preStartDate) {
-        processedLeave.set(key, 1);
-        return;
-      }
-      const multiplier = Number.isFinite(sessionValue.multiplier) && sessionValue.multiplier > 0
-        ? sessionValue.multiplier
-        : 1;
-      const remaining = Math.max(0, 1 - already);
-      if (remaining <= 0) return;
-      const credit = Math.min(multiplier, remaining);
-      const scale = multiplier ? credit / multiplier : 0;
-      const amount = sessionValue.amount * scale;
-      if (amount) {
-        result.totalPay += amount;
-        bucket.pay += amount;
-      }
-      processedLeave.set(key, already + credit);
-      bucket.daysPaid += credit;
-      result.diagnostics.paidLeaveDays += credit;
-      return;
-    }
-    if (row.entry_type === 'adjustment') {
-      const pay = row.total_payment || 0;
-      result.totalPay += pay;
-      result.diagnostics.adjustmentsSum += pay;
-      bucket.pay += pay;
-      bucket.adjustments += pay;
-      return;
-    }
+
     if (row.entry_type === 'session') {
-      const pay = row.total_payment || 0;
-      result.totalPay += pay;
-      result.totalSessions += row.sessions_count || 0;
-      bucket.pay += pay;
-      bucket.sessions += row.sessions_count || 0;
-    } else if (row.entry_type === 'hours') {
-      const pay = row.total_payment || 0;
-      const hours = row.hours || 0;
-      result.totalPay += pay;
-      result.totalHours += hours;
-      bucket.pay += pay;
-      bucket.hours += hours;
+      result.totalSessions += sessionsCount;
+      bucket.sessions += sessionsCount;
+    }
+
+    if (isPaidLeave) {
+      bucket.leavePay += payAmount;
+      const rawMultiplier = getLeaveValueMultiplier({
+        entry_type: row.entry_type,
+        metadata: row.metadata,
+        leave_type: row.leave_type,
+        leave_kind: row.leave_kind,
+      });
+      const multiplier = Number.isFinite(rawMultiplier) && rawMultiplier > 0 ? rawMultiplier : 1;
+      bucket.daysPaid += multiplier;
+      result.diagnostics.paidLeaveDays += multiplier;
+      if (row.date) {
+        uniquePaidDays.add(`${row.employee_id}|${row.date}`);
+      }
+      return;
+    }
+
+    if (row.payable !== false && payAmount && row.date) {
+      uniquePaidDays.add(`${row.employee_id}|${row.date}`);
     }
   });
 
+  result.diagnostics.uniquePaidDays = uniquePaidDays.size;
   result.totalsByEmployee = Object.values(perEmp);
   return result;
 }

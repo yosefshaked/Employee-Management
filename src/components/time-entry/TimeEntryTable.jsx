@@ -851,6 +851,7 @@ function TimeEntryTableInner({
           getRateForDate={resolveRateForDate}
           workSessions={contextSessions}
           leavePayPolicy={leavePayPolicy}
+          leavePolicy={leavePolicy}
           allowHalfDay={leavePolicy?.allow_half_day}
           defaultMode={activeTab === 'leave'
             ? 'leave'

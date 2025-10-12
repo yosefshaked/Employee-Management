@@ -327,6 +327,61 @@ export default function TimeEntryForm({
     try { return calculateGlobalDailyRate(employee, selectedDate, rate); } catch { return 0; }
   }, [employee, selectedDate, getRateForDate, isGlobal]);
 
+  const configuredLeavePortion = useMemo(() => {
+    if (!isLeaveDay) return 0;
+
+    let portion = 0;
+    const addPortionIfPaid = (kind, fraction) => {
+      if (!kind || !Number.isFinite(fraction)) return;
+      const baseKind = getLeaveBaseKind(kind) || kind;
+      if (isPayableLeaveKind(baseKind)) {
+        portion += fraction;
+      }
+    };
+
+    if (isHalfDaySelection) {
+      const primaryKind = firstHalfSystemPaid ? 'system_paid' : 'employee_paid';
+      addPortionIfPaid(primaryKind, 0.5);
+
+      if (shouldIncludeLeaveSecondHalf) {
+        addPortionIfPaid(secondHalfLeaveType, 0.5);
+      }
+      return Math.min(Math.max(portion, 0), 1);
+    }
+
+    addPortionIfPaid(leaveType, 1);
+    return Math.min(Math.max(portion, 0), 1);
+  }, [
+    isLeaveDay,
+    isHalfDaySelection,
+    leaveType,
+    firstHalfSystemPaid,
+    shouldIncludeLeaveSecondHalf,
+    secondHalfLeaveType,
+  ]);
+
+  const globalRemainingPortion = useMemo(() => {
+    if (!isGlobal) return 1;
+    const normalized = Math.min(Math.max(configuredLeavePortion, 0), 1);
+    return Math.max(0, 1 - normalized);
+  }, [configuredLeavePortion, isGlobal]);
+
+  const firstActiveGlobalSegmentIndex = useMemo(() => {
+    if (!isGlobal || !Array.isArray(segments)) return -1;
+    for (let index = 0; index < segments.length; index += 1) {
+      const candidate = segments[index];
+      if (candidate && candidate._status !== 'deleted') {
+        return index;
+      }
+    }
+    return -1;
+  }, [isGlobal, segments]);
+
+  const globalPreviewAmount = useMemo(() => {
+    if (!isGlobal) return dailyRate;
+    return dailyRate * globalRemainingPortion;
+  }, [dailyRate, globalRemainingPortion, isGlobal]);
+
   const normalizedLeavePay = useMemo(
     () => normalizeLeavePayPolicy(leavePayPolicy),
     [leavePayPolicy],
@@ -859,7 +914,7 @@ export default function TimeEntryForm({
 
   const baseSummary = useMemo(() => {
     const active = segments.filter(s => s._status !== 'deleted');
-    if (isGlobal) return `שכר יומי: ₪${dailyRate.toFixed(2)}`;
+    if (isGlobal) return `שכר יומי: ₪${globalPreviewAmount.toFixed(2)}`;
     if (isHourly) {
       const { rate } = getRateForDate(employee.id, selectedDate, null);
       const h = sumHours(active);
@@ -870,7 +925,15 @@ export default function TimeEntryForm({
       return acc + (parseFloat(s.sessions_count || 0) * parseFloat(s.students_count || 0) * rate);
     }, 0);
     return `שכר יומי: ₪${total.toFixed(2)}`;
-  }, [segments, isGlobal, isHourly, dailyRate, employee, selectedDate, getRateForDate]);
+  }, [
+    segments,
+    isGlobal,
+    globalPreviewAmount,
+    isHourly,
+    employee,
+    selectedDate,
+    getRateForDate,
+  ]);
 
   const adjustmentSummary = useMemo(() => {
     if (!Array.isArray(adjustments) || adjustments.length === 0) {
@@ -973,6 +1036,8 @@ export default function TimeEntryForm({
     const isHalfDayWork = options.isHalfDayWork === true;
     const disableSegment = isLeaveDay && !(isHalfDayWork && shouldIncludeWorkSegments);
     if (isGlobal) {
+      const isPrimaryGlobalSegment = idx === firstActiveGlobalSegmentIndex;
+      const segmentPreviewAmount = isPrimaryGlobalSegment ? globalPreviewAmount : 0;
       return (
         <GlobalSegment
           segment={seg}
@@ -981,7 +1046,7 @@ export default function TimeEntryForm({
           onDuplicate={duplicateSeg}
           onDelete={deleteSeg}
           isFirst={idx === 0}
-          dailyRate={dailyRate}
+          dailyRate={segmentPreviewAmount}
           error={errors[idx]}
           disabled={disableSegment}
         />
