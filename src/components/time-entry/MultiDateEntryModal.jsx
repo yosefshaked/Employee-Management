@@ -149,6 +149,11 @@ export default function MultiDateEntryModal({
 
   const defaultLeaveType = useMemo(() => leaveTypeOptions[0]?.[0] || 'employee_paid', [leaveTypeOptions]);
 
+  const defaultUnpaidLeaveType = useMemo(() => {
+    const found = leaveTypeOptions.find(([value]) => getLeaveBaseKind(value) === 'unpaid');
+    return found?.[0] || null;
+  }, [leaveTypeOptions]);
+
   const secondaryLeaveTypeOptions = useMemo(() => (
     LEAVE_TYPE_OPTIONS
       .filter(option => option.value !== 'mixed' && option.value !== 'half_day' && option.value !== 'system_paid' && option.value !== 'holiday_unpaid')
@@ -197,6 +202,63 @@ export default function MultiDateEntryModal({
   useEffect(() => {
     setLeaveSelections(defaultLeaveSelections);
   }, [defaultLeaveSelections]);
+
+  const allRowsSystemPaid = useMemo(() => {
+    if (!selectedEmployees.length || !sortedDates.length) return false;
+    let hasRows = false;
+    for (const empId of selectedEmployees) {
+      const employee = employeesById[empId];
+      if (!employee) continue;
+      const perDate = leaveSelections[empId] || {};
+      for (const dateValue of sortedDates) {
+        const dateStr = format(dateValue, 'yyyy-MM-dd');
+        const selection = perDate[dateStr] || createDefaultLeaveSelection(employee, dateStr);
+        const baseType = getLeaveBaseKind(selection.leaveType) || selection.leaveType;
+        hasRows = true;
+        if (baseType === 'half_day') {
+          if (selection.primaryHalfLeaveType !== 'system_paid') {
+            return false;
+          }
+        } else if (baseType !== 'system_paid') {
+          return false;
+        }
+      }
+    }
+    return hasRows;
+  }, [
+    selectedEmployees,
+    sortedDates,
+    leaveSelections,
+    employeesById,
+    createDefaultLeaveSelection,
+  ]);
+
+  const hasPaidLeaveRows = useMemo(() => {
+    for (const empId of selectedEmployees) {
+      const employee = employeesById[empId];
+      if (!employee) continue;
+      const perDate = leaveSelections[empId] || {};
+      for (const dateValue of sortedDates) {
+        const dateStr = format(dateValue, 'yyyy-MM-dd');
+        const selection = perDate[dateStr] || createDefaultLeaveSelection(employee, dateStr);
+        const baseType = getLeaveBaseKind(selection.leaveType) || selection.leaveType;
+        if (baseType === 'half_day') {
+          if (selection.primaryHalfLeaveType === 'employee_paid' || selection.primaryHalfLeaveType === 'system_paid') {
+            return true;
+          }
+        } else if (baseType !== 'unpaid') {
+          return true;
+        }
+      }
+    }
+    return false;
+  }, [
+    selectedEmployees,
+    sortedDates,
+    leaveSelections,
+    employeesById,
+    createDefaultLeaveSelection,
+  ]);
 
   const defaultAdjustmentValues = useMemo(() => {
     const base = {};
@@ -438,6 +500,75 @@ export default function MultiDateEntryModal({
       };
     });
   }, [updateLeaveSelection, leaveTypeOptions, defaultLeaveType]);
+
+  const handleMarkAllPaid = useCallback(() => {
+    if (!selectedEmployees.length || !sortedDates.length) return;
+    selectedEmployees.forEach(empId => {
+      sortedDates.forEach(dateValue => {
+        const dateStr = format(dateValue, 'yyyy-MM-dd');
+        setLeaveTypeForRow(empId, dateStr, defaultLeaveType);
+      });
+    });
+  }, [selectedEmployees, sortedDates, setLeaveTypeForRow, defaultLeaveType]);
+
+  const handleMarkAllUnpaid = useCallback(() => {
+    if (!defaultUnpaidLeaveType || !selectedEmployees.length || !sortedDates.length) return;
+    selectedEmployees.forEach(empId => {
+      sortedDates.forEach(dateValue => {
+        const dateStr = format(dateValue, 'yyyy-MM-dd');
+        setLeaveTypeForRow(empId, dateStr, defaultUnpaidLeaveType);
+      });
+    });
+  }, [
+    defaultUnpaidLeaveType,
+    selectedEmployees,
+    sortedDates,
+    setLeaveTypeForRow,
+  ]);
+
+  const handleToggleGlobalSystemPaid = useCallback((checked) => {
+    if (!selectedEmployees.length || !sortedDates.length) return;
+    selectedEmployees.forEach(empId => {
+      sortedDates.forEach(dateValue => {
+        const dateStr = format(dateValue, 'yyyy-MM-dd');
+        toggleSystemPaidForRow(empId, dateStr, checked);
+      });
+    });
+  }, [selectedEmployees, sortedDates, toggleSystemPaidForRow]);
+
+  const handleMarkAllHalfDay = useCallback(() => {
+    if (!allowHalfDay || !selectedEmployees.length || !sortedDates.length) return;
+    selectedEmployees.forEach(empId => {
+      const employee = employeesById[empId];
+      if (!employee) return;
+      const perDate = leaveSelections[empId] || {};
+      sortedDates.forEach(dateValue => {
+        const dateStr = format(dateValue, 'yyyy-MM-dd');
+        const selection = perDate[dateStr] || createDefaultLeaveSelection(employee, dateStr);
+        const baseType = getLeaveBaseKind(selection.leaveType) || selection.leaveType;
+        const isSystemPaid = baseType === 'system_paid'
+          || selection.systemPaid
+          || selection.primaryHalfLeaveType === 'system_paid';
+        const isPaid = baseType === 'half_day'
+          ? (selection.primaryHalfLeaveType === 'employee_paid' || selection.primaryHalfLeaveType === 'system_paid')
+          : baseType !== 'unpaid';
+        if (!isPaid) return;
+        setLeaveTypeForRow(empId, dateStr, 'half_day');
+        if (isSystemPaid) {
+          toggleSystemPaidForRow(empId, dateStr, true);
+        }
+      });
+    });
+  }, [
+    allowHalfDay,
+    selectedEmployees,
+    sortedDates,
+    leaveSelections,
+    employeesById,
+    createDefaultLeaveSelection,
+    setLeaveTypeForRow,
+    toggleSystemPaidForRow,
+  ]);
 
   const setIncludeSecondHalf = useCallback((empId, dateStr, checked) => {
     updateLeaveSelection(empId, dateStr, current => {
@@ -941,6 +1072,46 @@ export default function MultiDateEntryModal({
                 <div className="space-y-4">
                   <div className="text-sm text-slate-600">
                     בחרו סוג חופשה לכל תאריך. ניתן להגדיר חצי יום ולהוסיף רישום לחצי השני של היום בעת הצורך.
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-100 px-3 py-3 ring-1 ring-slate-200">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleMarkAllPaid}
+                        disabled={!selectedEmployees.length || !sortedDates.length}
+                      >
+                        סמן הכל כתשלום
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleMarkAllUnpaid}
+                        disabled={!selectedEmployees.length || !sortedDates.length || !defaultUnpaidLeaveType}
+                      >
+                        סמן הכל כלא תשלום
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={handleMarkAllHalfDay}
+                        disabled={!allowHalfDay || !hasPaidLeaveRows}
+                      >
+                        סמן חצי יום לכל הימים בתשלום
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs font-medium text-slate-600" htmlFor="leave-global-system-paid">
+                        על חשבון המערכת
+                      </Label>
+                      <Switch
+                        id="leave-global-system-paid"
+                        checked={allRowsSystemPaid}
+                        onCheckedChange={handleToggleGlobalSystemPaid}
+                        disabled={!selectedEmployees.length || !sortedDates.length}
+                        aria-label="החל על חשבון המערכת לכל הימים"
+                      />
+                    </div>
                   </div>
                   {selectedEmployees.length === 0 ? (
                     <div className="text-sm text-slate-600">בחרו לפחות עובד אחד להזנת חופשה.</div>
