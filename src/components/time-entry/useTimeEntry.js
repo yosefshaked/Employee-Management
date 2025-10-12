@@ -1212,12 +1212,6 @@ export function useTimeEntry({
           payloadBase.students_count = parseInt(segment.students_count, 10) || null;
         }
 
-        if (hasDuplicateSession(duplicateReference, { ...payloadBase, id: segment.id || null })) {
-          const error = new Error('רישום זה כבר קיים.');
-          error.code = 'TIME_ENTRY_DUPLICATE';
-          throw error;
-        }
-
         if (canWriteMetadata) {
           const metadata = buildSourceMetadata(source, { half_day_second_half: 'work' });
           if (metadata) {
