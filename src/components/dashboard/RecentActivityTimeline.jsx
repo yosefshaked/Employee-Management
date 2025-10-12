@@ -29,7 +29,7 @@ function LoadingTimelineSkeleton() {
             )}
           </div>
           <div className="overflow-hidden rounded-3xl border border-slate-200/70 bg-white/60 p-5 shadow-sm">
-            <div className="flex items-center gap-6">
+            <div className="flex flex-row items-center gap-4 md:gap-6">
               <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-slate-200/70 bg-white">
                 <span className="h-6 w-6 rounded-full bg-slate-200/70" aria-hidden />
                 <span className="absolute inset-0 animate-pulse rounded-full bg-slate-100/60" aria-hidden />
@@ -502,7 +502,7 @@ export default function RecentActivityTimeline() {
                 )}
               </div>
 
-              <article className="relative flex items-stretch gap-6 rounded-3xl border border-slate-200/80 bg-white/90 p-5 shadow-sm transition-shadow duration-200 hover:shadow-lg">
+              <article className="relative flex flex-row items-stretch gap-4 rounded-3xl border border-slate-200/80 bg-white/90 p-5 shadow-sm transition-shadow duration-200 hover:shadow-lg md:gap-6">
                 <div className="flex w-14 shrink-0 items-center justify-center">
                   <span
                     className="flex h-12 w-12 items-center justify-center rounded-full border-2"
