@@ -14,6 +14,64 @@ const NEGATIVE_PAYMENT_COLOR = '#DC2626';
 const NEUTRAL_PAYMENT_COLOR = '#6B7280';
 const TIMESTAMP_LOCALE = 'he-IL';
 
+function LoadingTimelineSkeleton() {
+  return (
+    <div className="space-y-6">
+      {Array.from({ length: MAX_RECENT_ITEMS }).map((_, index, arr) => (
+        <div key={`timeline-skeleton-${index}`} className="relative ps-12">
+          <div className="absolute left-5 top-0 bottom-0 flex flex-col items-center">
+            <span className="relative z-10 mt-2 flex h-3 w-3 items-center justify-center">
+              <span
+                className="h-3 w-3 rounded-full bg-slate-200/80"
+                aria-hidden
+              />
+              <span
+                className="absolute inset-0 rounded-full bg-slate-200/60 blur-[1px]"
+                aria-hidden
+              />
+            </span>
+            {index < arr.length - 1 && (
+              <span className="mt-1 w-px flex-1 bg-slate-200/60" aria-hidden />
+            )}
+          </div>
+          <div className="overflow-hidden rounded-2xl border border-slate-200/70 bg-white/60 p-4 shadow-sm">
+            <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
+              <span className="relative flex h-12 w-12 items-center justify-center rounded-full border border-slate-200/70 bg-white">
+                <span className="h-6 w-6 rounded-full bg-slate-200/70" aria-hidden />
+                <span className="absolute inset-0 animate-pulse rounded-full bg-slate-100/60" aria-hidden />
+              </span>
+              <div className="space-y-3">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-40" />
+              </div>
+              <div className="flex flex-col items-end gap-2">
+                <Skeleton className="h-5 w-24" />
+                <Skeleton className="h-3 w-20" />
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function EmptyTimelineState() {
+  return (
+    <div className="flex flex-col items-center justify-center gap-4 py-10 text-center">
+      <div className="relative flex h-28 w-28 items-center justify-center">
+        <span className="absolute inset-0 animate-pulse rounded-full bg-slate-100/70" aria-hidden />
+        <span className="relative flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-white via-slate-50 to-slate-100 shadow-inner">
+          <Icons.CalendarClock className="h-10 w-10 text-slate-400" aria-hidden />
+        </span>
+      </div>
+      <p className="max-w-xs text-sm font-medium text-slate-600">
+        אין פעילות אחרונה עדיין—הוסיפו תיעוד חדש
+      </p>
+    </div>
+  );
+}
+
 function getIconComponent(iconName) {
   if (iconName && Icons[iconName]) {
     return Icons[iconName];
@@ -363,33 +421,7 @@ export default function RecentActivityTimeline() {
 
   const content = useMemo(() => {
     if (supabaseLoading || isLoading) {
-      return (
-        <div className="space-y-6">
-          {Array.from({ length: MAX_RECENT_ITEMS }).map((_, index, arr) => (
-            <div key={index} className="relative ps-12">
-              <div className="absolute left-5 top-0 bottom-0 flex flex-col items-center">
-                <span className="mt-1 h-3 w-3 rounded-full bg-slate-200" />
-                {index < arr.length - 1 && (
-                  <span className="mt-1 w-px flex-1 bg-slate-200" aria-hidden />
-                )}
-              </div>
-              <div className="rounded-2xl border border-slate-200 bg-white/60 p-4 shadow-sm">
-                <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
-                  <Skeleton className="h-12 w-12 rounded-full" />
-                  <div className="space-y-3">
-                    <Skeleton className="h-4 w-1/2" />
-                    <Skeleton className="h-3 w-3/4" />
-                  </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <Skeleton className="h-5 w-24" />
-                    <Skeleton className="h-3 w-20" />
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      );
+      return <LoadingTimelineSkeleton />;
     }
 
     if (!canFetch) {
@@ -409,11 +441,7 @@ export default function RecentActivityTimeline() {
     }
 
     if (!activities.length) {
-      return (
-        <div className="text-sm text-slate-500">
-          אין פעילות להצגה כרגע.
-        </div>
-      );
+      return <EmptyTimelineState />;
     }
 
     return (
