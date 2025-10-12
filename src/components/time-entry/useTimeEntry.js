@@ -933,7 +933,7 @@ export function useTimeEntry({
       : 1;
 
     const ledgerDelta = baseLeaveKind === 'half_day'
-      ? getLeaveLedgerDelta(normalizedPrimaryHalfKind)
+      ? (isPayableLeaveKind(normalizedPrimaryHalfKind) ? -0.5 : 0)
       : (getLeaveLedgerDelta(baseLeaveKind) || 0);
 
     const summary = selectLeaveRemaining(employee.id, normalizedDate, {
