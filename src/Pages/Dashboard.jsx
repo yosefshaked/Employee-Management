@@ -6,7 +6,7 @@ import { fetchWorkSessions } from '@/api/work-sessions.js';
 import { getServices } from '@/api/services.js';
 import QuickStats from '../components/dashboard/QuickStats';
 import MonthlyCalendar from '../components/dashboard/MonthlyCalendar';
-import RecentActivity from '../components/dashboard/RecentActivity';
+import RecentActivityTimeline from '../components/dashboard/RecentActivityTimeline';
 import { toast } from "sonner";
 import { DEFAULT_LEAVE_PAY_POLICY, normalizeLeavePayPolicy } from '@/lib/leave.js';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
@@ -70,9 +70,6 @@ export default function Dashboard() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // הרשומות מסודרות כברירת מחדל לפי created_at כשהן נטענות
-  const recentSessions = (workSessions || []).slice(0, 5);
-
   if (loading || !authClient) {
     return (
       <div className="p-6 text-center text-slate-500">
@@ -125,14 +122,7 @@ export default function Dashboard() {
             />
           </div>
           <div className="lg:col-span-1">
-            <RecentActivity
-              sessions={recentSessions} // מעבירים את הרשימה החתוכה
-              employees={employees}
-              services={services}
-              workSessions={workSessions}
-              leavePayPolicy={leavePayPolicy}
-              isLoading={isLoading}
-            />
+            <RecentActivityTimeline />
           </div>
         </div>
       </div>

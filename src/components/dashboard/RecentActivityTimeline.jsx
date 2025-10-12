@@ -9,6 +9,10 @@ import { fetchEmployeesList } from '@/api/employees.js';
 import { getActivityTypeDetails } from '@/lib/activity-helpers.js';
 
 const MAX_RECENT_ITEMS = 5;
+const POSITIVE_PAYMENT_COLOR = '#0F766E';
+const NEGATIVE_PAYMENT_COLOR = '#DC2626';
+const NEUTRAL_PAYMENT_COLOR = '#6B7280';
+const TIMESTAMP_LOCALE = 'he-IL';
 
 function getIconComponent(iconName) {
   if (iconName && Icons[iconName]) {
@@ -17,22 +21,266 @@ function getIconComponent(iconName) {
   return Icons.Clock;
 }
 
-function formatActivityDate(workSession) {
-  if (!workSession?.created_at && !workSession?.date) {
-    return '—';
+function toNumber(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
   }
-  const dateToUse = workSession.created_at || workSession.date;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function addAlphaToHex(hexColor, alpha = 0.16) {
+  if (typeof hexColor !== 'string') {
+    return `rgba(148, 163, 184, ${alpha})`;
+  }
+
+  let hex = hexColor.replace('#', '').trim();
+  if (hex.length === 3) {
+    hex = hex.split('').map((char) => char + char).join('');
+  }
+
+  if (hex.length !== 6) {
+    return `rgba(148, 163, 184, ${alpha})`;
+  }
+
+  const numeric = parseInt(hex, 16);
+  const r = (numeric >> 16) & 255;
+  const g = (numeric >> 8) & 255;
+  const b = numeric & 255;
+
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+function parseDate(value) {
+  if (!value) {
+    return null;
+  }
   try {
-    return new Date(dateToUse).toLocaleString('he-IL', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return null;
+    }
+    return parsed;
   } catch {
-    return dateToUse;
+    return null;
   }
+}
+
+function formatActivityTimestamp(workSession) {
+  const createdDate = parseDate(workSession?.created_at);
+  const sessionDate = parseDate(workSession?.date);
+
+  const primaryDate = createdDate || sessionDate;
+  if (!primaryDate) {
+    return { primary: '—', secondary: null, createdDiffers: false, recordedFor: null };
+  }
+
+  const now = new Date();
+  const isSameDay = primaryDate.toDateString() === now.toDateString();
+  const timeFormatter = new Intl.DateTimeFormat(TIMESTAMP_LOCALE, {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  const weekdayFormatter = new Intl.DateTimeFormat(TIMESTAMP_LOCALE, {
+    weekday: 'short',
+  });
+  const longDateFormatter = new Intl.DateTimeFormat(TIMESTAMP_LOCALE, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+  const shortDateFormatter = new Intl.DateTimeFormat(TIMESTAMP_LOCALE, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+
+  const primary = isSameDay
+    ? `היום · ${timeFormatter.format(primaryDate)}`
+    : `${weekdayFormatter.format(primaryDate)} · ${longDateFormatter.format(primaryDate)}`;
+
+  const secondary = `${shortDateFormatter.format(primaryDate)} · ${timeFormatter.format(primaryDate)}`;
+
+  const createdDiffers = Boolean(createdDate && sessionDate
+    && createdDate.toDateString() !== sessionDate.toDateString());
+  const recordedFor = createdDiffers
+    ? `${weekdayFormatter.format(sessionDate)} · ${longDateFormatter.format(sessionDate)}`
+    : null;
+
+  return { primary, secondary, createdDiffers, recordedFor };
+}
+
+function formatCurrency(amount, { includeSign = true } = {}) {
+  if (amount === null || typeof amount === 'undefined') {
+    return null;
+  }
+  const numeric = toNumber(amount);
+  if (numeric === null) {
+    return null;
+  }
+
+  const formatter = new Intl.NumberFormat(TIMESTAMP_LOCALE, {
+    style: 'currency',
+    currency: 'ILS',
+    minimumFractionDigits: Math.abs(numeric % 1) > 0 ? 2 : 0,
+    maximumFractionDigits: 2,
+  });
+
+  const formattedAbsolute = formatter.format(Math.abs(numeric));
+  const prefix = !includeSign
+    ? ''
+    : numeric > 0
+      ? '+'
+      : numeric < 0
+        ? '−'
+        : '';
+
+  return {
+    display: numeric === 0 ? formattedAbsolute : `${prefix}${formattedAbsolute}`,
+    numeric,
+  };
+}
+
+function determinePaymentColor(numeric) {
+  if (numeric > 0) {
+    return POSITIVE_PAYMENT_COLOR;
+  }
+  if (numeric < 0) {
+    return NEGATIVE_PAYMENT_COLOR;
+  }
+  return NEUTRAL_PAYMENT_COLOR;
+}
+
+function formatHours(hours) {
+  const numeric = toNumber(hours);
+  if (numeric === null || numeric === 0) {
+    return null;
+  }
+
+  const hasFraction = Math.abs(numeric % 1) > 0;
+  const display = hasFraction ? numeric.toFixed(1) : numeric.toString();
+  return `${display} שעות`;
+}
+
+function formatSessionsCount(count) {
+  const numeric = toNumber(count);
+  if (numeric === null || numeric === 0) {
+    return null;
+  }
+  return `${numeric} מפגשים`;
+}
+
+function formatRate(activity) {
+  const numeric = toNumber(activity?.rate_used);
+  if (numeric === null || numeric <= 0) {
+    return null;
+  }
+
+  const { display } = formatCurrency(numeric, { includeSign: false }) || {};
+  if (!display) {
+    return null;
+  }
+
+  if (activity?.entry_type === 'session') {
+    return `${display} למפגש`;
+  }
+  if (activity?.entry_type && activity.entry_type.startsWith('leave')) {
+    return `${display} ליום`;
+  }
+  return `${display} לשעה`;
+}
+
+function buildScopeDescriptor(activity) {
+  const parts = [];
+  const formattedHours = formatHours(activity?.hours);
+  const formattedSessions = formatSessionsCount(activity?.sessions_count);
+
+  if (formattedHours) {
+    parts.push(formattedHours);
+  }
+  if (formattedSessions) {
+    parts.push(formattedSessions);
+  }
+
+  if (!parts.length) {
+    return null;
+  }
+
+  return `היקף: ${parts.join(' · ')}`;
+}
+
+function extractNotes(activity) {
+  const candidates = [
+    activity?.notes,
+    activity?.note,
+    activity?.description,
+    activity?.metadata?.notes,
+    activity?.metadata?.note,
+    activity?.metadata?.description,
+    activity?.metadata?.reason,
+  ];
+
+  return candidates.find((value) => typeof value === 'string' && value.trim().length > 0) || null;
+}
+
+function resolveServiceName(activity) {
+  const candidates = [
+    activity?.service?.name,
+    activity?.service_name,
+    activity?.metadata?.service?.name,
+    activity?.metadata?.service_name,
+  ];
+
+  return candidates.find((value) => typeof value === 'string' && value.trim().length > 0) || null;
+}
+
+function resolveStatusDescriptor(activity) {
+  if (activity?.entry_type === 'leave_system_paid') {
+    return 'סטטוס: על חשבון המערכת';
+  }
+  if (activity?.entry_type === 'leave_unpaid') {
+    return 'סטטוס: ללא תשלום';
+  }
+  if (activity?.entry_type === 'leave_employee_paid') {
+    return 'סטטוס: חופשה בתשלום';
+  }
+  if (activity?.entry_type === 'leave_half_day') {
+    return 'סטטוס: חצי יום';
+  }
+  if (activity?.entry_type === 'adjustment') {
+    return activity?.total_payment > 0 ? 'סוג: זיכוי' : activity?.total_payment < 0 ? 'סוג: חיוב' : 'סוג: התאמה';
+  }
+  return null;
+}
+
+function buildContextLine(activity) {
+  const contextParts = [];
+  const serviceName = resolveServiceName(activity);
+  if (serviceName) {
+    contextParts.push(serviceName);
+  }
+
+  const scopeDescriptor = buildScopeDescriptor(activity);
+  if (scopeDescriptor) {
+    contextParts.push(scopeDescriptor);
+  }
+
+  const statusDescriptor = resolveStatusDescriptor(activity);
+  if (statusDescriptor) {
+    contextParts.push(statusDescriptor);
+  }
+
+  const notes = extractNotes(activity);
+  if (notes) {
+    contextParts.push(notes);
+  }
+
+  return contextParts;
 }
 
 export default function RecentActivityTimeline() {
@@ -116,13 +364,27 @@ export default function RecentActivityTimeline() {
   const content = useMemo(() => {
     if (supabaseLoading || isLoading) {
       return (
-        <div className="space-y-4">
-          {Array.from({ length: MAX_RECENT_ITEMS }).map((_, index) => (
-            <div key={index} className="flex items-center gap-3">
-              <Skeleton className="h-10 w-10 rounded-full" />
-              <div className="flex-1 space-y-2">
-                <Skeleton className="h-4 w-2/3" />
-                <Skeleton className="h-3 w-1/2" />
+        <div className="space-y-6">
+          {Array.from({ length: MAX_RECENT_ITEMS }).map((_, index, arr) => (
+            <div key={index} className="relative ps-12">
+              <div className="absolute left-5 top-0 bottom-0 flex flex-col items-center">
+                <span className="mt-1 h-3 w-3 rounded-full bg-slate-200" />
+                {index < arr.length - 1 && (
+                  <span className="mt-1 w-px flex-1 bg-slate-200" aria-hidden />
+                )}
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white/60 p-4 shadow-sm">
+                <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4">
+                  <Skeleton className="h-12 w-12 rounded-full" />
+                  <div className="space-y-3">
+                    <Skeleton className="h-4 w-1/2" />
+                    <Skeleton className="h-3 w-3/4" />
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <Skeleton className="h-5 w-24" />
+                    <Skeleton className="h-3 w-20" />
+                  </div>
+                </div>
               </div>
             </div>
           ))}
@@ -155,35 +417,131 @@ export default function RecentActivityTimeline() {
     }
 
     return (
-      <ul className="space-y-3">
-        {activities.map((activity) => {
+      <ol className="relative space-y-6">
+        {activities.map((activity, index) => {
           const { icon, color, label } = getActivityTypeDetails(activity);
           const IconComponent = getIconComponent(icon);
           const employeeName = activity?.employee?.name || 'עובד לא מזוהה';
-          const formattedDate = formatActivityDate(activity);
+          const {
+            primary: primaryTimestamp,
+            secondary: secondaryTimestamp,
+            createdDiffers,
+            recordedFor,
+          } = formatActivityTimestamp(activity);
+          const payment = formatCurrency(activity?.total_payment);
+          const paymentColor = payment
+            ? determinePaymentColor(payment.numeric)
+            : NEUTRAL_PAYMENT_COLOR;
+          const subMetrics = [
+            formatHours(activity?.hours),
+            formatSessionsCount(activity?.sessions_count),
+            formatRate(activity),
+          ].filter(Boolean);
+          const contextParts = buildContextLine(activity);
 
           return (
             <li
               key={activity.id || `${activity.employee_id}-${activity.date}-${activity.entry_type}`}
-              className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white/60 p-3"
+              className="relative ps-12"
             >
-              <span
-                className="flex h-10 w-10 items-center justify-center rounded-full border"
-                style={{ borderColor: color }}
-              >
-                <IconComponent className="h-5 w-5" style={{ color }} />
-              </span>
-              <div className="flex flex-1 flex-col">
-                <span className="text-sm font-semibold text-slate-900">{employeeName}</span>
-                <span className="text-xs text-slate-500">{formattedDate}</span>
+              <div className="absolute left-5 top-0 bottom-0 flex flex-col items-center">
+                <span className="relative z-10 mt-2 flex h-3 w-3 items-center justify-center">
+                  <span
+                    className="h-3 w-3 rounded-full"
+                    style={{ backgroundColor: color }}
+                    aria-hidden
+                  />
+                </span>
+                {index < activities.length - 1 && (
+                  <span className="mt-1 w-px flex-1 bg-slate-200" aria-hidden />
+                )}
               </div>
-              <span className="text-sm font-medium" style={{ color }}>
-                {label}
-              </span>
+
+              <article className="relative grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-4 rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm transition-shadow duration-200 hover:shadow-lg">
+                <div className="flex items-center justify-center">
+                  <span
+                    className="flex h-12 w-12 items-center justify-center rounded-full border-2"
+                    style={{
+                      borderColor: color,
+                      backgroundColor: addAlphaToHex(color),
+                    }}
+                  >
+                    <IconComponent className="h-6 w-6" style={{ color }} aria-hidden />
+                  </span>
+                </div>
+
+                <div className="min-w-0 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="max-w-[12rem] truncate text-sm font-semibold text-slate-900 sm:max-w-[16rem]">
+                      {employeeName}
+                    </span>
+                    <span
+                      className="flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-semibold"
+                      style={{
+                        color,
+                        borderColor: color,
+                        backgroundColor: addAlphaToHex(color, 0.18),
+                      }}
+                    >
+                      <IconComponent className="h-3.5 w-3.5" aria-hidden />
+                      <span>{label}</span>
+                    </span>
+                    <span
+                      className="ml-auto text-xs text-slate-500"
+                      title={secondaryTimestamp || undefined}
+                    >
+                      {primaryTimestamp}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-600">
+                    {contextParts.length ? (
+                      contextParts.map((part, partIndex) => (
+                        <React.Fragment key={`${activity.id || index}-context-${partIndex}`}>
+                          <span className="truncate">{part}</span>
+                          {partIndex < contextParts.length - 1 && (
+                            <span aria-hidden>·</span>
+                          )}
+                        </React.Fragment>
+                      ))
+                    ) : (
+                      <span>—</span>
+                    )}
+                  </div>
+
+                  {createdDiffers && recordedFor && (
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5">
+                        נרשם עבור: {recordedFor}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex min-w-[160px] flex-col items-end gap-2 text-right">
+                  <span
+                    className="text-lg font-semibold"
+                    style={{ color: paymentColor }}
+                  >
+                    {payment?.display || '—'}
+                  </span>
+                  <div className="flex flex-col items-end gap-1 text-xs text-slate-500">
+                    {subMetrics.length ? (
+                      subMetrics.map((metric, metricIndex) => (
+                        <span key={`${activity.id || index}-metric-${metricIndex}`}>
+                          {metric}
+                        </span>
+                      ))
+                    ) : (
+                      <span>—</span>
+                    )}
+                  </div>
+                </div>
+              </article>
             </li>
           );
         })}
-      </ul>
+      </ol>
     );
   }, [activities, canFetch, error, isLoading, supabaseLoading]);
 
