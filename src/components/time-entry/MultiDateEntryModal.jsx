@@ -42,12 +42,58 @@ export default function MultiDateEntryModal({
   defaultMode = 'regular',
 }) {
   const employeesById = useMemo(() => Object.fromEntries(employees.map(e => [e.id, e])), [employees]);
+  const sortedDates = useMemo(() => [...selectedDates].sort((a, b) => a - b), [selectedDates]);
+  const employeeStartDateMap = useMemo(() => {
+    const map = new Map();
+    employees.forEach(emp => {
+      if (!emp?.start_date) return;
+      const parsed = new Date(`${emp.start_date}T00:00:00`);
+      if (!Number.isNaN(parsed.getTime())) {
+        map.set(emp.id, parsed);
+      }
+    });
+    return map;
+  }, [employees]);
+  const invalidEmployeesForRange = useMemo(() => {
+    if (!sortedDates.length) {
+      return { ids: new Set(), names: [] };
+    }
+    const lastDate = sortedDates[sortedDates.length - 1];
+    const lastTime = lastDate && !Number.isNaN(lastDate.getTime()) ? lastDate.getTime() : null;
+    if (lastTime === null) {
+      return { ids: new Set(), names: [] };
+    }
+    const ids = new Set();
+    const names = [];
+    selectedEmployees.forEach(empId => {
+      const employee = employeesById[empId];
+      if (!employee) return;
+      const startDate = employeeStartDateMap.get(empId);
+      if (!startDate) return;
+      if (startDate.getTime() > lastTime) {
+        ids.add(empId);
+        names.push(employee.name || 'עובד');
+      }
+    });
+    return { ids, names };
+  }, [sortedDates, selectedEmployees, employeeStartDateMap, employeesById]);
+  const invalidEmployeeIds = invalidEmployeesForRange.ids;
+  const invalidEmployeeNames = invalidEmployeesForRange.names;
+  const hasInvalidEmployees = invalidEmployeeIds.size > 0;
+  const invalidEmployeesListText = useMemo(
+    () => invalidEmployeeNames.join(', '),
+    [invalidEmployeeNames],
+  );
+  const validSelectedEmployees = useMemo(
+    () => selectedEmployees.filter(empId => !invalidEmployeeIds.has(empId)),
+    [selectedEmployees, invalidEmployeeIds],
+  );
   const initialRows = useMemo(() => {
     const items = [];
-    for (const empId of selectedEmployees) {
+    for (const empId of validSelectedEmployees) {
       const emp = employeesById[empId];
-      const datesSorted = [...selectedDates].sort((a, b) => a - b);
-      for (const d of datesSorted) {
+      if (!emp) continue;
+      for (const d of sortedDates) {
         items.push({
           employee_id: empId,
           date: format(d, 'yyyy-MM-dd'),
@@ -65,10 +111,21 @@ export default function MultiDateEntryModal({
       }
     }
     return items;
-  }, [selectedEmployees, selectedDates, employeesById]);
+  }, [validSelectedEmployees, sortedDates, employeesById]);
 
   const [rows, setRows] = useState(initialRows);
   useEffect(() => { setRows(initialRows); }, [initialRows]);
+  const [showInvalidEmployeeNotice, setShowInvalidEmployeeNotice] = useState(false);
+  useEffect(() => {
+    if (open && hasInvalidEmployees) {
+      setShowInvalidEmployeeNotice(true);
+    }
+  }, [open, hasInvalidEmployees]);
+  useEffect(() => {
+    if (!hasInvalidEmployees) {
+      setShowInvalidEmployeeNotice(false);
+    }
+  }, [hasInvalidEmployees]);
   const { session, dataClient } = useSupabase();
   const { activeOrgId } = useOrg();
 
@@ -165,11 +222,6 @@ export default function MultiDateEntryModal({
     [secondaryLeaveTypeOptions],
   );
 
-  const sortedDates = useMemo(
-    () => [...selectedDates].sort((a, b) => a - b),
-    [selectedDates]
-  );
-
   const createDefaultLeaveSelection = useCallback((employee, dateStr) => ({
     leaveType: defaultLeaveType,
     lastNonSystemLeaveType: defaultLeaveType,
@@ -185,7 +237,7 @@ export default function MultiDateEntryModal({
 
   const defaultLeaveSelections = useMemo(() => {
     const base = {};
-    selectedEmployees.forEach(empId => {
+    validSelectedEmployees.forEach(empId => {
       const employee = employeesById[empId];
       if (!employee) return;
       const inner = {};
@@ -196,7 +248,7 @@ export default function MultiDateEntryModal({
       base[empId] = inner;
     });
     return base;
-  }, [selectedEmployees, sortedDates, employeesById, createDefaultLeaveSelection]);
+  }, [validSelectedEmployees, sortedDates, employeesById, createDefaultLeaveSelection]);
 
   const [leaveSelections, setLeaveSelections] = useState(defaultLeaveSelections);
   useEffect(() => {
@@ -204,13 +256,17 @@ export default function MultiDateEntryModal({
   }, [defaultLeaveSelections]);
 
   const allRowsSystemPaid = useMemo(() => {
-    if (!selectedEmployees.length || !sortedDates.length) return false;
+    if (!validSelectedEmployees.length || !sortedDates.length) return false;
     let hasRows = false;
-    for (const empId of selectedEmployees) {
+    for (const empId of validSelectedEmployees) {
       const employee = employeesById[empId];
       if (!employee) continue;
+      const startDate = employeeStartDateMap.get(empId);
       const perDate = leaveSelections[empId] || {};
       for (const dateValue of sortedDates) {
+        if (startDate && dateValue < startDate) {
+          continue;
+        }
         const dateStr = format(dateValue, 'yyyy-MM-dd');
         const selection = perDate[dateStr] || createDefaultLeaveSelection(employee, dateStr);
         const baseType = getLeaveBaseKind(selection.leaveType) || selection.leaveType;
@@ -226,19 +282,24 @@ export default function MultiDateEntryModal({
     }
     return hasRows;
   }, [
-    selectedEmployees,
+    validSelectedEmployees,
     sortedDates,
     leaveSelections,
     employeesById,
     createDefaultLeaveSelection,
+    employeeStartDateMap,
   ]);
 
   const hasPaidLeaveRows = useMemo(() => {
-    for (const empId of selectedEmployees) {
+    for (const empId of validSelectedEmployees) {
       const employee = employeesById[empId];
       if (!employee) continue;
+      const startDate = employeeStartDateMap.get(empId);
       const perDate = leaveSelections[empId] || {};
       for (const dateValue of sortedDates) {
+        if (startDate && dateValue < startDate) {
+          continue;
+        }
         const dateStr = format(dateValue, 'yyyy-MM-dd');
         const selection = perDate[dateStr] || createDefaultLeaveSelection(employee, dateStr);
         const baseType = getLeaveBaseKind(selection.leaveType) || selection.leaveType;
@@ -253,16 +314,17 @@ export default function MultiDateEntryModal({
     }
     return false;
   }, [
-    selectedEmployees,
+    validSelectedEmployees,
     sortedDates,
     leaveSelections,
     employeesById,
     createDefaultLeaveSelection,
+    employeeStartDateMap,
   ]);
 
   const defaultAdjustmentValues = useMemo(() => {
     const base = {};
-    selectedEmployees.forEach(empId => {
+    validSelectedEmployees.forEach(empId => {
       const inner = {};
       sortedDates.forEach(d => {
         const dateStr = format(d, 'yyyy-MM-dd');
@@ -271,7 +333,7 @@ export default function MultiDateEntryModal({
       base[empId] = inner;
     });
     return base;
-  }, [selectedEmployees, sortedDates]);
+  }, [validSelectedEmployees, sortedDates]);
 
   const [adjustmentValues, setAdjustmentValues] = useState(defaultAdjustmentValues);
   const [adjustmentErrors, setAdjustmentErrors] = useState({});
@@ -289,7 +351,7 @@ export default function MultiDateEntryModal({
 
   useEffect(() => {
     setAdjustmentErrors({});
-  }, [selectedEmployees, sortedDates]);
+  }, [validSelectedEmployees, sortedDates]);
 
   const updateAdjustmentValue = useCallback((empId, dateStr, patch) => {
     setAdjustmentValues(prev => {
@@ -319,7 +381,7 @@ export default function MultiDateEntryModal({
     let filled = 0;
     let total = 0;
     let sum = 0;
-    selectedEmployees.forEach(empId => {
+    validSelectedEmployees.forEach(empId => {
       const inner = adjustmentValues[empId] || {};
       sortedDates.forEach(d => {
         total += 1;
@@ -334,18 +396,36 @@ export default function MultiDateEntryModal({
       });
     });
     return { filled, total, sum };
-  }, [adjustmentValues, selectedEmployees, sortedDates]);
+  }, [adjustmentValues, validSelectedEmployees, sortedDates]);
 
   const summaryTotal = useMemo(() => rows.reduce((sum, row) => {
     const employee = employeesById[row.employee_id];
     if (!employee) return sum;
+    const startDate = employeeStartDateMap.get(row.employee_id);
+    if (startDate && row.date) {
+      const candidate = new Date(`${row.date}T00:00:00`);
+      if (!Number.isNaN(candidate.getTime()) && candidate < startDate) {
+        return sum;
+      }
+    }
     const value = computeRowPayment(row, employee, services, getRateForDate, { leaveValueResolver });
     return sum + (Number.isFinite(value) ? value : 0);
-  }, 0), [rows, employeesById, services, getRateForDate, leaveValueResolver]);
+  }, 0), [rows, employeesById, services, getRateForDate, leaveValueResolver, employeeStartDateMap]);
 
   const filledCount = useMemo(
-    () => rows.filter(r => isRowCompleteForProgress(r, employeesById[r.employee_id])).length,
-    [rows, employeesById]
+    () => rows.filter(r => {
+      const employee = employeesById[r.employee_id];
+      if (!employee) return false;
+      const startDate = employeeStartDateMap.get(r.employee_id);
+      if (startDate && r.date) {
+        const candidate = new Date(`${r.date}T00:00:00`);
+        if (!Number.isNaN(candidate.getTime()) && candidate < startDate) {
+          return false;
+        }
+      }
+      return isRowCompleteForProgress(r, employee);
+    }).length,
+    [rows, employeesById, employeeStartDateMap]
   );
 
   const [flash, setFlash] = useState(null);
@@ -502,47 +582,64 @@ export default function MultiDateEntryModal({
   }, [updateLeaveSelection, leaveTypeOptions, defaultLeaveType]);
 
   const handleMarkAllPaid = useCallback(() => {
-    if (!selectedEmployees.length || !sortedDates.length) return;
-    selectedEmployees.forEach(empId => {
+    if (!validSelectedEmployees.length || !sortedDates.length) return;
+    validSelectedEmployees.forEach(empId => {
+      const startDate = employeeStartDateMap.get(empId);
       sortedDates.forEach(dateValue => {
+        if (startDate && dateValue < startDate) {
+          return;
+        }
         const dateStr = format(dateValue, 'yyyy-MM-dd');
         setLeaveTypeForRow(empId, dateStr, defaultLeaveType);
       });
     });
-  }, [selectedEmployees, sortedDates, setLeaveTypeForRow, defaultLeaveType]);
+  }, [validSelectedEmployees, sortedDates, setLeaveTypeForRow, defaultLeaveType, employeeStartDateMap]);
 
   const handleMarkAllUnpaid = useCallback(() => {
-    if (!defaultUnpaidLeaveType || !selectedEmployees.length || !sortedDates.length) return;
-    selectedEmployees.forEach(empId => {
+    if (!defaultUnpaidLeaveType || !validSelectedEmployees.length || !sortedDates.length) return;
+    validSelectedEmployees.forEach(empId => {
+      const startDate = employeeStartDateMap.get(empId);
       sortedDates.forEach(dateValue => {
+        if (startDate && dateValue < startDate) {
+          return;
+        }
         const dateStr = format(dateValue, 'yyyy-MM-dd');
         setLeaveTypeForRow(empId, dateStr, defaultUnpaidLeaveType);
       });
     });
   }, [
     defaultUnpaidLeaveType,
-    selectedEmployees,
+    validSelectedEmployees,
     sortedDates,
     setLeaveTypeForRow,
+    employeeStartDateMap,
   ]);
 
   const handleToggleGlobalSystemPaid = useCallback((checked) => {
-    if (!selectedEmployees.length || !sortedDates.length) return;
-    selectedEmployees.forEach(empId => {
+    if (!validSelectedEmployees.length || !sortedDates.length) return;
+    validSelectedEmployees.forEach(empId => {
+      const startDate = employeeStartDateMap.get(empId);
       sortedDates.forEach(dateValue => {
+        if (startDate && dateValue < startDate) {
+          return;
+        }
         const dateStr = format(dateValue, 'yyyy-MM-dd');
         toggleSystemPaidForRow(empId, dateStr, checked);
       });
     });
-  }, [selectedEmployees, sortedDates, toggleSystemPaidForRow]);
+  }, [validSelectedEmployees, sortedDates, toggleSystemPaidForRow, employeeStartDateMap]);
 
   const handleMarkAllHalfDay = useCallback(() => {
-    if (!allowHalfDay || !selectedEmployees.length || !sortedDates.length) return;
-    selectedEmployees.forEach(empId => {
+    if (!allowHalfDay || !validSelectedEmployees.length || !sortedDates.length) return;
+    validSelectedEmployees.forEach(empId => {
       const employee = employeesById[empId];
       if (!employee) return;
+      const startDate = employeeStartDateMap.get(empId);
       const perDate = leaveSelections[empId] || {};
       sortedDates.forEach(dateValue => {
+        if (startDate && dateValue < startDate) {
+          return;
+        }
         const dateStr = format(dateValue, 'yyyy-MM-dd');
         const selection = perDate[dateStr] || createDefaultLeaveSelection(employee, dateStr);
         const baseType = getLeaveBaseKind(selection.leaveType) || selection.leaveType;
@@ -561,13 +658,14 @@ export default function MultiDateEntryModal({
     });
   }, [
     allowHalfDay,
-    selectedEmployees,
+    validSelectedEmployees,
     sortedDates,
     leaveSelections,
     employeesById,
     createDefaultLeaveSelection,
     setLeaveTypeForRow,
     toggleSystemPaidForRow,
+    employeeStartDateMap,
   ]);
 
   const setIncludeSecondHalf = useCallback((empId, dateStr, checked) => {
@@ -647,6 +745,7 @@ export default function MultiDateEntryModal({
   const groupedRows = useMemo(() => {
     const map = new Map();
     rows.forEach((row, index) => {
+      if (!row || !row.employee_id) return;
       if (!map.has(row.employee_id)) map.set(row.employee_id, []);
       map.get(row.employee_id).push({ row, index });
     });
@@ -666,6 +765,13 @@ export default function MultiDateEntryModal({
     rows.forEach(row => {
       if (!row || !row.employee_id || !row.date) {
         return;
+      }
+      const startDate = employeeStartDateMap.get(row.employee_id);
+      if (startDate) {
+        const candidate = new Date(`${row.date}T00:00:00`);
+        if (!Number.isNaN(candidate.getTime()) && candidate < startDate) {
+          return;
+        }
       }
       const key = `${row.employee_id}|${row.date}`;
       if (!grouped.has(key)) {
@@ -737,10 +843,10 @@ export default function MultiDateEntryModal({
     onSaved();
     onClose();
     return true;
-  }, [rows, employeesById, saveWorkDay, formatRegularConflictMessage, onSaved, onClose]);
+  }, [rows, employeesById, saveWorkDay, formatRegularConflictMessage, onSaved, onClose, employeeStartDateMap]);
 
   const handleSaveLeaveMode = useCallback(async () => {
-    if (!selectedEmployees.length || !sortedDates.length) {
+    if (!validSelectedEmployees.length || !sortedDates.length) {
       toast.error('בחרו עובדים ותאריכים להזנת חופשה');
       return;
     }
@@ -749,12 +855,16 @@ export default function MultiDateEntryModal({
     let fallbackCount = 0;
     let overrideCount = 0;
 
-    for (const empId of selectedEmployees) {
+    for (const empId of validSelectedEmployees) {
       const employee = employeesById[empId];
       if (!employee) continue;
       const perDateSelections = leaveSelections[empId] || {};
+      const startDate = employeeStartDateMap.get(empId);
 
       for (const dateValue of sortedDates) {
+        if (startDate && dateValue < startDate) {
+          continue;
+        }
         const dateStr = format(dateValue, 'yyyy-MM-dd');
         const selection = perDateSelections[dateStr] || createDefaultLeaveSelection(employee, dateStr);
         const dayReference = new Date(`${dateStr}T00:00:00`);
@@ -859,7 +969,7 @@ export default function MultiDateEntryModal({
     onSaved();
     onClose();
   }, [
-    selectedEmployees,
+    validSelectedEmployees,
     sortedDates,
     employeesById,
     leaveSelections,
@@ -875,17 +985,22 @@ export default function MultiDateEntryModal({
     formatInvalidStartMessage,
     onSaved,
     onClose,
+    employeeStartDateMap,
   ]);
 
   const regularSaveDisabled = mode === 'regular' && rows.length === 0;
-  const leaveSaveDisabled = mode === 'leave' && (!selectedEmployees.length || !sortedDates.length);
+  const leaveSaveDisabled = mode === 'leave' && (!validSelectedEmployees.length || !sortedDates.length);
   const handleAdjustmentSave = useCallback(async () => {
     const entries = [];
     const errors = {};
     let hasError = false;
-    selectedEmployees.forEach(empId => {
+    validSelectedEmployees.forEach(empId => {
+      const employeeStart = employeeStartDateMap.get(empId);
       const inner = adjustmentValues[empId] || {};
       sortedDates.forEach(d => {
+        if (employeeStart && d < employeeStart) {
+          return;
+        }
         const dateStr = format(d, 'yyyy-MM-dd');
         const entry = inner[dateStr];
         if (!entry) return;
@@ -934,12 +1049,13 @@ export default function MultiDateEntryModal({
     }
   }, [
     adjustmentValues,
-    selectedEmployees,
+    validSelectedEmployees,
     sortedDates,
     setAdjustmentErrors,
     saveAdjustments,
     onSaved,
     onClose,
+    employeeStartDateMap,
   ]);
   const adjustmentSaveDisabled = mode === 'adjustment' && adjustmentStats.filled === 0;
   const primaryDisabled = mode === 'leave'
@@ -981,7 +1097,7 @@ export default function MultiDateEntryModal({
               <div className="flex items-center">
                 <div className="text-xl font-semibold ml-auto">הזנה מרובה</div>
                 <div className="text-sm text-slate-700 flex gap-2 mr-4">
-                  <span>נבחרו {selectedEmployees.length} עובדים</span>
+                  <span>נבחרו {validSelectedEmployees.length} עובדים</span>
                   <span>{selectedDates.length} תאריכים להזנה</span>
                 </div>
               </div>
@@ -1018,6 +1134,24 @@ export default function MultiDateEntryModal({
                 </Button>
               </div>
 
+              {hasInvalidEmployees && showInvalidEmployeeNotice ? (
+                <div className="flex items-start justify-between gap-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+                  <div className="flex-1">
+                    <p className="font-medium">העובדים הבאים טרם החלו לעבוד בטווח התאריכים שנבחר ויידלגו:</p>
+                    <p className="mt-1 text-xs text-amber-800 text-right">{invalidEmployeesListText}</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowInvalidEmployeeNotice(false)}
+                    aria-label="סגירת התראה"
+                  >
+                    סגור
+                  </Button>
+                </div>
+              ) : null}
+
               {mode === 'regular' ? (
                 <>
                   <div className="flex text-sm text-slate-600">
@@ -1028,6 +1162,7 @@ export default function MultiDateEntryModal({
                   {groupedRows.map(([empId, items], idx) => {
                     const emp = employeesById[empId];
                     const isCollapsed = collapsed[empId];
+                    const startDate = employeeStartDateMap.get(empId);
                     return (
                       <div key={empId} className="space-y-3">
                         <div
@@ -1041,25 +1176,48 @@ export default function MultiDateEntryModal({
                         {!isCollapsed && (
                           <div className="space-y-3 mt-2 relative">
                             <div className="flex flex-col gap-3 mt-2">
-                              {items.map(({ row, index }) => (
-                                <EntryRow
-                                  key={`${row.employee_id}-${row.date}-${index}`}
-                                  value={row}
-                                  employee={emp}
-                                  services={services}
-                                  getRateForDate={getRateForDate}
-                                  leaveValueResolver={leaveValueResolver}
-                                  onChange={(patch) => updateRow(index, patch)}
-                                  onCopyField={(field) => handleCopy(index, field)}
-                                  showSummary={true}
-                                  readOnlyDate
-                                  rowId={`row-${index}`}
-                                  flashField={flash && flash.index === index ? flash.field : null}
-                                  hideDayType={emp.employee_type === 'global'}
-                                  allowRemove
-                                  onRemove={() => removeRow(index)}
-                                />
-                              ))}
+                              {items.map(({ row, index }) => {
+                                const rowDateValue = row.date ? new Date(`${row.date}T00:00:00`) : null;
+                                const hasValidDate = rowDateValue && !Number.isNaN(rowDateValue.getTime());
+                                const isBeforeStart = Boolean(startDate && hasValidDate && rowDateValue < startDate);
+                                const formattedRowDate = hasValidDate ? format(rowDateValue, 'dd/MM/yyyy') : (row.date || '');
+                                const formattedStart = startDate ? format(startDate, 'dd/MM/yyyy') : '';
+                                if (isBeforeStart) {
+                                  return (
+                                    <div
+                                      key={`${row.employee_id}-${row.date}-${index}`}
+                                      className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900"
+                                      aria-disabled="true"
+                                    >
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="text-sm font-medium text-amber-900">{formattedRowDate}</span>
+                                      </div>
+                                      <p className="mt-2 text-right">
+                                        תאריך זה לפני תאריך תחילת העבודה ({formattedStart}) ולכן לא ניתן להזין שעות עבורו.
+                                      </p>
+                                    </div>
+                                  );
+                                }
+                                return (
+                                  <EntryRow
+                                    key={`${row.employee_id}-${row.date}-${index}`}
+                                    value={row}
+                                    employee={emp}
+                                    services={services}
+                                    getRateForDate={getRateForDate}
+                                    leaveValueResolver={leaveValueResolver}
+                                    onChange={(patch) => updateRow(index, patch)}
+                                    onCopyField={(field) => handleCopy(index, field)}
+                                    showSummary={true}
+                                    readOnlyDate
+                                    rowId={`row-${index}`}
+                                    flashField={flash && flash.index === index ? flash.field : null}
+                                    hideDayType={emp.employee_type === 'global'}
+                                    allowRemove
+                                    onRemove={() => removeRow(index)}
+                                  />
+                                );
+                              })}
                             </div>
                           </div>
                         )}
@@ -1079,7 +1237,7 @@ export default function MultiDateEntryModal({
                         type="button"
                         variant="outline"
                         onClick={handleMarkAllPaid}
-                        disabled={!selectedEmployees.length || !sortedDates.length}
+                        disabled={!validSelectedEmployees.length || !sortedDates.length}
                       >
                         סמן הכל כתשלום
                       </Button>
@@ -1087,7 +1245,7 @@ export default function MultiDateEntryModal({
                         type="button"
                         variant="outline"
                         onClick={handleMarkAllUnpaid}
-                        disabled={!selectedEmployees.length || !sortedDates.length || !defaultUnpaidLeaveType}
+                        disabled={!validSelectedEmployees.length || !sortedDates.length || !defaultUnpaidLeaveType}
                       >
                         סמן הכל כלא תשלום
                       </Button>
@@ -1108,17 +1266,18 @@ export default function MultiDateEntryModal({
                         id="leave-global-system-paid"
                         checked={allRowsSystemPaid}
                         onCheckedChange={handleToggleGlobalSystemPaid}
-                        disabled={!selectedEmployees.length || !sortedDates.length}
+                        disabled={!validSelectedEmployees.length || !sortedDates.length}
                         aria-label="החל על חשבון המערכת לכל הימים"
                       />
                     </div>
                   </div>
-                  {selectedEmployees.length === 0 ? (
+                  {validSelectedEmployees.length === 0 ? (
                     <div className="text-sm text-slate-600">בחרו לפחות עובד אחד להזנת חופשה.</div>
                   ) : null}
-                  {selectedEmployees.map(empId => {
+                  {validSelectedEmployees.map(empId => {
                     const emp = employeesById[empId];
                     const perDateSelections = leaveSelections[empId] || {};
+                    const employeeStartDate = employeeStartDateMap.get(empId);
                     return (
                       <div key={empId} className="space-y-4 rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4">
                         <div className="flex items-center justify-between">
@@ -1159,6 +1318,23 @@ export default function MultiDateEntryModal({
                                     ? selection.secondHalfLastNonSystemLeaveType
                                     : defaultSecondHalfLeaveType
                                 );
+                              if (employeeStartDate && dateValue < employeeStartDate) {
+                                const formattedStart = format(employeeStartDate, 'dd/MM/yyyy');
+                                return (
+                                  <div
+                                    key={`${empId}-${dateStr}`}
+                                    className="space-y-2 rounded-xl bg-slate-50 px-3 py-3 ring-1 ring-slate-200"
+                                    aria-disabled="true"
+                                  >
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
+                                      <span className="text-sm font-medium text-slate-700">{format(dateValue, 'dd/MM/yyyy')}</span>
+                                    </div>
+                                    <p className="text-xs text-slate-600 text-right">
+                                      תאריך זה לפני תאריך תחילת העבודה ({formattedStart}) ולכן לא ניתן להזין חופשה עבורו.
+                                    </p>
+                                  </div>
+                                );
+                              }
                               return (
                                 <div
                                   key={`${empId}-${dateStr}`}
@@ -1301,12 +1477,13 @@ export default function MultiDateEntryModal({
                   <div className="text-sm text-slate-600">
                     מלאו סכום לכל התאמות שתרצו לשמור. שורות ללא סכום יידלגו אוטומטית.
                   </div>
-                  {selectedEmployees.length === 0 ? (
+                  {validSelectedEmployees.length === 0 ? (
                     <div className="text-sm text-slate-600">בחרו לפחות עובד אחד להזנת התאמות.</div>
                   ) : null}
-                  {selectedEmployees.map(empId => {
+                  {validSelectedEmployees.map(empId => {
                     const emp = employeesById[empId];
                     const map = adjustmentValues[empId] || {};
+                    const employeeStart = employeeStartDateMap.get(empId);
                     return (
                       <div key={empId} className="space-y-3 rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 p-4">
                         <div className="flex items-center justify-between">
@@ -1318,6 +1495,23 @@ export default function MultiDateEntryModal({
                             <div className="text-sm text-slate-600">בחרו תאריכים להזנת התאמות.</div>
                           ) : null}
                           {sortedDates.map(d => {
+                            if (employeeStart && d < employeeStart) {
+                              const formattedStart = format(employeeStart, 'dd/MM/yyyy');
+                              return (
+                                <div
+                                  key={`${empId}-${format(d, 'yyyy-MM-dd')}`}
+                                  className="space-y-2 rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200"
+                                  aria-disabled="true"
+                                >
+                                  <div className="flex flex-wrap items-center justify-between gap-3">
+                                    <span className="text-sm font-medium text-slate-700">{format(d, 'dd/MM/yyyy')}</span>
+                                  </div>
+                                  <p className="text-xs text-slate-600 text-right">
+                                    תאריך זה לפני תאריך תחילת העבודה ({formattedStart}) ולכן לא ניתן להזין התאמה עבורו.
+                                  </p>
+                                </div>
+                              );
+                            }
                             const dateStr = format(d, 'yyyy-MM-dd');
                             const entry = map[dateStr] || { type: 'credit', amount: '', notes: '' };
                             const rowErrors = (adjustmentErrors[empId] && adjustmentErrors[empId][dateStr]) || {};
