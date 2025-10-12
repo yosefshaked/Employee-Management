@@ -37,6 +37,7 @@ export default function MultiDateEntryModal({
   onSaved,
   workSessions = [],
   leavePayPolicy = null,
+  leavePolicy = null,
   allowHalfDay = false,
   defaultMode = 'regular',
 }) {
@@ -78,6 +79,7 @@ export default function MultiDateEntryModal({
     metadataClient: dataClient,
     workSessions,
     leavePayPolicy,
+    leavePolicy,
     session,
     orgId: activeOrgId,
   });
