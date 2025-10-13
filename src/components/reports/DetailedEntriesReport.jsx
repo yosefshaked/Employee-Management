@@ -169,15 +169,15 @@ export default function DetailedEntriesReport({
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50 hover:bg-slate-50">
-                  <TableHead>עובד</TableHead>
-                  {showEmploymentScopeColumn ? <TableHead>היקף משרה</TableHead> : null}
-                  <TableHead>תאריך</TableHead>
-                  <TableHead className="w-64">סוג רישום</TableHead>
-                  <TableHead>כמות</TableHead>
-                  <TableHead>תלמידים</TableHead>
-                  <TableHead>תעריף</TableHead>
-                  <TableHead>סה״כ</TableHead>
-                  <TableHead>הערות</TableHead>
+                  <TableHead className="text-center">עובד</TableHead>
+                  {showEmploymentScopeColumn ? <TableHead className="text-center">היקף משרה</TableHead> : null}
+                  <TableHead className="text-center">תאריך</TableHead>
+                  <TableHead className="w-64 text-center">סוג רישום</TableHead>
+                  <TableHead className="text-center">כמות</TableHead>
+                  <TableHead className="text-center">תלמידים</TableHead>
+                  <TableHead className="text-center">תעריף</TableHead>
+                  <TableHead className="text-center">סה״כ</TableHead>
+                  <TableHead className="text-center">הערות</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>{sortedSessions.map(session => renderSessionRow(session))}</TableBody>
