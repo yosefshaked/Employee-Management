@@ -12,13 +12,14 @@ const MAX_RECENT_ITEMS = 5;
 const POSITIVE_PAYMENT_COLOR = '#0F766E';
 const NEGATIVE_PAYMENT_COLOR = '#DC2626';
 const NEUTRAL_PAYMENT_COLOR = '#6B7280';
+const TIMELINE_LIST_CLASSNAME = 'relative block space-y-6';
 const TIMESTAMP_LOCALE = 'he-IL';
 
 function LoadingTimelineSkeleton() {
   return (
-    <div className="space-y-6">
+    <ol className={TIMELINE_LIST_CLASSNAME}>
       {Array.from({ length: MAX_RECENT_ITEMS }).map((_, index, arr) => (
-        <div key={`timeline-skeleton-${index}`} className="relative ps-12">
+        <li key={`timeline-skeleton-${index}`} className="relative ps-12">
           <div className="absolute ltr:left-5 rtl:right-5 top-0 bottom-0 flex flex-col items-center">
             <span className="relative z-10 mt-2 flex h-3 w-3 items-center justify-center">
               <span className="h-3 w-3 rounded-full bg-slate-200/80" aria-hidden />
@@ -28,7 +29,7 @@ function LoadingTimelineSkeleton() {
               <span className="mt-1 w-px flex-1 bg-slate-200/60" aria-hidden />
             )}
           </div>
-          <div className="overflow-hidden rounded-3xl border border-slate-200/70 bg-white/60 p-5 shadow-sm">
+          <article className="overflow-hidden rounded-3xl border border-slate-200/70 bg-white/60 p-5 shadow-sm">
             <div className="flex flex-row items-center gap-4 md:gap-6">
               <span className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-slate-200/70 bg-white">
                 <span className="h-6 w-6 rounded-full bg-slate-200/70" aria-hidden />
@@ -43,10 +44,10 @@ function LoadingTimelineSkeleton() {
                 <Skeleton className="h-3 w-20" />
               </div>
             </div>
-          </div>
-        </div>
+          </article>
+        </li>
       ))}
-    </div>
+    </ol>
   );
 }
 
@@ -498,7 +499,7 @@ export default function RecentActivityTimeline() {
     }
 
     return (
-      <ol className="relative space-y-6">
+      <ol className={TIMELINE_LIST_CLASSNAME}>
         {activities.map((activity, index) => {
           const { icon, color, label } = getActivityTypeDetails(activity);
           const IconComponent = getIconComponent(icon);
