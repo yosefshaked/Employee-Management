@@ -392,20 +392,21 @@ async function fetchOrganization(context, supabase, orgId) {
 }
 
 async function findAuthUserByEmail(supabase, email) {
-  const listResult = await supabase.auth.admin.listUsers({ email, perPage: 1 });
-  if (listResult.error) {
-    return { error: listResult.error };
+  const userResult = await supabase
+    .from('auth.users')
+    .select('id, email')
+    .eq('email', email)
+    .maybeSingle();
+
+  if (userResult.error) {
+    return { error: userResult.error };
   }
-  const users = Array.isArray(listResult.data?.users) ? listResult.data.users : [];
-  for (const user of users) {
-    if (typeof user?.email !== 'string') {
-      continue;
-    }
-    if (user.email.toLowerCase() === email) {
-      return { user };
-    }
+
+  if (!userResult.data) {
+    return { user: null };
   }
-  return { user: null };
+
+  return { user: userResult.data };
 }
 
 async function checkUserMembership(supabase, orgId, userId) {
