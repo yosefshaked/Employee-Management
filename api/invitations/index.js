@@ -879,6 +879,203 @@ async function handleAccept(context, controlApi, user, authorizationHeader, invi
   });
 }
 
+async function handleIncoming(context, controlApi, user, authorizationHeader) {
+  const userEmail = normalizeEmail(user?.email);
+  if (!userEmail) {
+    return respond(context, 400, { message: 'user_missing_email' });
+  }
+
+  let invitations = [];
+  try {
+    const { data } = await controlApi.get('/org_invitations', {
+      query: { email: userEmail, status: ACTIVE_INVITE_STATUSES },
+      headers: buildAuthHeaders(authorizationHeader),
+    });
+
+    const rows = Array.isArray(data) ? data : data ? [data] : [];
+    const normalizedRows = [];
+    const sourceRows = [];
+
+    for (const row of rows) {
+      const normalized = normalizeInvitationRow(row);
+      if (!normalized) {
+        continue;
+      }
+      normalizedRows.push(normalized);
+      sourceRows.push(row);
+    }
+
+    const orgIds = Array.from(new Set(normalizedRows.map((row) => row.org_id).filter(Boolean)));
+    const orgMap = new Map();
+
+    await Promise.all(
+      orgIds.map(async (orgId) => {
+        try {
+          const organization = await fetchOrganization(controlApi, orgId);
+          if (organization) {
+            orgMap.set(orgId, organization);
+          }
+        } catch (organizationError) {
+          context.log?.warn?.('invitations incoming organization fetch failed', {
+            message: organizationError?.message,
+            orgId,
+          });
+        }
+      }),
+    );
+
+    invitations = normalizedRows.map((row, index) => {
+      const source = sourceRows[index] || {};
+      const directOrganization =
+        (source.organization && typeof source.organization === 'object' && source.organization)
+        || (source.organizations && typeof source.organizations === 'object' && source.organizations)
+        || null;
+
+      const orgId = row.org_id;
+      const resolvedOrganization = directOrganization || orgMap.get(orgId) || null;
+
+      return {
+        ...row,
+        organization: resolvedOrganization
+          ? { id: resolvedOrganization.id ?? orgId, name: resolvedOrganization.name ?? null }
+          : orgId
+            ? { id: orgId, name: null }
+            : null,
+      };
+    });
+  } catch (incomingError) {
+    if (incomingError instanceof InternalApiError && incomingError.status === 404) {
+      invitations = [];
+    } else if (incomingError instanceof InternalApiError && incomingError.status === 204) {
+      invitations = [];
+    } else {
+      context.log?.error?.('invitations incoming lookup failed', {
+        message: incomingError?.message,
+        status: incomingError instanceof InternalApiError ? incomingError.status : undefined,
+      });
+      return respond(context, 500, { message: 'failed_to_list_invitations' });
+    }
+  }
+
+  return respond(context, 200, { invitations });
+}
+
+async function handleRevoke(context, controlApi, userId, authorizationHeader, invitationId) {
+  const normalizedInvitationId = normalizeString(invitationId);
+  if (!normalizedInvitationId || !UUID_PATTERN.test(normalizedInvitationId)) {
+    return respond(context, 400, { message: 'invalid_invitation_id' });
+  }
+
+  let invitation;
+  try {
+    invitation = await fetchInvitationById(controlApi, normalizedInvitationId, authorizationHeader);
+  } catch (invitationError) {
+    context.log?.error?.('invitations revoke failed to load invitation', {
+      message: invitationError?.message,
+      status: invitationError instanceof InternalApiError ? invitationError.status : undefined,
+      invitationId: normalizedInvitationId,
+    });
+    return respond(context, 500, { message: 'failed_to_load_invitation' });
+  }
+
+  if (!invitation) {
+    return respond(context, 404, { message: 'invitation_not_found' });
+  }
+
+  const orgId = invitation.org_id ?? invitation.organization_id ?? null;
+  if (!orgId || !isValidOrgId(String(orgId))) {
+    return respond(context, 409, { message: 'invitation_missing_org' });
+  }
+
+  let membershipRole;
+  try {
+    membershipRole = await ensureMembershipRole(controlApi, orgId, userId);
+  } catch (membershipError) {
+    context.log?.error?.('invitations revoke failed to verify membership', {
+      message: membershipError?.message,
+      status: membershipError instanceof InternalApiError ? membershipError.status : undefined,
+      orgId,
+      userId,
+    });
+    return respond(context, 500, { message: 'failed_to_verify_membership' });
+  }
+
+  if (!membershipRole || !isAdminRole(membershipRole)) {
+    return respond(context, 403, { message: 'forbidden' });
+  }
+
+  if (invitation.status === 'revoked') {
+    return respond(context, 204, null);
+  }
+
+  try {
+    await updateInvitationStatus(controlApi, normalizedInvitationId, 'revoked', authorizationHeader);
+  } catch (updateError) {
+    context.log?.error?.('invitations revoke failed to update invitation', {
+      message: updateError?.message,
+      status: updateError instanceof InternalApiError ? updateError.status : undefined,
+      invitationId: normalizedInvitationId,
+    });
+    return respond(context, 500, { message: 'failed_to_update_invitation' });
+  }
+
+  return respond(context, 204, null);
+}
+
+async function handleDecline(context, controlApi, user, authorizationHeader, invitationId) {
+  const normalizedInvitationId = normalizeString(invitationId);
+  if (!normalizedInvitationId || !UUID_PATTERN.test(normalizedInvitationId)) {
+    return respond(context, 400, { message: 'invalid_invitation_id' });
+  }
+
+  const userEmail = normalizeEmail(user?.email);
+  if (!userEmail) {
+    return respond(context, 400, { message: 'user_missing_email' });
+  }
+
+  let invitation;
+  try {
+    invitation = await fetchInvitationById(controlApi, normalizedInvitationId, authorizationHeader);
+  } catch (invitationError) {
+    context.log?.error?.('invitations decline failed to load invitation', {
+      message: invitationError?.message,
+      status: invitationError instanceof InternalApiError ? invitationError.status : undefined,
+      invitationId: normalizedInvitationId,
+    });
+    return respond(context, 500, { message: 'failed_to_load_invitation' });
+  }
+
+  if (!invitation) {
+    return respond(context, 404, { message: 'invitation_not_found' });
+  }
+
+  const invitationEmail = normalizeEmail(invitation.email || invitation.invitee_email);
+  if (!invitationEmail) {
+    return respond(context, 409, { message: 'invitation_missing_email' });
+  }
+
+  if (invitationEmail !== userEmail) {
+    return respond(context, 403, { message: 'invitee_mismatch' });
+  }
+
+  if (!ACTIVE_INVITE_STATUSES.includes(invitation.status)) {
+    return respond(context, 409, { message: 'invitation_not_pending' });
+  }
+
+  try {
+    await updateInvitationStatus(controlApi, normalizedInvitationId, 'declined', authorizationHeader);
+  } catch (updateError) {
+    context.log?.error?.('invitations decline failed to update invitation', {
+      message: updateError?.message,
+      status: updateError instanceof InternalApiError ? updateError.status : undefined,
+      invitationId: normalizedInvitationId,
+    });
+    return respond(context, 500, { message: 'failed_to_update_invitation' });
+  }
+
+  return respond(context, 204, null);
+}
+
 export default async function (context, req) {
   const env = readEnv(context);
   const { tail } = parseInvitationRoute(req);
@@ -933,6 +1130,10 @@ export default async function (context, req) {
     return handleGet(context, req, controlApi, user.id, authorization.header);
   }
 
+  if (method === 'GET' && tail.length === 1 && tail[0] === 'incoming') {
+    return handleIncoming(context, controlApi, user, authorization.header);
+  }
+
   if (method === 'POST' && (!tail.length || tail[0] === '')) {
     return handlePost(context, req, controlApi, user, env);
   }
@@ -941,5 +1142,13 @@ export default async function (context, req) {
     return handleAccept(context, controlApi, user, authorization.header, tail[0]);
   }
 
-  return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET, POST' });
+  if (method === 'POST' && tail.length === 2 && tail[1] === 'decline') {
+    return handleDecline(context, controlApi, user, authorization.header, tail[0]);
+  }
+
+  if (method === 'DELETE' && tail.length === 1 && tail[0]) {
+    return handleRevoke(context, controlApi, user.id, authorization.header, tail[0]);
+  }
+
+  return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET, POST, DELETE' });
 }

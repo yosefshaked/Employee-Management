@@ -6,6 +6,7 @@ import { useAuth } from '@/auth/AuthContext.jsx';
 import { useOrg } from '@/org/OrgContext.jsx';
 import {
   acceptInvitation as acceptInvitationRequest,
+  declineInvitation as declineInvitationRequest,
   getInvitationByToken,
 } from '@/api/invitations.js';
 import { Button } from '@/components/ui/button';
@@ -101,6 +102,7 @@ function AcceptanceView({
   onAccept,
   isAccepting,
   onDecline,
+  isDeclining,
 }) {
   return (
     <div className="space-y-6">
@@ -111,10 +113,22 @@ function AcceptanceView({
         </p>
       </div>
       <div className="flex flex-col sm:flex-row gap-3 sm:justify-end">
-        <Button onClick={onDecline} variant="outline" className="sm:w-40">
-          <span>דחיית ההזמנה</span>
+        <Button
+          onClick={onDecline}
+          variant="outline"
+          className="sm:w-40"
+          disabled={isDeclining || isAccepting}
+        >
+          {isDeclining ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              <span>דוחה...</span>
+            </>
+          ) : (
+            <span>דחיית ההזמנה</span>
+          )}
         </Button>
-        <Button onClick={onAccept} disabled={isAccepting} className="sm:w-40">
+        <Button onClick={onAccept} disabled={isAccepting || isDeclining} className="sm:w-40">
           {isAccepting ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -138,6 +152,7 @@ export default function AcceptInvitePage() {
   const [invitation, setInvitation] = useState(null);
   const [inviteError, setInviteError] = useState('');
   const [isAccepting, setIsAccepting] = useState(false);
+  const [isDeclining, setIsDeclining] = useState(false);
 
   const token = useMemo(() => {
     const params = new URLSearchParams(location.search);
@@ -255,9 +270,30 @@ export default function AcceptInvitePage() {
     }
   }, [session, invitation, refreshOrganizations, selectOrg, navigate]);
 
-  const handleDecline = useCallback(() => {
-    toast.info('אפשרות דחיית הזמנה תתווסף בהמשך.');
-  }, []);
+  const handleDecline = useCallback(async () => {
+    if (!session || !invitation?.id) {
+      toast.error('נדרש חיבור פעיל כדי לדחות הזמנה.');
+      return;
+    }
+
+    setIsDeclining(true);
+    try {
+      await declineInvitationRequest({
+        session,
+        invitationId: invitation.id,
+      });
+
+      await refreshOrganizations({ keepSelection: true });
+      toast.success('ההזמנה נדחתה בהצלחה.');
+      navigate('/select-org', { replace: true });
+    } catch (error) {
+      console.error('Failed to decline invitation', error);
+      const message = error?.message || 'דחיית ההזמנה נכשלה. נסו שוב מאוחר יותר.';
+      toast.error(message);
+    } finally {
+      setIsDeclining(false);
+    }
+  }, [session, invitation, refreshOrganizations, navigate]);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -301,6 +337,7 @@ export default function AcceptInvitePage() {
         onAccept={handleAccept}
         onDecline={handleDecline}
         isAccepting={isAccepting}
+        isDeclining={isDeclining}
       />
     );
   } else {

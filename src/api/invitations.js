@@ -128,3 +128,49 @@ export async function acceptInvitation({ session, invitationId, signal } = {}) {
     signal,
   });
 }
+
+export async function listIncomingInvitations({ session, signal } = {}) {
+  if (!session) {
+    throw new Error('נדרשת התחברות כדי לטעון הזמנות נכנסות.');
+  }
+
+  return authenticatedFetch('invitations/incoming', {
+    method: 'GET',
+    session,
+    signal,
+  });
+}
+
+export async function revokeInvitation({ session, invitationId, signal } = {}) {
+  if (!session) {
+    throw new Error('נדרשת התחברות כדי לבטל הזמנה.');
+  }
+
+  const normalizedId = normalizeToken(invitationId);
+  if (!normalizedId) {
+    throw new Error('זיהוי הזמנה חסר.');
+  }
+
+  return authenticatedFetch(`invitations/${encodeURIComponent(normalizedId)}`, {
+    method: 'DELETE',
+    session,
+    signal,
+  });
+}
+
+export async function declineInvitation({ session, invitationId, signal } = {}) {
+  if (!session) {
+    throw new Error('נדרשת התחברות כדי לדחות הזמנה.');
+  }
+
+  const normalizedId = normalizeToken(invitationId);
+  if (!normalizedId) {
+    throw new Error('זיהוי הזמנה חסר.');
+  }
+
+  return authenticatedFetch(`invitations/${encodeURIComponent(normalizedId)}/decline`, {
+    method: 'POST',
+    session,
+    signal,
+  });
+}

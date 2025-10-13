@@ -17,6 +17,8 @@ import {
   createInvitation as createInvitationRequest,
   listPendingInvitations,
   acceptInvitation as acceptInvitationRequest,
+  listIncomingInvitations,
+  revokeInvitation as revokeInvitationRequest,
 } from '@/api/invitations.js';
 import { mapSupabaseError } from '@/org/errors.js';
 import { fetchCurrentUser } from '@/shared/api/user.ts';
@@ -229,35 +231,17 @@ export function OrgProvider({ children }) {
 
     try {
       const client = authClient;
-      const membershipPromise = client
+      const membershipResponse = await client
         .from('org_memberships')
         .select('id, role, org_id, user_id, created_at')
         .eq('user_id', user.id)
         .order('created_at', { ascending: true });
 
-      const invitesPromise = user.email
-        ? client
-            .from('org_invitations')
-            .select('id, org_id, email, status, invited_by, created_at, expires_at')
-            .eq('email', user.email.toLowerCase())
-            .in('status', ['pending', 'sent'])
-            .order('created_at', { ascending: true })
-        : Promise.resolve({ data: [], error: null });
-
-      const [membershipResponse, inviteResponse] = await Promise.all([membershipPromise, invitesPromise]);
-
       if (membershipResponse.error) throw membershipResponse.error;
-      if (inviteResponse.error) throw inviteResponse.error;
 
       const membershipData = membershipResponse.data || [];
-      const inviteData = inviteResponse.data || [];
 
-      const orgIds = Array.from(
-        new Set([
-          ...membershipData.map((record) => record.org_id).filter(Boolean),
-          ...inviteData.map((record) => record.org_id).filter(Boolean),
-        ]),
-      );
+      const orgIds = Array.from(new Set(membershipData.map((record) => record.org_id).filter(Boolean)));
 
       let organizationMap = null;
       const connectionMap = new Map();
@@ -318,14 +302,24 @@ export function OrgProvider({ children }) {
 
       setOrgConnections(connectionMap);
 
-      const normalizedInvites = inviteData
-        .map((invite) => normalizeInvite(invite, organizationMap?.get(invite.org_id)))
-        .filter(Boolean);
-
       setOrganizations(normalizedOrganizations);
-      setIncomingInvites(normalizedInvites);
 
-      return { organizations: normalizedOrganizations, invites: normalizedInvites };
+      let incoming = [];
+      if (session) {
+        try {
+          const response = await listIncomingInvitations({ session });
+          incoming = Array.isArray(response?.invitations)
+            ? response.invitations.map((invite) => normalizeInvite(invite)).filter(Boolean)
+            : [];
+        } catch (incomingError) {
+          console.error('Failed to load incoming invitations', incomingError);
+          incoming = [];
+        }
+      }
+
+      setIncomingInvites(incoming);
+
+      return { organizations: normalizedOrganizations, invites: incoming };
     } catch (loadError) {
       console.error('Failed to load organization memberships', loadError);
       setError(loadError);
@@ -335,7 +329,7 @@ export function OrgProvider({ children }) {
     } finally {
       loadingRef.current = false;
     }
-  }, [authClient, user, resetState]);
+  }, [authClient, user, resetState, session]);
 
   const loadOrgDirectory = useCallback(
     async (orgId) => {
@@ -948,15 +942,17 @@ export function OrgProvider({ children }) {
   const revokeInvite = useCallback(
     async (inviteId) => {
       if (!inviteId) return;
-      const client = requireAuthClient();
-      const { error } = await client
-        .from('org_invitations')
-        .update({ status: 'revoked', revoked_at: new Date().toISOString() })
-        .eq('id', inviteId);
-      if (error) throw error;
+      if (!session) {
+        throw new Error('נדרשת התחברות כדי לבטל הזמנה.');
+      }
+
+      await revokeInvitationRequest({
+        session,
+        invitationId: inviteId,
+      });
       if (activeOrgId) await loadOrgDirectory(activeOrgId);
     },
-    [requireAuthClient, activeOrgId, loadOrgDirectory],
+    [session, activeOrgId, loadOrgDirectory],
   );
 
   const removeMember = useCallback(
