@@ -60,12 +60,24 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
                 service,
               });
               const activityLabel = activityDetails.label;
+              const activityVariant = activityDetails.variant === 'solid' ? 'solid' : 'outline';
               const activityColor = typeof activityDetails.color === 'string' && activityDetails.color.trim().length > 0
                 ? activityDetails.color.trim()
                 : '#0F766E';
-              const badgeBackground = activityColor.startsWith('#')
-                ? `${activityColor}20`
-                : activityColor;
+              const isHexColor = activityColor.startsWith('#');
+              const outlineBackground = isHexColor ? `${activityColor}20` : 'transparent';
+              const badgeStyles = activityVariant === 'solid'
+                ? {
+                    backgroundColor: activityColor,
+                    color: '#FFFFFF',
+                    borderColor: activityColor,
+                  }
+                : {
+                    backgroundColor: outlineBackground,
+                    color: activityColor,
+                    borderColor: activityColor,
+                  };
+              const badgeVariantProp = activityVariant === 'solid' ? 'default' : 'outline';
 
               return (
                 <div key={session.id} className="flex items-center gap-3 p-3 rounded-lg bg-slate-50">
@@ -89,14 +101,10 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
 
                   <div className="flex-shrink-0 w-28 text-center">
                     <Badge
-                      variant="outline"
+                      variant={badgeVariantProp}
                       className="text-xs w-full block truncate"
                       title={activityLabel}
-                      style={{
-                        backgroundColor: badgeBackground,
-                        color: activityColor,
-                        borderColor: activityColor,
-                      }}
+                      style={badgeStyles}
                     >
                       {activityLabel}
                     </Badge>
