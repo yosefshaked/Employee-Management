@@ -99,7 +99,6 @@ export async function authenticatedFetch(path, { session, accessToken, ...option
   };
 
   headers.Authorization = bearer;
-  headers.authorization = bearer;
   headers['X-Supabase-Authorization'] = bearer;
   headers['x-supabase-authorization'] = bearer;
   headers['x-supabase-auth'] = bearer;
