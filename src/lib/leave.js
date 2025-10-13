@@ -213,7 +213,11 @@ const ENTRY_TYPE_TO_KIND = {
 };
 
 export function getLeaveKindFromEntryType(entryType) {
-  return ENTRY_TYPE_TO_KIND[entryType] || null;
+  if (Object.prototype.hasOwnProperty.call(ENTRY_TYPE_TO_KIND, entryType)) {
+    return ENTRY_TYPE_TO_KIND[entryType];
+  }
+
+  return null;
 }
 
 export function getEntryTypeForLeaveKind(kind) {
