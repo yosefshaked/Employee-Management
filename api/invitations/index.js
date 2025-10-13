@@ -392,21 +392,23 @@ async function fetchOrganization(context, supabase, orgId) {
 }
 
 async function findAuthUserByEmail(supabase, email) {
-  const userResult = await supabase
-    .from('auth.users')
-    .select('id, email')
-    .eq('email', email)
-    .maybeSingle();
+  try {
+    const adminResult = await supabase.auth.admin.getUserByEmail(email);
+    if (adminResult.error) {
+      if (adminResult.error.status === 404) {
+        return { user: null };
+      }
+      return { error: adminResult.error };
+    }
 
-  if (userResult.error) {
-    return { error: userResult.error };
+    if (!adminResult.data || !adminResult.data.user) {
+      return { user: null };
+    }
+
+    return { user: adminResult.data.user };
+  } catch (error) {
+    return { error };
   }
-
-  if (!userResult.data) {
-    return { user: null };
-  }
-
-  return { user: userResult.data };
 }
 
 async function checkUserMembership(supabase, orgId, userId) {
