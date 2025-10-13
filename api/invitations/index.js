@@ -147,6 +147,203 @@ function normalizeRedirectUrl(value) {
   }
 }
 
+function splitPathAndQuery(segment) {
+  const value = typeof segment === 'string' ? segment : '';
+  const [pathPart, queryPart] = value.split('?', 2);
+  return {
+    path: pathPart ?? '',
+    query: queryPart ?? '',
+  };
+}
+
+function ensureAcceptInviteBaseUrl(candidate) {
+  if (typeof candidate !== 'string') {
+    return null;
+  }
+  const trimmed = candidate.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.toLowerCase().includes('accept-invite')) {
+    return trimmed;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    const normalizedPath = parsed.pathname && parsed.pathname !== '/' ? parsed.pathname.replace(/\/+$/, '') : '';
+    return `${parsed.origin}${normalizedPath}/#/accept-invite`;
+  } catch {
+    return null;
+  }
+}
+
+function appendTokenToUrl(baseUrl, token) {
+  if (typeof baseUrl !== 'string' || typeof token !== 'string') {
+    return null;
+  }
+  const normalizedUrl = baseUrl.trim();
+  const normalizedToken = token.trim();
+  if (!normalizedUrl || !normalizedToken) {
+    return null;
+  }
+  if (normalizedUrl.includes('#')) {
+    const [root, hashSegment] = normalizedUrl.split('#', 2);
+    const { path, query } = splitPathAndQuery(hashSegment ?? '');
+    const params = new URLSearchParams(query);
+    params.set('token', normalizedToken);
+    const serialized = params.toString();
+    const rebuiltHash = serialized ? `${path}?${serialized}` : path;
+    return `${root}#${rebuiltHash}`;
+  }
+  try {
+    const parsed = new URL(normalizedUrl);
+    parsed.searchParams.set('token', normalizedToken);
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function pickFirstString(keys, ...sources) {
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') {
+      continue;
+    }
+    for (const key of keys) {
+      const value = selectStringCandidate(source, key);
+      if (value) {
+        return value;
+      }
+    }
+  }
+  return '';
+}
+
+function resolveInvitationEmailConfig(context) {
+  const env = readEnv(context);
+  const fallbackEnv = process.env ?? {};
+
+  const apiKey =
+    pickFirstString(['APP_SENDGRID_API_KEY', 'SENDGRID_API_KEY', 'APP_EMAIL_API_KEY'], env, fallbackEnv) || '';
+  const fromEmailRaw = pickFirstString(
+    ['APP_INVITE_EMAIL_FROM', 'APP_EMAIL_FROM', 'SENDGRID_FROM_EMAIL', 'EMAIL_FROM'],
+    env,
+    fallbackEnv,
+  );
+  const fromName = pickFirstString(
+    ['APP_INVITE_EMAIL_FROM_NAME', 'APP_EMAIL_FROM_NAME', 'SENDGRID_FROM_NAME', 'EMAIL_FROM_NAME'],
+    env,
+    fallbackEnv,
+  );
+  const templateId = pickFirstString(
+    ['APP_SENDGRID_INVITE_TEMPLATE_ID', 'APP_INVITE_TEMPLATE_ID', 'SENDGRID_INVITE_TEMPLATE_ID', 'SENDGRID_TEMPLATE_ID'],
+    env,
+    fallbackEnv,
+  );
+  const replyToEmailRaw = pickFirstString(
+    ['APP_INVITE_REPLY_TO', 'APP_EMAIL_REPLY_TO', 'SENDGRID_REPLY_TO_EMAIL', 'EMAIL_REPLY_TO'],
+    env,
+    fallbackEnv,
+  );
+  const replyToName = pickFirstString(
+    ['APP_INVITE_REPLY_TO_NAME', 'APP_EMAIL_REPLY_TO_NAME', 'SENDGRID_REPLY_TO_NAME', 'EMAIL_REPLY_TO_NAME'],
+    env,
+    fallbackEnv,
+  );
+  const subject = pickFirstString(
+    ['APP_INVITE_EMAIL_SUBJECT', 'APP_EMAIL_SUBJECT', 'SENDGRID_TEMPLATE_SUBJECT'],
+    env,
+    fallbackEnv,
+  );
+
+  return {
+    apiKey,
+    fromEmail: normalizeEmail(fromEmailRaw) ?? '',
+    fromName,
+    templateId,
+    replyToEmail: normalizeEmail(replyToEmailRaw) ?? '',
+    replyToName,
+    subject,
+  };
+}
+
+async function sendInvitationEmailWithSendGrid(config, payload) {
+  const { apiKey, fromEmail, fromName, templateId, replyToEmail, replyToName, subject } = config;
+  const { toEmail, dynamicTemplateData } = payload;
+
+  if (!apiKey || !fromEmail || !templateId || !toEmail) {
+    return {
+      error: new Error('missing_email_configuration'),
+    };
+  }
+
+  const message = {
+    personalizations: [
+      {
+        to: [{ email: toEmail }],
+        dynamic_template_data: dynamicTemplateData,
+      },
+    ],
+    from: fromName ? { email: fromEmail, name: fromName } : { email: fromEmail },
+    template_id: templateId,
+  };
+
+  if (replyToEmail) {
+    message.reply_to = replyToName ? { email: replyToEmail, name: replyToName } : { email: replyToEmail };
+  }
+
+  if (subject) {
+    message.subject = subject;
+  }
+
+  try {
+    const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(message),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      const error = new Error('sendgrid_request_failed');
+      error.status = response.status;
+      error.detail = detail;
+      return { error };
+    }
+    return { error: null };
+  } catch (err) {
+    const error = err instanceof Error ? err : new Error('sendgrid_request_error');
+    return { error };
+  }
+}
+
+function resolveAcceptInviteRedirect(context, requestedRedirect, token) {
+  const fallbackEnv = process.env ?? {};
+  const env = readEnv(context);
+  const candidates = [requestedRedirect]
+    .concat([
+      pickFirstString(['APP_ACCEPT_INVITE_URL', 'APP_INVITE_REDIRECT_URL'], env),
+      pickFirstString(['APP_ACCEPT_INVITE_URL', 'APP_INVITE_REDIRECT_URL'], fallbackEnv),
+      pickFirstString(['APP_PUBLIC_SITE_URL', 'APP_SITE_URL', 'APP_BASE_URL'], env),
+      pickFirstString(['APP_PUBLIC_SITE_URL', 'APP_SITE_URL', 'APP_BASE_URL'], fallbackEnv),
+    ])
+    .filter(Boolean);
+
+  for (const candidate of candidates) {
+    const baseUrl = ensureAcceptInviteBaseUrl(candidate);
+    if (!baseUrl) {
+      continue;
+    }
+    const redirect = appendTokenToUrl(baseUrl, token);
+    if (redirect) {
+      return redirect;
+    }
+  }
+  return null;
+}
+
 function normalizeExpirationInput(value) {
   if (value === undefined || value === null || value === '') {
     return { value: null, valid: true };
@@ -342,6 +539,16 @@ async function markInvitationExpired(supabase, invitationId) {
     .eq('id', invitationId);
 }
 
+async function markInvitationFailed(supabase, invitationId) {
+  if (!invitationId) {
+    return;
+  }
+  await supabase
+    .from('org_invitations')
+    .update({ status: STATUS_FAILED })
+    .eq('id', invitationId);
+}
+
 async function handleCreateInvitation(context, req, supabase) {
   const authUser = await getAuthenticatedUser(context, req, supabase);
   if (!authUser) {
@@ -441,7 +648,6 @@ async function handleCreateInvitation(context, req, supabase) {
   }
 
   const invitation = insertResult.data;
-  const redirectUrl = redirectTo || null;
   const inviterResult = await supabase.auth.admin.getUserById(authUser.id);
   if (inviterResult.error || !inviterResult.data?.user) {
     context.log?.error?.('invitations failed to load inviter profile', {
@@ -464,22 +670,79 @@ async function handleCreateInvitation(context, req, supabase) {
     invitationToken: invitation.token,
   };
 
-  const inviteResult = await supabase.auth.admin.inviteUserByEmail(email, {
-    redirectTo: redirectUrl || undefined,
-    data: inviteMetadata,
-  });
-
-  if (inviteResult.error) {
-    context.log?.error?.('invitations failed to send email invite', {
+  const acceptRedirect = resolveAcceptInviteRedirect(context, redirectTo, invitation.token);
+  if (!acceptRedirect) {
+    context.log?.error?.('invitations failed to resolve accept invite redirect', {
       orgId,
       email,
       invitationId: invitation.id,
-      message: inviteResult.error.message,
     });
-    await supabase
-      .from('org_invitations')
-      .update({ status: STATUS_FAILED })
-      .eq('id', invitation.id);
+    await markInvitationFailed(supabase, invitation.id);
+    respond(context, 500, { message: 'failed to prepare invitation redirect' });
+    return;
+  }
+
+  const magicLinkResult = await supabase.auth.admin.generateLink({
+    type: 'magiclink',
+    email,
+    options: {
+      redirectTo: acceptRedirect,
+      data: inviteMetadata,
+    },
+  });
+
+  const actionLink = magicLinkResult.data?.properties?.action_link ?? null;
+  if (magicLinkResult.error || !actionLink) {
+    context.log?.error?.('invitations failed to generate magic link', {
+      orgId,
+      email,
+      invitationId: invitation.id,
+      message: magicLinkResult.error?.message ?? 'missing action link',
+    });
+    await markInvitationFailed(supabase, invitation.id);
+    respond(context, 502, { message: 'failed to generate invitation link' });
+    return;
+  }
+
+  const emailConfig = resolveInvitationEmailConfig(context);
+  if (!emailConfig.apiKey || !emailConfig.fromEmail || !emailConfig.templateId) {
+    context.log?.error?.('invitations missing email configuration', {
+      orgId,
+      email,
+      invitationId: invitation.id,
+    });
+    await markInvitationFailed(supabase, invitation.id);
+    respond(context, 500, { message: 'invitation email configuration missing' });
+    return;
+  }
+
+  const dynamicOverrides =
+    emailData && typeof emailData.dynamicTemplateData === 'object' ? emailData.dynamicTemplateData : null;
+  const dynamicTemplateData = {
+    ...inviteMetadata,
+    ...(dynamicOverrides ?? {}),
+    action_link: actionLink,
+    actionLink,
+    accept_redirect: acceptRedirect,
+    inviter_name: inviterName ?? inviteMetadata.inviter_name ?? null,
+    organization_name: organization.name ?? inviteMetadata.organization_name ?? null,
+  };
+
+  const emailSendResult = await sendInvitationEmailWithSendGrid(emailConfig, {
+    toEmail: email,
+    dynamicTemplateData,
+  });
+
+  if (emailSendResult.error) {
+    context.log?.error?.('invitations failed to send magic link email', {
+      orgId,
+      email,
+      invitationId: invitation.id,
+      message: emailSendResult.error.message,
+      status: emailSendResult.error.status ?? null,
+      detail: emailSendResult.error.detail ?? null,
+    });
+    await markInvitationFailed(supabase, invitation.id);
     respond(context, 502, { message: 'failed to send invitation email' });
     return;
   }
