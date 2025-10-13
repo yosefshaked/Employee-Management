@@ -1,7 +1,7 @@
 # תיק פרויקט: מערכת ניהול שכר ועובדים
 
-**גרסה: 1.9.2**
-**תאריך עדכון אחרון: 2025-10-22**
+**גרסה: 1.9.3**
+**תאריך עדכון אחרון: 2025-10-23**
 
 ## 1. חזון ומטרה
 
@@ -63,12 +63,12 @@
 
 - פונקציית Azure בנתיב `/api/invitations` מרכזת את כל פעולות ההזמנה: יצירה, שליפה, ולידציה ופעולות קבלה/דחייה.
 - היא מקימה לקוח Supabase אדמין עם `APP_CONTROL_DB_URL` ו-`APP_CONTROL_DB_SERVICE_ROLE_KEY`, מאמתת את ה-JWT של הפונה ומוודאת מחדש חברות ותפקיד מול `org_memberships` לפני כל שינוי נתונים.
-- `POST /api/invitations` מקבל `{ orgId, email, expiresAt?, redirectTo?, emailData? }` ממנהלים/בעלים, בודק שאין חברות קיימת או הזמנה ממתינה, מוסיף שורה ל-`org_invitations`, ושולח קישור קסם מנוהל ע"י Supabase דרך `supabase.auth.signInWithOtp({ email, options: { emailRedirectTo } })` שמפנה ל-`/#/accept-invite?token=<invitation>` כדי שגם משתמשים חדשים וגם קיימים יעברו באותו CTA.
+- `POST /api/invitations` מקבל `{ orgId, email, expiresAt?, redirectTo?, emailData? }` ממנהלים/בעלים, בודק שאין חברות קיימת או הזמנה ממתינה ומוסיף שורה ל-`org_invitations`. לאחר אימות ההרשאה הפונקציה מחפשת את המייל ב-Supabase Auth: משתמש שקיים כבר מקבל רק את הרשומה הממתינה כדי שה-UI יציג התראה בתוך המערכת, בעוד שמייל חדש מפעיל `supabase.auth.admin.inviteUserByEmail` עם הטוקן בכתובת ההפניה ל-`/#/accept-invite` ונתוני `inviter_name`/`organization_name` להתאמה אישית של המייל.
 - `GET /api/invitations` (למנהלים בלבד) מחזיר הזמנות ממתינות לאחר שהפונקציה מעדכנת הזמנות שפג תוקפן לסטטוס `expired` כך שהן לא יוצגו ל-UI.
 - `GET /api/invitations/token/:token` פתוח ללא אימות, מאמת את הטוקן והפג תוקף ומחזיר שם ארגון, מייל וסטטוס ללא חשיפת שדות רגישים.
 - `POST /api/invitations/:id/accept` דורש שהמייל המאומת של המוזמן יתאים להזמנה, מוסיף/מעדכן רשומת `org_memberships` עם תפקיד `member` ומסמן את ההזמנה כ-`accepted`.
 - `POST /api/invitations/:id/decline` מאמת את המוזמן ומעדכן סטטוס `declined`; `DELETE /api/invitations/:id` מאפשר למנהלים לבטל הזמנות פתוחות.
-- מחזור הסטטוסים: `pending` → (`accepted` | `declined` | `revoked` | `expired` | `failed`). עדכון פקיעת תוקף מתבצע בצד השרת לפני המענה ללקוח.
+- מחזור הסטטוסים: `pending` → (`accepted` | `declined` | `revoked` | `expired`). עדכון פקיעת תוקף מתבצע בצד השרת לפני המענה ללקוח.
 
 ### 2.4 ממשק הזמנות בלשונית "חברי ארגון"
 

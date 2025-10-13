@@ -21,7 +21,6 @@ const STATUS_ACCEPTED = 'accepted';
 const STATUS_REVOKED = 'revoked';
 const STATUS_DECLINED = 'declined';
 const STATUS_EXPIRED = 'expired';
-const STATUS_FAILED = 'failed';
 
 let cachedAdminClient = null;
 let cachedAdminConfig = null;
@@ -380,32 +379,39 @@ async function fetchOrganization(context, supabase, orgId) {
   return orgResult.data;
 }
 
-async function findExistingMemberByEmail(supabase, orgId, email) {
+async function findAuthUserByEmail(supabase, email) {
   const listResult = await supabase.auth.admin.listUsers({ email, perPage: 1 });
   if (listResult.error) {
     return { error: listResult.error };
   }
   const users = Array.isArray(listResult.data?.users) ? listResult.data.users : [];
   for (const user of users) {
-    if (typeof user?.email !== 'string' || user.email.toLowerCase() !== email) {
+    if (typeof user?.email !== 'string') {
       continue;
     }
-    const membershipResult = await supabase
-      .from('org_memberships')
-      .select('user_id')
-      .eq('org_id', orgId)
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (membershipResult.error) {
-      return { error: membershipResult.error };
-    }
-
-    if (membershipResult.data) {
-      return { userId: user.id };
+    if (user.email.toLowerCase() === email) {
+      return { user };
     }
   }
-  return { userId: null };
+  return { user: null };
+}
+
+async function checkUserMembership(supabase, orgId, userId) {
+  if (!userId) {
+    return { isMember: false };
+  }
+  const membershipResult = await supabase
+    .from('org_memberships')
+    .select('user_id')
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (membershipResult.error) {
+    return { error: membershipResult.error };
+  }
+
+  return { isMember: Boolean(membershipResult.data) };
 }
 
 async function findPendingInvitation(supabase, orgId, email) {
@@ -444,7 +450,7 @@ async function markInvitationFailed(supabase, invitationId) {
   }
   await supabase
     .from('org_invitations')
-    .update({ status: STATUS_FAILED })
+    .update({ status: STATUS_REVOKED })
     .eq('id', invitationId);
 }
 
@@ -476,29 +482,42 @@ async function handleCreateInvitation(context, req, supabase) {
     return;
   }
 
-  const organization = await fetchOrganization(context, supabase, orgId);
-  if (!organization) {
-    return;
-  }
-
   const role = await requireAdminForOrg(context, supabase, orgId, authUser.id);
   if (!role) {
     return;
   }
 
-  const { error: memberLookupError, userId: existingUserId } = await findExistingMemberByEmail(supabase, orgId, email);
-  if (memberLookupError) {
-    context.log?.error?.('invitations failed to verify member by email', {
+  const { error: userLookupError, user: existingUser } = await findAuthUserByEmail(supabase, email);
+  if (userLookupError) {
+    context.log?.error?.('invitations failed to locate user by email', {
       orgId,
       email,
-      message: memberLookupError.message,
+      message: userLookupError.message,
     });
-    respond(context, 500, { message: 'failed to verify member' });
+    respond(context, 500, { message: 'failed to verify user' });
     return;
   }
 
-  if (existingUserId) {
-    respond(context, 409, { message: 'user already a member' });
+  if (existingUser) {
+    const { error: membershipError, isMember } = await checkUserMembership(supabase, orgId, existingUser.id);
+    if (membershipError) {
+      context.log?.error?.('invitations failed to verify membership for existing user', {
+        orgId,
+        email,
+        message: membershipError.message,
+      });
+      respond(context, 500, { message: 'failed to verify membership' });
+      return;
+    }
+
+    if (isMember) {
+      respond(context, 409, { message: 'user already a member' });
+      return;
+    }
+  }
+
+  const organization = await fetchOrganization(context, supabase, orgId);
+  if (!organization) {
     return;
   }
 
@@ -547,6 +566,15 @@ async function handleCreateInvitation(context, req, supabase) {
   }
 
   const invitation = insertResult.data;
+
+  if (existingUser) {
+    respond(context, 201, {
+      invitation: sanitizeInvitation(invitation),
+      delivery: 'in_app',
+    });
+    return;
+  }
+
   const inviterResult = await supabase.auth.admin.getUserById(authUser.id);
   if (inviterResult.error || !inviterResult.data?.user) {
     context.log?.error?.('invitations failed to load inviter profile', {
@@ -554,6 +582,7 @@ async function handleCreateInvitation(context, req, supabase) {
       invitedBy: authUser.id,
       message: inviterResult.error?.message ?? 'inviter not found',
     });
+    await markInvitationFailed(supabase, invitation.id);
     respond(context, 500, { message: 'failed to personalize invitation email' });
     return;
   }
@@ -581,20 +610,17 @@ async function handleCreateInvitation(context, req, supabase) {
     return;
   }
 
-  const signInResult = await supabase.auth.signInWithOtp({
-    email,
-    options: {
-      emailRedirectTo: acceptRedirect,
-      data: inviteMetadata,
-    },
+  const inviteResult = await supabase.auth.admin.inviteUserByEmail(email, {
+    redirectTo: acceptRedirect,
+    data: inviteMetadata,
   });
 
-  if (signInResult.error) {
-    context.log?.error?.('invitations failed to send magic link', {
+  if (inviteResult.error) {
+    context.log?.error?.('invitations failed to send invite email', {
       orgId,
       email,
       invitationId: invitation.id,
-      message: signInResult.error.message,
+      message: inviteResult.error.message,
     });
     await markInvitationFailed(supabase, invitation.id);
     respond(context, 502, { message: 'failed to send invitation email' });
@@ -603,6 +629,7 @@ async function handleCreateInvitation(context, req, supabase) {
 
   respond(context, 201, {
     invitation: sanitizeInvitation(invitation),
+    delivery: 'email',
   });
 }
 
