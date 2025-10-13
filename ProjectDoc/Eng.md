@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.7.6**
-**Last Updated: 2025-10-16**
+**Version: 1.7.7**
+**Last Updated: 2025-10-13**
 
 ## 1. Vision & Purpose
 
@@ -46,7 +46,7 @@ The system is built on a modern client-server architecture, packaged as a standa
 - The desktop shell keeps a dedicated Supabase project for application metadata. Core tables include `organizations`, `org_memberships`, and `org_invitations`.
 - Each organization row stores the Supabase public connection details (`supabase_url`, `supabase_anon_key`), the encrypted dedicated key (`dedicated_key_encrypted`) that unlocks server-side write access, optional `policy_links` (array of URLs), `legal_settings` (JSON payload for contact email, terms, privacy policy), and lifecycle markers (`setup_completed`, `verified_at`).
 - Membership rows link Supabase Auth `user_id` values to an organization with a `role` (`admin` or `member`). Each user currently belongs to a single organization; switching orgs updates the active organization context used by secure API calls instead of retargeting a browser Supabase client.
-- Invitation rows record pending emails. Admins can issue invites from **Settings → Org Members**, revoke pending ones, or remove existing members (except themselves).
+- Invitation rows record pending emails. Admins can issue invites from **Settings → Org Members**, revoke pending ones, or remove existing members (except themselves). The invite form now calls the secure `/api/invitations` endpoint via `src/api/invitations.js`, surfaces inline validation, and displays pending invite statuses directly in the admin card.
 - On login the `OrgProvider` loads the user’s memberships, persists the last selected org in `localStorage`, and ensures routes without a saved connection redirect to **Settings** so the Setup Assistant can finish configuration. The active organization context is then forwarded with every secure API call instead of wiring the UI directly to the tenant database.
 
 ### 2.2. Secure API Gateway Flow
@@ -65,6 +65,7 @@ The system is built on a modern client-server architecture, packaged as a standa
 - **Endpoints:**
   - `POST /api/invitations` — Admin/owner only. Validates membership, inserts a new `org_invitations` row, retrieves the generated token, and dispatches the Supabase `inviteUserByEmail` message with `redirectTo` pointing to `#/accept-invite?token=...`.
   - `GET /api/invitations?orgId=<uuid>` — Admin/owner only. Returns all pending/sent invitations for the requested organization to power the Settings → Org Members view.
+- **Frontend Integration:** `InviteUserForm.jsx` and the refreshed `OrgMembersCard.jsx` consume `src/api/invitations.js` to send invitations and list pending rows with user-friendly status badges and loading/error states.
 - **Configuration:** The invitation link uses the first non-empty value among `APP_PUBLIC_URL`, `APP_BASE_URL`, `APP_SITE_URL`, `APP_WEB_URL`, `APP_DESKTOP_URL`, `APP_URL`, `PUBLIC_APP_URL`, or `PUBLIC_URL`. Ensure one of these environment variables is set to the SPA origin (e.g., `https://yourapp.com`).
 - **Security:** All role validation and email dispatch occur server-side. Tokens never leave the backend except through the email link, and responses exclude the raw token to avoid leakage through the admin dashboard.
 

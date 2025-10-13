@@ -13,6 +13,10 @@ import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
 import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { createOrganization as createOrganizationRpc } from '@/api/organizations.js';
+import {
+  createInvitation as createInvitationRequest,
+  listPendingInvitations,
+} from '@/api/invitations.js';
 import { mapSupabaseError } from '@/org/errors.js';
 import { fetchCurrentUser } from '@/shared/api/user.ts';
 
@@ -182,6 +186,7 @@ export function OrgProvider({ children }) {
   const [incomingInvites, setIncomingInvites] = useState([]);
   const [orgMembers, setOrgMembers] = useState([]);
   const [orgInvites, setOrgInvites] = useState([]);
+  const [orgInvitesStatus, setOrgInvitesStatus] = useState('idle');
   const [orgConnections, setOrgConnections] = useState(new Map());
   const [error, setError] = useState(null);
   const [configStatus, setConfigStatus] = useState('idle');
@@ -199,6 +204,7 @@ export function OrgProvider({ children }) {
     setIncomingInvites([]);
     setOrgMembers([]);
     setOrgInvites([]);
+    setOrgInvitesStatus('idle');
     setOrgConnections(new Map());
     setError(null);
     setActiveOrgConfig(null);
@@ -335,31 +341,24 @@ export function OrgProvider({ children }) {
       if (!orgId) {
         setOrgMembers([]);
         setOrgInvites([]);
+        setOrgInvitesStatus('idle');
         return;
       }
 
       if (!authClient) {
+        setOrgInvitesStatus('idle');
         return;
       }
 
       try {
         const client = authClient;
-        const [membersResponse, invitesResponse] = await Promise.all([
-          client
-            .from('org_memberships')
-            .select('id, org_id, user_id, role, created_at')
-            .eq('org_id', orgId)
-            .order('created_at', { ascending: true }),
-          client
-            .from('org_invitations')
-            .select('id, org_id, email, status, invited_by, created_at, expires_at')
-            .eq('org_id', orgId)
-            .in('status', ['pending', 'sent'])
-            .order('created_at', { ascending: true }),
-        ]);
+        const membersResponse = await client
+          .from('org_memberships')
+          .select('id, org_id, user_id, role, created_at')
+          .eq('org_id', orgId)
+          .order('created_at', { ascending: true });
 
         if (membersResponse.error) throw membersResponse.error;
-        if (invitesResponse.error) throw invitesResponse.error;
 
         const membersData = membersResponse.data || [];
         const userIds = membersData.map((member) => member.user_id).filter(Boolean);
@@ -407,11 +406,31 @@ export function OrgProvider({ children }) {
           .filter(Boolean);
 
         setOrgMembers(normalizedMembers);
-        setOrgInvites((invitesResponse.data || []).map((invite) => normalizeInvite(invite)).filter(Boolean));
+
+        if (!session) {
+          setOrgInvites([]);
+          setOrgInvitesStatus('idle');
+          return;
+        }
+
+        setOrgInvitesStatus('loading');
+        try {
+          const response = await listPendingInvitations({ session, orgId });
+          const invitations = Array.isArray(response?.invitations)
+            ? response.invitations.map((invite) => normalizeInvite(invite)).filter(Boolean)
+            : [];
+          setOrgInvites(invitations);
+          setOrgInvitesStatus('succeeded');
+        } catch (inviteError) {
+          console.error('Failed to load organization invitations', inviteError);
+          setOrgInvites([]);
+          setOrgInvitesStatus('error');
+        }
       } catch (directoryError) {
         console.error('Failed to load organization directory', directoryError);
         setOrgMembers([]);
         setOrgInvites([]);
+        setOrgInvitesStatus('error');
       }
     },
     [authClient, session],
@@ -908,25 +927,21 @@ export function OrgProvider({ children }) {
       if (!orgId) throw new Error('יש לבחור ארגון להזמנה.');
       const normalizedEmail = (email || '').trim().toLowerCase();
       if (!normalizedEmail) throw new Error('יש להזין כתובת אימייל תקינה.');
+      if (!session) throw new Error('ההתחברות פגה. התחבר מחדש כדי לשלוח הזמנות.');
 
-      const client = requireAuthClient();
-      const { data, error } = await client
-        .from('org_invitations')
-        .insert({
-          org_id: orgId,
+      try {
+        await createInvitationRequest({
+          session,
+          orgId,
           email: normalizedEmail,
-          status: 'pending',
-          invited_by: user?.id || null,
-        })
-        .select('id')
-        .single();
+        });
+      } catch (inviteError) {
+        throw inviteError;
+      }
 
-      if (error) throw error;
       await loadOrgDirectory(orgId);
-      toast.success('הזמנה נשלחה.');
-      return data;
     },
-    [requireAuthClient, user, loadOrgDirectory],
+    [session, loadOrgDirectory],
   );
 
   const revokeInvite = useCallback(
@@ -1024,6 +1039,7 @@ export function OrgProvider({ children }) {
       incomingInvites,
       members: orgMembers,
       pendingInvites: orgInvites,
+      pendingInvitesStatus: orgInvitesStatus,
       selectOrg,
       refreshOrganizations,
       createOrganization,
@@ -1052,6 +1068,7 @@ export function OrgProvider({ children }) {
       incomingInvites,
       orgMembers,
       orgInvites,
+      orgInvitesStatus,
       selectOrg,
       refreshOrganizations,
       createOrganization,

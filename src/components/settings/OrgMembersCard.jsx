@@ -1,12 +1,12 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, MailPlus, Trash2, UserMinus } from 'lucide-react';
+import { AlertTriangle, Trash2, UserMinus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
+import InviteUserForm from '@/components/settings/InviteUserForm.jsx';
 
 function formatDate(isoString) {
   if (!isoString) return '';
@@ -22,32 +22,39 @@ function formatDate(isoString) {
   }
 }
 
+function translateInviteStatus(status) {
+  switch ((status || '').toLowerCase()) {
+    case 'pending':
+      return 'ממתינה להצטרפות';
+    case 'sent':
+      return 'נשלחה בהצלחה';
+    case 'accepted':
+      return 'התקבלה';
+    case 'declined':
+      return 'נדחתה';
+    default:
+      return 'סטטוס לא ידוע';
+  }
+}
+
 export default function OrgMembersCard() {
-  const { activeOrg, members, pendingInvites, inviteMember, revokeInvite, removeMember } = useOrg();
+  const {
+    activeOrg,
+    members,
+    pendingInvites,
+    pendingInvitesStatus,
+    revokeInvite,
+    removeMember,
+  } = useOrg();
   const { user } = useAuth();
-  const [email, setEmail] = useState('');
-  const [isInviting, setIsInviting] = useState(false);
   const isAdmin = activeOrg?.membership?.role === 'admin';
+  const isLoadingInvites = pendingInvitesStatus === 'loading';
+  const invitesFailed = pendingInvitesStatus === 'error';
+  const hasPendingInvites = Array.isArray(pendingInvites) && pendingInvites.length > 0;
 
   if (!activeOrg) {
     return null;
   }
-
-  const handleInvite = async (event) => {
-    event.preventDefault();
-    if (!isAdmin || !email.trim()) return;
-
-    setIsInviting(true);
-    try {
-      await inviteMember(activeOrg.id, email.trim());
-      setEmail('');
-    } catch (error) {
-      console.error('Failed to send invitation', error);
-      toast.error('שליחת ההזמנה נכשלה. ודא שהכתובת תקינה ונסה שוב.');
-    } finally {
-      setIsInviting(false);
-    }
-  };
 
   const handleRevoke = async (inviteId) => {
     try {
@@ -130,24 +137,7 @@ export default function OrgMembersCard() {
         {isAdmin ? (
           <section className="space-y-3">
             <h3 className="text-sm font-semibold text-slate-700">הזמן חבר חדש</h3>
-            <form className="flex flex-col md:flex-row gap-3" onSubmit={handleInvite}>
-              <Input
-                type="email"
-                dir="ltr"
-                placeholder="manager@example.com"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                required
-              />
-              <Button type="submit" className="gap-2" disabled={isInviting}>
-                {isInviting ? 'שולח...' : (
-                  <>
-                    <MailPlus className="w-4 h-4" />
-                    שלח הזמנה
-                  </>
-                )}
-              </Button>
-            </form>
+            <InviteUserForm orgId={activeOrg.id} />
           </section>
         ) : null}
 
@@ -155,30 +145,43 @@ export default function OrgMembersCard() {
           <section className="space-y-3">
             <h3 className="text-sm font-semibold text-slate-700">הזמנות ממתינות</h3>
             <div className="space-y-3">
-              {pendingInvites?.length ? (
-                pendingInvites.map((invite) => (
-                  <div
-                    key={invite.id}
-                    className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 border border-slate-200 rounded-xl px-4 py-3"
-                  >
-                    <div className="text-right space-y-1">
-                      <p className="text-sm font-medium text-slate-900" dir="ltr">{invite.email}</p>
-                      <p className="text-xs text-slate-500">נשלח: {formatDate(invite.created_at)}</p>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="text-slate-600 hover:bg-slate-100 gap-2"
-                      onClick={() => handleRevoke(invite.id)}
+              {isLoadingInvites ? (
+                <p className="text-xs text-slate-500" role="status">טוען הזמנות...</p>
+              ) : null}
+              {invitesFailed ? (
+                <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2" role="alert">
+                  <AlertTriangle className="w-4 h-4" aria-hidden="true" />
+                  <span>טעינת ההזמנות נכשלה. נסה לרענן את הדף.</span>
+                </div>
+              ) : null}
+              {hasPendingInvites
+                ? pendingInvites.map((invite) => (
+                    <div
+                      key={invite.id}
+                      className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 border border-slate-200 rounded-xl px-4 py-3"
                     >
-                      <Trash2 className="w-4 h-4" />
-                      בטל הזמנה
-                    </Button>
-                  </div>
-                ))
-              ) : (
+                      <div className="text-right space-y-1">
+                        <p className="text-sm font-medium text-slate-900" dir="ltr">{invite.email}</p>
+                        <p className="text-xs text-slate-500">נשלח: {formatDate(invite.created_at)}</p>
+                        <Badge variant="outline" className="text-indigo-700 border-indigo-200 bg-indigo-50">
+                          {translateInviteStatus(invite.status)}
+                        </Badge>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="text-slate-600 hover:bg-slate-100 gap-2"
+                        onClick={() => handleRevoke(invite.id)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        בטל הזמנה
+                      </Button>
+                    </div>
+                  ))
+                : null}
+              {!hasPendingInvites && !isLoadingInvites && !invitesFailed ? (
                 <p className="text-xs text-slate-500">אין הזמנות ממתינות.</p>
-              )}
+              ) : null}
             </div>
           </section>
         ) : null}
