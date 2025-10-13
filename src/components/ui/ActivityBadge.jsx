@@ -27,7 +27,7 @@ export default function ActivityBadge({ label, color, variant = 'outline', class
   const isSolid = variant === 'solid';
   const backgroundColor = isSolid ? normalizedColor : buildOutlineBackground(normalizedColor);
   const textColor = isSolid ? '#FFFFFF' : normalizedColor;
-  const combinedClassName = `w-fit text-xs font-medium ${className}`.trim();
+  const combinedClassName = `w-fit max-w-full text-xs font-medium ${className}`.trim();
 
   return (
     <Badge
@@ -41,7 +41,7 @@ export default function ActivityBadge({ label, color, variant = 'outline', class
       title={title || label}
       {...badgeProps}
     >
-      {label}
+      <span className="block max-w-full truncate">{label}</span>
     </Badge>
   );
 }

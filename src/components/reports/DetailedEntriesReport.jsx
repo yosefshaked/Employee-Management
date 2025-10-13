@@ -121,12 +121,11 @@ export default function DetailedEntriesReport({
           <TableCell>{employmentScopeLabel || '—'}</TableCell>
         ) : null}
         <TableCell>{format(parseISO(session.date), 'dd/MM/yyyy', { locale: he })}</TableCell>
-        <TableCell className="items-start">
+        <TableCell className="w-64 items-start">
           <ActivityBadge
             label={activityDetails.label}
             color={activityDetails.color}
             variant={activityDetails.variant}
-            className="w-full"
             title={activityDetails.label}
           />
         </TableCell>
@@ -173,7 +172,7 @@ export default function DetailedEntriesReport({
                   <TableHead>עובד</TableHead>
                   {showEmploymentScopeColumn ? <TableHead>היקף משרה</TableHead> : null}
                   <TableHead>תאריך</TableHead>
-                  <TableHead>סוג רישום</TableHead>
+                  <TableHead className="w-64">סוג רישום</TableHead>
                   <TableHead>כמות</TableHead>
                   <TableHead>תלמידים</TableHead>
                   <TableHead>תעריף</TableHead>
