@@ -84,6 +84,17 @@ function buildInternalApiUrl(baseUrl, path, query) {
   return url.toString();
 }
 
+function buildAuthHeaders(authorizationHeader) {
+  if (!authorizationHeader) {
+    return undefined;
+  }
+
+  return {
+    Authorization: authorizationHeader,
+    'X-Supabase-Authorization': authorizationHeader,
+  };
+}
+
 function createInternalApiClient(context, env, authorizationHeader) {
   const baseUrl = resolveControlApiBaseUrl(env);
   if (!baseUrl) {
@@ -97,10 +108,12 @@ function createInternalApiClient(context, env, authorizationHeader) {
       ...(extraHeaders ?? {}),
     };
 
-    if (authorizationHeader) {
-      headers.Authorization = authorizationHeader;
-      if (!headers['X-Supabase-Authorization']) {
-        headers['X-Supabase-Authorization'] = authorizationHeader;
+    const authHeaders = buildAuthHeaders(authorizationHeader);
+    if (authHeaders) {
+      for (const [key, value] of Object.entries(authHeaders)) {
+        if (value !== undefined && value !== null && !headers[key]) {
+          headers[key] = value;
+        }
       }
     }
 
@@ -147,6 +160,9 @@ function createInternalApiClient(context, env, authorizationHeader) {
     },
     post(path, options) {
       return request('POST', path, options);
+    },
+    patch(path, options) {
+      return request('PATCH', path, options);
     },
   };
 }
@@ -207,6 +223,27 @@ function parseRequestBody(req) {
   } catch {
     return {};
   }
+}
+
+function parseInvitationRoute(req) {
+  const rawUrl = typeof req?.url === 'string' ? req.url : '/api/invitations';
+  let url;
+  try {
+    url = new URL(rawUrl, 'http://localhost');
+  } catch {
+    url = new URL('/api/invitations', 'http://localhost');
+  }
+
+  const segments = url.pathname.split('/').filter(Boolean);
+  const apiIndex = segments.indexOf('api');
+  const relevantSegments = apiIndex >= 0 ? segments.slice(apiIndex + 1) : segments;
+
+  if (!relevantSegments.length || relevantSegments[0] !== 'invitations') {
+    return { base: [], tail: [] };
+  }
+
+  const tail = relevantSegments.slice(1);
+  return { base: relevantSegments, tail };
 }
 
 function isValidOrgId(value) {
@@ -400,6 +437,62 @@ async function sendInvitationEmail(controlApi, payload) {
   return controlApi.post('/emails/invitations', { body: payload });
 }
 
+async function fetchInvitationById(controlApi, invitationId, authorizationHeader) {
+  try {
+    const { data } = await controlApi.get(`/org_invitations/${encodeURIComponent(invitationId)}`, {
+      headers: buildAuthHeaders(authorizationHeader),
+    });
+
+    if (!data) {
+      return null;
+    }
+
+    if (Array.isArray(data)) {
+      return data[0] ?? null;
+    }
+
+    return data;
+  } catch (error) {
+    if (error instanceof InternalApiError && (error.status === 404 || error.status === 204)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function fetchInvitationByToken(controlApi, token) {
+  try {
+    const { data } = await controlApi.get('/org_invitations', {
+      query: { token },
+    });
+
+    if (!data) {
+      return null;
+    }
+
+    const rows = Array.isArray(data) ? data : [data];
+    return rows.find((row) => row && typeof row === 'object' && normalizeString(row.token) === token) ?? null;
+  } catch (error) {
+    if (error instanceof InternalApiError && (error.status === 404 || error.status === 204)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function updateInvitationStatus(controlApi, invitationId, status, authorizationHeader) {
+  const { data } = await controlApi.patch(`/org_invitations/${encodeURIComponent(invitationId)}`, {
+    headers: buildAuthHeaders(authorizationHeader),
+    body: { status },
+  });
+
+  if (Array.isArray(data)) {
+    return data[0] ?? null;
+  }
+
+  return data ?? null;
+}
+
 async function handlePost(context, req, controlApi, user, env) {
   context.log('Invitations POST handler started', { userId: user?.id });
 
@@ -585,7 +678,7 @@ async function handlePost(context, req, controlApi, user, env) {
   });
 }
 
-async function handleGet(context, req, controlApi, userId) {
+async function handleGet(context, req, controlApi, userId, authorizationHeader) {
   const query = req?.query ?? {};
   const orgCandidate = query.orgId || query.org_id;
   const orgId = normalizeString(orgCandidate);
@@ -615,6 +708,7 @@ async function handleGet(context, req, controlApi, userId) {
   try {
     const { data } = await controlApi.get('/org_invitations', {
       query: { org_id: orgId, status: ACTIVE_INVITE_STATUSES },
+      headers: buildAuthHeaders(authorizationHeader),
     });
 
     const rows = Array.isArray(data) ? data : (data ? [data] : []);
@@ -637,8 +731,173 @@ async function handleGet(context, req, controlApi, userId) {
   return respond(context, 200, { invitations: normalized });
 }
 
+async function handleTokenLookup(context, controlApi, token) {
+  const normalizedToken = normalizeString(token);
+  if (!normalizedToken || !UUID_PATTERN.test(normalizedToken)) {
+    return respond(context, 400, { message: 'invalid_token' });
+  }
+
+  let invitation;
+  try {
+    invitation = await fetchInvitationByToken(controlApi, normalizedToken);
+  } catch (lookupError) {
+    context.log?.error?.('invitations token lookup failed', {
+      message: lookupError?.message,
+      status: lookupError instanceof InternalApiError ? lookupError.status : undefined,
+    });
+    return respond(context, 500, { message: 'failed_to_lookup_invitation' });
+  }
+
+  if (!invitation || !ACTIVE_INVITE_STATUSES.includes(invitation.status)) {
+    return respond(context, 404, { message: 'invitation_not_found' });
+  }
+
+  const organizationId = invitation.org_id ?? invitation.organization_id ?? null;
+  let organization = null;
+  if (organizationId) {
+    try {
+      organization = await fetchOrganization(controlApi, organizationId);
+    } catch (organizationError) {
+      context.log?.warn?.('invitations token lookup organization fetch failed', {
+        message: organizationError?.message,
+        organizationId,
+      });
+    }
+  }
+
+  const normalized = normalizeInvitationRow(invitation);
+  return respond(context, 200, {
+    invitation: {
+      id: normalized?.id ?? null,
+      org_id: normalized?.org_id ?? organizationId,
+      email: normalized?.email ?? normalizeEmail(invitation.email || invitation.invitee_email),
+      status: normalized?.status ?? invitation.status ?? 'pending',
+      created_at: normalized?.created_at ?? invitation.created_at ?? null,
+      expires_at: normalized?.expires_at ?? invitation.expires_at ?? null,
+    },
+    organization: organization
+      ? { id: organization.id ?? organizationId, name: organization.name ?? null }
+      : { id: organizationId, name: organization?.name ?? null },
+  });
+}
+
+async function handleAccept(context, controlApi, user, authorizationHeader, invitationId) {
+  const normalizedInvitationId = normalizeString(invitationId);
+  if (!normalizedInvitationId || !UUID_PATTERN.test(normalizedInvitationId)) {
+    return respond(context, 400, { message: 'invalid_invitation_id' });
+  }
+
+  const userEmail = normalizeEmail(user.email);
+  if (!userEmail) {
+    return respond(context, 400, { message: 'user_missing_email' });
+  }
+
+  let invitation;
+  try {
+    invitation = await fetchInvitationById(controlApi, normalizedInvitationId, authorizationHeader);
+  } catch (invitationError) {
+    context.log?.error?.('invitations accept failed to load invitation', {
+      message: invitationError?.message,
+      status: invitationError instanceof InternalApiError ? invitationError.status : undefined,
+      invitationId: normalizedInvitationId,
+    });
+    return respond(context, 500, { message: 'failed_to_load_invitation' });
+  }
+
+  if (!invitation) {
+    return respond(context, 404, { message: 'invitation_not_found' });
+  }
+
+  const invitationEmail = normalizeEmail(invitation.email || invitation.invitee_email);
+  if (!invitationEmail) {
+    return respond(context, 409, { message: 'invitation_missing_email' });
+  }
+
+  if (invitationEmail !== userEmail) {
+    return respond(context, 403, { message: 'invitee_mismatch' });
+  }
+
+  if (!ACTIVE_INVITE_STATUSES.includes(invitation.status)) {
+    return respond(context, 409, { message: 'invitation_not_pending' });
+  }
+
+  const orgId = invitation.org_id ?? invitation.organization_id;
+  if (!orgId || !isValidOrgId(String(orgId))) {
+    return respond(context, 409, { message: 'invitation_missing_org' });
+  }
+
+  try {
+    await controlApi.post('/org_memberships', {
+      headers: buildAuthHeaders(authorizationHeader),
+      body: {
+        org_id: orgId,
+        user_id: user.id,
+        email: userEmail,
+        role: 'member',
+      },
+    });
+  } catch (membershipError) {
+    if (membershipError instanceof InternalApiError && membershipError.status === 409) {
+      return respond(context, 409, { message: 'user_already_member' });
+    }
+    context.log?.error?.('invitations accept failed to create membership', {
+      message: membershipError?.message,
+      status: membershipError instanceof InternalApiError ? membershipError.status : undefined,
+      invitationId: normalizedInvitationId,
+    });
+    return respond(context, 500, { message: 'failed_to_create_membership' });
+  }
+
+  let updatedInvitation = null;
+  try {
+    updatedInvitation = await updateInvitationStatus(controlApi, normalizedInvitationId, 'accepted', authorizationHeader);
+  } catch (updateError) {
+    context.log?.error?.('invitations accept failed to update invitation', {
+      message: updateError?.message,
+      status: updateError instanceof InternalApiError ? updateError.status : undefined,
+      invitationId: normalizedInvitationId,
+    });
+    return respond(context, 500, { message: 'failed_to_update_invitation' });
+  }
+
+  let organization;
+  try {
+    organization = await fetchOrganization(controlApi, orgId);
+  } catch (organizationError) {
+    context.log?.warn?.('invitations accept organization fetch failed', {
+      message: organizationError?.message,
+      orgId,
+    });
+  }
+
+  const normalizedInvitation = normalizeInvitationRow(updatedInvitation || invitation);
+  return respond(context, 200, {
+    invitation: normalizedInvitation,
+    organization: organization
+      ? { id: organization.id ?? orgId, name: organization.name ?? null }
+      : { id: orgId, name: organization?.name ?? null },
+  });
+}
+
 export default async function (context, req) {
   const env = readEnv(context);
+  const { tail } = parseInvitationRoute(req);
+  const method = String(req?.method || 'GET').toUpperCase();
+
+  if (method === 'GET' && tail[0] === 'token') {
+    if (!tail[1]) {
+      return respond(context, 400, { message: 'invalid_token' });
+    }
+
+    const controlApi = createInternalApiClient(context, env, undefined);
+    if (!controlApi) {
+      context.log?.error?.('invitations missing control API base URL');
+      return respond(context, 500, { message: 'server_misconfigured' });
+    }
+
+    return handleTokenLookup(context, controlApi, tail[1]);
+  }
+
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
     context.log?.warn?.('invitations missing bearer token');
@@ -670,14 +929,16 @@ export default async function (context, req) {
     return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
-  const method = String(req?.method || 'GET').toUpperCase();
-
-  if (method === 'GET') {
-    return handleGet(context, req, controlApi, user.id);
+  if (method === 'GET' && (!tail.length || tail[0] === '')) {
+    return handleGet(context, req, controlApi, user.id, authorization.header);
   }
 
-  if (method === 'POST') {
+  if (method === 'POST' && (!tail.length || tail[0] === '')) {
     return handlePost(context, req, controlApi, user, env);
+  }
+
+  if (method === 'POST' && tail.length === 2 && tail[1] === 'accept') {
+    return handleAccept(context, controlApi, user, authorization.header, tail[0]);
   }
 
   return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET, POST' });
