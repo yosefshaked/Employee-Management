@@ -44,6 +44,23 @@ function selectStringCandidate(source, key) {
   return '';
 }
 
+function resolveUserFullName(user) {
+  if (!user || typeof user !== 'object') {
+    return '';
+  }
+  const metadata = user.user_metadata ?? {};
+  const candidates = [metadata.full_name, metadata.fullName, metadata.name];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  if (typeof user.email === 'string' && user.email.trim()) {
+    return user.email.trim();
+  }
+  return '';
+}
+
 function resolveAdminConfig(context) {
   const env = readEnv(context);
   const fallbackEnv = process.env ?? {};
@@ -425,10 +442,24 @@ async function handleCreateInvitation(context, req, supabase) {
 
   const invitation = insertResult.data;
   const redirectUrl = redirectTo || null;
+  const inviterResult = await supabase.auth.admin.getUserById(authUser.id);
+  if (inviterResult.error || !inviterResult.data?.user) {
+    context.log?.error?.('invitations failed to load inviter profile', {
+      orgId,
+      invitedBy: authUser.id,
+      message: inviterResult.error?.message ?? 'inviter not found',
+    });
+    respond(context, 500, { message: 'failed to personalize invitation email' });
+    return;
+  }
+
+  const inviterName = resolveUserFullName(inviterResult.data.user) || null;
   const inviteMetadata = {
     ...emailData,
     orgId,
     orgName: organization.name ?? null,
+    organization_name: organization.name ?? null,
+    inviter_name: inviterName,
     invitationId: invitation.id,
     invitationToken: invitation.token,
   };
