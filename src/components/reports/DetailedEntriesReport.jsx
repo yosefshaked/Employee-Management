@@ -121,7 +121,7 @@ export default function DetailedEntriesReport({
           <TableCell>{employmentScopeLabel || '—'}</TableCell>
         ) : null}
         <TableCell>{format(parseISO(session.date), 'dd/MM/yyyy', { locale: he })}</TableCell>
-        <TableCell>
+        <TableCell className="items-start">
           <ActivityBadge
             label={activityDetails.label}
             color={activityDetails.color}
