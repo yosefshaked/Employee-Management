@@ -22,6 +22,7 @@
 
 ## Notes
 - Invitation emails read the application origin from the first non-empty value among `APP_PUBLIC_URL`, `APP_BASE_URL`, `APP_SITE_URL`, `APP_WEB_URL`, `APP_DESKTOP_URL`, `APP_URL`, `PUBLIC_APP_URL`, or `PUBLIC_URL`; ensure one of these is configured when enabling organization invitations.
+- Invitations Azure Functions now call the internal Control API (configure `CONTROL_API_URL`, `CONTROL_DB_API_URL`, or `APP_CONTROL_API_URL`) instead of direct Supabase admin clients; confirm those endpoints are reachable and authorized when diagnosing invite issues.
 - WorkSessions inserts should omit `id` so the database can generate it; include `id` only when updating existing records.
 - `/api/work-sessions` now returns full inserted rows (not just IDs) so leave flows can capture the generated `id` for `LeaveBalances.work_session_id`.
 - Payroll calculations now rely solely on `WorkSessions.rate_used` and `total_payment`; avoid adding external salary adjustments in reports.

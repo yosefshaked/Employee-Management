@@ -1,11 +1,155 @@
 /* eslint-env node */
 import process from 'node:process';
 import { json, resolveBearerAuthorization } from '../_shared/http.js';
-import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ADMIN_ROLES = new Set(['admin', 'owner']);
 const ACTIVE_INVITE_STATUSES = ['pending', 'sent'];
+
+class InternalApiError extends Error {
+  constructor(message, status, payload) {
+    super(message || 'internal_api_error');
+    this.status = status ?? 500;
+    this.payload = payload ?? null;
+  }
+}
+
+async function parseJsonResponse(response) {
+  if (!response) {
+    return null;
+  }
+
+  const contentType = response.headers?.get?.('content-type') ?? response.headers?.get?.('Content-Type') ?? '';
+  const isJson = typeof contentType === 'string' && contentType.toLowerCase().includes('application/json');
+
+  try {
+    if (isJson) {
+      return await response.json();
+    }
+    const text = await response.text();
+    if (!text) {
+      return null;
+    }
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function resolveControlApiBaseUrl(env) {
+  const candidates = [
+    env.CONTROL_API_URL,
+    env.CONTROL_DB_API_URL,
+    env.APP_CONTROL_API_URL,
+    env.INTERNAL_CONTROL_API_URL,
+    env.CONTROL_SERVICE_URL,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeString(candidate);
+    if (!normalized) {
+      continue;
+    }
+    return normalized.replace(/\/+$/, '');
+  }
+
+  return '';
+}
+
+function buildInternalApiUrl(baseUrl, path, query) {
+  const normalizedBase = `${baseUrl}/`.replace(/\/+/g, '/');
+  const trimmedPath = normalizeString(path).replace(/^\/+/, '');
+  const url = new URL(trimmedPath || '', normalizedBase);
+
+  if (query && typeof query === 'object') {
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined || value === null) {
+        continue;
+      }
+
+      if (Array.isArray(value)) {
+        for (const entry of value) {
+          if (entry === undefined || entry === null) {
+            continue;
+          }
+          url.searchParams.append(key, String(entry));
+        }
+        continue;
+      }
+
+      url.searchParams.append(key, String(value));
+    }
+  }
+
+  return url.toString();
+}
+
+function createInternalApiClient(context, env, authorizationHeader) {
+  const baseUrl = resolveControlApiBaseUrl(env);
+  if (!baseUrl) {
+    return null;
+  }
+
+  async function request(method, path, { query, body, headers: extraHeaders } = {}) {
+    const url = buildInternalApiUrl(baseUrl, path, query);
+    const headers = {
+      Accept: 'application/json',
+      ...(extraHeaders ?? {}),
+    };
+
+    if (authorizationHeader) {
+      headers.Authorization = authorizationHeader;
+      if (!headers['X-Supabase-Authorization']) {
+        headers['X-Supabase-Authorization'] = authorizationHeader;
+      }
+    }
+
+    const hasBody = body !== undefined && body !== null;
+    const serializedBody = hasBody ? JSON.stringify(body) : undefined;
+
+    if (hasBody) {
+      headers['Content-Type'] = 'application/json';
+    }
+
+    let response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers,
+        body: serializedBody,
+      });
+    } catch (networkError) {
+      context.log?.error?.('control api request failed', {
+        method,
+        path,
+        message: networkError?.message,
+      });
+      throw new InternalApiError('control_api_unreachable', 502, {
+        message: networkError?.message,
+      });
+    }
+
+    const payload = await parseJsonResponse(response);
+
+    if (!response.ok) {
+      const message = payload?.message || 'control_api_error';
+      throw new InternalApiError(message, response.status, payload);
+    }
+
+    return { status: response.status, data: payload };
+  }
+
+  return {
+    baseUrl,
+    request,
+    get(path, options) {
+      return request('GET', path, options);
+    },
+    post(path, options) {
+      return request('POST', path, options);
+    },
+  };
+}
 
 function readEnv(context) {
   if (context?.env && typeof context.env === 'object') {
@@ -119,7 +263,11 @@ function extractInviterName(user) {
     ? user.user_metadata
     : user.raw_user_meta_data && typeof user.raw_user_meta_data === 'object'
       ? user.raw_user_meta_data
-      : null;
+      : user.metadata && typeof user.metadata === 'object'
+        ? user.metadata
+        : user.profile && typeof user.profile === 'object'
+          ? user.profile
+          : null;
 
   if (metadata) {
     const fullName = normalizeString(metadata.full_name || metadata.fullName || metadata.name);
@@ -158,75 +306,101 @@ function normalizeInvitationRow(row) {
   };
 }
 
-async function ensureMembershipRole(supabase, orgId, userId) {
-  const { data, error } = await supabase
-    .from('org_memberships')
-    .select('role')
-    .eq('org_id', orgId)
-    .eq('user_id', userId)
-    .maybeSingle();
+async function ensureMembershipRole(controlApi, orgId, userId) {
+  try {
+    const { data } = await controlApi.get('/org_memberships', {
+      query: { org_id: orgId, user_id: userId },
+    });
 
-  if (error) {
-    throw new Error(error.message || 'failed_to_fetch_membership');
+    const record = Array.isArray(data) ? data.find((entry) => entry && typeof entry === 'object') : data;
+    if (!record || typeof record !== 'object') {
+      return null;
+    }
+
+    return record.role ?? null;
+  } catch (error) {
+    if (error instanceof InternalApiError && (error.status === 404 || error.status === 204)) {
+      return null;
+    }
+    throw error;
   }
+}
 
-  if (!data) {
+async function fetchOrganization(controlApi, orgId) {
+  try {
+    const { data } = await controlApi.get(`/organizations/${encodeURIComponent(orgId)}`);
+    if (!data || typeof data !== 'object') {
+      return null;
+    }
+
+    if (data.organization && typeof data.organization === 'object') {
+      return data.organization;
+    }
+
+    return data;
+  } catch (error) {
+    if (error instanceof InternalApiError && (error.status === 404 || error.status === 204)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function checkExistingMembership(controlApi, orgId, email) {
+  try {
+    const { data } = await controlApi.get('/org_memberships', {
+      query: { org_id: orgId, email },
+    });
+
+    if (Array.isArray(data)) {
+      return data.length > 0;
+    }
+
+    return Boolean(data);
+  } catch (error) {
+    if (error instanceof InternalApiError && (error.status === 404 || error.status === 204)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function findActiveInvitation(controlApi, orgId, email) {
+  try {
+    const { data } = await controlApi.get('/org_invitations', {
+      query: { org_id: orgId, email, status: ACTIVE_INVITE_STATUSES },
+    });
+
+    if (Array.isArray(data)) {
+      return data.find((entry) => entry && ACTIVE_INVITE_STATUSES.includes(entry.status));
+    }
+
+    if (data && typeof data === 'object' && ACTIVE_INVITE_STATUSES.includes(data.status)) {
+      return data;
+    }
+
     return null;
+  } catch (error) {
+    if (error instanceof InternalApiError && (error.status === 404 || error.status === 204)) {
+      return null;
+    }
+    throw error;
   }
-
-  return data.role || null;
 }
 
-async function fetchOrganization(supabase, orgId) {
-  const { data, error } = await supabase
-    .from('organizations')
-    .select('id, name')
-    .eq('id', orgId)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message || 'failed_to_fetch_organization');
+async function createInvitation(controlApi, payload) {
+  const { data } = await controlApi.post('/org_invitations', { body: payload });
+  if (Array.isArray(data)) {
+    return data[0] ?? null;
   }
-
-  if (!data) {
-    return null;
-  }
-
-  return data;
+  return data ?? null;
 }
 
-async function checkExistingMembership(supabase, orgId, email) {
-  const { data, error } = await supabase
-    .from('org_memberships')
-    .select('user_id, users!inner(email)')
-    .eq('org_id', orgId)
-    .eq('users.email', email)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message || 'failed_to_check_membership');
-  }
-
-  return Boolean(data);
+async function sendInvitationEmail(controlApi, payload) {
+  return controlApi.post('/emails/invitations', { body: payload });
 }
 
-async function findActiveInvitation(supabase, orgId, email) {
-  const { data, error } = await supabase
-    .from('org_invitations')
-    .select('id, status')
-    .eq('org_id', orgId)
-    .eq('email', email)
-    .in('status', ACTIVE_INVITE_STATUSES)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message || 'failed_to_check_existing_invitation');
-  }
-
-  return data;
-}
-
-async function handlePost(context, req, supabase, user, env) {
+async function handlePost(context, req, controlApi, user, env) {
   context.log('Invitations POST handler started', { userId: user?.id });
 
   const body = parseRequestBody(req);
@@ -250,13 +424,14 @@ async function handlePost(context, req, supabase, user, env) {
   let membershipRole;
   try {
     context.log('Invitations POST verifying membership role', { orgId, userId: user.id });
-    membershipRole = await ensureMembershipRole(supabase, orgId, user.id);
+    membershipRole = await ensureMembershipRole(controlApi, orgId, user.id);
     context.log('Invitations POST membership role resolved', { orgId, userId: user.id, membershipRole });
   } catch (membershipError) {
     context.log?.error?.('invitations failed to verify membership', {
       message: membershipError?.message,
       orgId,
       userId: user.id,
+      status: membershipError instanceof InternalApiError ? membershipError.status : undefined,
     });
     return respond(context, 500, { message: 'failed_to_verify_membership' });
   }
@@ -270,7 +445,7 @@ async function handlePost(context, req, supabase, user, env) {
   let organization;
   try {
     context.log('Invitations POST loading organization', { orgId });
-    organization = await fetchOrganization(supabase, orgId);
+    organization = await fetchOrganization(controlApi, orgId);
     context.log('Invitations POST organization loaded', { orgId, organizationFound: Boolean(organization) });
   } catch (organizationError) {
     context.log?.error?.('invitations failed to load organization', {
@@ -286,7 +461,7 @@ async function handlePost(context, req, supabase, user, env) {
 
   try {
     context.log('Invitations POST checking for existing membership', { orgId, invitedEmail: email });
-    const membershipExists = await checkExistingMembership(supabase, orgId, email);
+    const membershipExists = await checkExistingMembership(controlApi, orgId, email);
     context.log('Invitations POST existing membership check complete', { orgId, invitedEmail: email, membershipExists });
     if (membershipExists) {
       return respond(context, 409, { message: 'user_already_member' });
@@ -302,7 +477,7 @@ async function handlePost(context, req, supabase, user, env) {
 
   try {
     context.log('Invitations POST checking for existing invitation', { orgId, invitedEmail: email });
-    const existingInvitation = await findActiveInvitation(supabase, orgId, email);
+    const existingInvitation = await findActiveInvitation(controlApi, orgId, email);
     context.log('Invitations POST existing invitation check complete', {
       orgId,
       invitedEmail: email,
@@ -324,31 +499,22 @@ async function handlePost(context, req, supabase, user, env) {
   let inserted;
   try {
     context.log('Invitations POST inserting new invitation', { orgId, invitedEmail: email, invitedBy: user.id });
-    const insertResult = await supabase
-      .from('org_invitations')
-      .insert({
-        org_id: orgId,
-        email,
-        invited_by: user.id,
-      })
-      .select('id, org_id, email, status, invited_by, created_at, expires_at, token')
-      .single();
-
-    if (insertResult.error) {
-      if (insertResult.error.code === '23505') {
-        return respond(context, 409, { message: 'invitation_already_pending' });
-      }
-      throw new Error(insertResult.error.message || 'failed_to_create_invitation');
-    }
-
-    inserted = insertResult.data;
+    inserted = await createInvitation(controlApi, {
+      org_id: orgId,
+      email,
+      invited_by: user.id,
+    });
     context.log('Invitations POST insert succeeded', { orgId, invitedEmail: email, invitationId: inserted?.id });
   } catch (insertError) {
     context.log?.error?.('invitations failed to insert invitation', {
       message: insertError?.message,
       orgId,
       invitedEmail: email,
+      status: insertError instanceof InternalApiError ? insertError.status : undefined,
     });
+    if (insertError instanceof InternalApiError && insertError.status === 409) {
+      return respond(context, 409, { message: 'invitation_already_pending' });
+    }
     return respond(context, 500, { message: 'failed_to_create_invitation' });
   }
 
@@ -380,38 +546,29 @@ async function handlePost(context, req, supabase, user, env) {
     organizationName,
   });
 
-  let emailResult;
   try {
-    context.log('Invitations POST dispatching invite email', { orgId, invitedEmail: email });
-    emailResult = await supabase.auth.admin.inviteUserByEmail(email, {
-      redirectTo: invitationLink,
-      data: {
-        inviter_name: inviterName,
-        organization_name: organizationName,
-      },
+    context.log('Invitations POST dispatching invite email', { orgId, invitedEmail: email, redirectTo: invitationLink, token: inserted.token });
+    await sendInvitationEmail(controlApi, {
+      invitation_id: inserted.id,
+      org_id: orgId,
+      email,
+      token: inserted.token,
+      redirect_to: invitationLink,
+      inviter_name: inviterName,
+      organization_name: organizationName,
     });
     context.log('Invitations POST invite email dispatched', {
       orgId,
       invitedEmail: email,
-      hasError: Boolean(emailResult?.error),
     });
   } catch (emailError) {
     context.log?.error?.('invitations failed to dispatch email', {
       message: emailError?.message,
       orgId,
       invitedEmail: email,
+      status: emailError instanceof InternalApiError ? emailError.status : undefined,
     });
     return respond(context, 502, { message: 'failed_to_send_email' });
-  }
-
-  if (emailResult.error) {
-    context.log?.error?.('invitations email dispatch returned error', {
-      message: emailResult.error.message,
-      status: emailResult.error.status,
-      orgId,
-      invitedEmail: email,
-    });
-    return respond(context, emailResult.error.status || 502, { message: 'failed_to_send_email' });
   }
 
   const normalizedInvitation = normalizeInvitationRow(inserted);
@@ -428,7 +585,7 @@ async function handlePost(context, req, supabase, user, env) {
   });
 }
 
-async function handleGet(context, req, supabase, userId) {
+async function handleGet(context, req, controlApi, userId) {
   const query = req?.query ?? {};
   const orgCandidate = query.orgId || query.org_id;
   const orgId = normalizeString(orgCandidate);
@@ -439,12 +596,13 @@ async function handleGet(context, req, supabase, userId) {
 
   let membershipRole;
   try {
-    membershipRole = await ensureMembershipRole(supabase, orgId, userId);
+    membershipRole = await ensureMembershipRole(controlApi, orgId, userId);
   } catch (membershipError) {
     context.log?.error?.('invitations failed to verify membership on list', {
       message: membershipError?.message,
       orgId,
       userId,
+      status: membershipError instanceof InternalApiError ? membershipError.status : undefined,
     });
     return respond(context, 500, { message: 'failed_to_verify_membership' });
   }
@@ -453,68 +611,73 @@ async function handleGet(context, req, supabase, userId) {
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  const { data, error } = await supabase
-    .from('org_invitations')
-    .select('id, org_id, email, status, invited_by, created_at, expires_at')
-    .eq('org_id', orgId)
-    .in('status', ACTIVE_INVITE_STATUSES)
-    .order('created_at', { ascending: true });
-
-  if (error) {
-    context.log?.error?.('invitations failed to list invitations', {
-      message: error?.message,
-      orgId,
-      userId,
+  let invitations = [];
+  try {
+    const { data } = await controlApi.get('/org_invitations', {
+      query: { org_id: orgId, status: ACTIVE_INVITE_STATUSES },
     });
-    return respond(context, 500, { message: 'failed_to_list_invitations' });
+
+    const rows = Array.isArray(data) ? data : (data ? [data] : []);
+    invitations = rows.map((row) => normalizeInvitationRow(row)).filter(Boolean);
+  } catch (listError) {
+    if (listError instanceof InternalApiError && (listError.status === 404 || listError.status === 204)) {
+      invitations = [];
+    } else {
+      context.log?.error?.('invitations failed to list invitations', {
+        message: listError?.message,
+        orgId,
+        userId,
+        status: listError instanceof InternalApiError ? listError.status : undefined,
+      });
+      return respond(context, 500, { message: 'failed_to_list_invitations' });
+    }
   }
 
-  const normalized = Array.isArray(data) ? data.map((row) => normalizeInvitationRow(row)).filter(Boolean) : [];
+  const normalized = invitations;
   return respond(context, 200, { invitations: normalized });
 }
 
 export default async function (context, req) {
   const env = readEnv(context);
-  const adminConfig = readSupabaseAdminConfig(env);
-  const { supabaseUrl, serviceRoleKey } = adminConfig;
-
-  if (!supabaseUrl || !serviceRoleKey) {
-    context.log?.error?.('invitations missing Supabase admin credentials');
-    return respond(context, 500, { message: 'server_misconfigured' });
-  }
-
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
     context.log?.warn?.('invitations missing bearer token');
     return respond(context, 401, { message: 'missing_bearer' });
   }
 
-  const supabase = createSupabaseAdminClient(adminConfig);
+  const controlApi = createInternalApiClient(context, env, authorization.header);
+  if (!controlApi) {
+    context.log?.error?.('invitations missing control API base URL');
+    return respond(context, 500, { message: 'server_misconfigured' });
+  }
 
-  let authResult;
+  let user;
   try {
-    authResult = await supabase.auth.getUser(authorization.token);
-  } catch (authError) {
-    context.log?.error?.('invitations failed to validate token', {
-      message: authError?.message,
+    const { data } = await controlApi.get('/auth/user');
+    if (data && typeof data === 'object') {
+      user = data.user && typeof data.user === 'object' ? data.user : data;
+    }
+  } catch (userError) {
+    context.log?.error?.('invitations failed to resolve user from control API', {
+      message: userError?.message,
+      status: userError instanceof InternalApiError ? userError.status : undefined,
     });
     return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
-  if (authResult.error || !authResult.data?.user?.id) {
-    context.log?.warn?.('invitations token did not resolve to user');
+  if (!user || !user.id) {
+    context.log?.warn?.('invitations control API did not return user');
     return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
-  const user = authResult.data.user;
   const method = String(req?.method || 'GET').toUpperCase();
 
   if (method === 'GET') {
-    return handleGet(context, req, supabase, user.id);
+    return handleGet(context, req, controlApi, user.id);
   }
 
   if (method === 'POST') {
-    return handlePost(context, req, supabase, user, env);
+    return handlePost(context, req, controlApi, user, env);
   }
 
   return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET, POST' });
