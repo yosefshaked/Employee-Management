@@ -50,10 +50,14 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
                   ? computedPayment
                   : (Number(session.total_payment) || 0))
                 : (Number(session.total_payment) || 0);
-              
+
+              const service = Array.isArray(services)
+                ? services.find((item) => item.id === session.service_id)
+                : undefined;
               const activityDetails = getActivityDisplayDetails({
                 ...session,
                 employee,
+                service,
               });
               const activityLabel = activityDetails.label;
               const activityColor = typeof activityDetails.color === 'string' && activityDetails.color.trim().length > 0
