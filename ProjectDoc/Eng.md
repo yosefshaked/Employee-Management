@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.7.5**
-**Last Updated: 2025-10-15**
+**Version: 1.7.6**
+**Last Updated: 2025-10-16**
 
 ## 1. Vision & Purpose
 
@@ -58,6 +58,15 @@ The system is built on a modern client-server architecture, packaged as a standa
 - **Key Decryption:** Using the server-side secret `APP_ORG_CREDENTIALS_ENCRYPTION_KEY`, the function decrypts the dedicated key and creates a privileged `tenantClient` scoped to the tenant’s Data DB with the `app_user` role.
 - **Database Action:** All reads and writes execute through this server-only `tenantClient`. The function performs the requested query (e.g., selecting ordered services or inserting work sessions) and captures any errors.
 - **Response:** The function returns a JSON payload to the frontend, translating Supabase errors into standardized API messages. The UI never holds the dedicated key nor performs direct writes, ensuring RLS and auditing remain intact.
+
+### 2.3. Organization Invitation API
+
+- **Purpose:** Issues and tracks organization invitations through the Control DB while delegating email delivery to Supabase Auth.
+- **Endpoints:**
+  - `POST /api/invitations` — Admin/owner only. Validates membership, inserts a new `org_invitations` row, retrieves the generated token, and dispatches the Supabase `inviteUserByEmail` message with `redirectTo` pointing to `#/accept-invite?token=...`.
+  - `GET /api/invitations?orgId=<uuid>` — Admin/owner only. Returns all pending/sent invitations for the requested organization to power the Settings → Org Members view.
+- **Configuration:** The invitation link uses the first non-empty value among `APP_PUBLIC_URL`, `APP_BASE_URL`, `APP_SITE_URL`, `APP_WEB_URL`, `APP_DESKTOP_URL`, `APP_URL`, `PUBLIC_APP_URL`, or `PUBLIC_URL`. Ensure one of these environment variables is set to the SPA origin (e.g., `https://yourapp.com`).
+- **Security:** All role validation and email dispatch occur server-side. Tokens never leave the backend except through the email link, and responses exclude the raw token to avoid leakage through the admin dashboard.
 
 ---
 
