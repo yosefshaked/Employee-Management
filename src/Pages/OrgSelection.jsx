@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { AlertCircle, Building2, Users } from 'lucide-react';
+import { AlertCircle, Building2, Users, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { mapSupabaseError } from '@/org/errors.js';
@@ -46,7 +46,7 @@ function EmptyState({ onCreate }) {
   );
 }
 
-function InviteList({ invites, onAccept }) {
+function InviteList({ invites, onAccept, onDecline }) {
   if (!invites.length) return null;
   return (
     <Card className="w-full max-w-3xl">
@@ -60,12 +60,26 @@ function InviteList({ invites, onAccept }) {
               <p className="font-medium text-slate-900">{invite.organization?.name || 'ארגון ללא שם'}</p>
               <p className="text-sm text-slate-500">{invite.email}</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <Badge variant="outline" className="text-blue-700 border-blue-200 bg-blue-50">מוזמן</Badge>
-              <Button onClick={() => onAccept(invite.id)} className="gap-2" size="sm">
-                <Users className="w-4 h-4" />
-                הצטרף
-              </Button>
+              {onDecline ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="text-red-600 hover:bg-red-50 gap-2"
+                  size="sm"
+                  onClick={() => onDecline(invite.id)}
+                >
+                  <XCircle className="w-4 h-4" />
+                  דחה
+                </Button>
+              ) : null}
+              {onAccept ? (
+                <Button onClick={() => onAccept(invite.id)} className="gap-2" size="sm">
+                  <Users className="w-4 h-4" />
+                  הצטרף
+                </Button>
+              ) : null}
             </div>
           </div>
         ))}
@@ -182,7 +196,15 @@ function CreateOrgDialog({ open, onClose, onCreate }) {
 }
 
 export default function OrgSelection() {
-  const { organizations, incomingInvites, status, selectOrg, createOrganization, acceptInvite } = useOrg();
+  const {
+    organizations,
+    incomingInvites,
+    status,
+    selectOrg,
+    createOrganization,
+    acceptInvitation,
+    declineInvitation,
+  } = useOrg();
   const navigate = useNavigate();
   const location = useLocation();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -205,11 +227,20 @@ export default function OrgSelection() {
 
   const handleAcceptInvite = async (inviteId) => {
     try {
-      await acceptInvite(inviteId);
+      await acceptInvitation(inviteId);
       navigate(returnTo, { replace: true });
     } catch (error) {
       console.error('Failed to accept invite', error);
       toast.error('לא ניתן להצטרף לארגון. נסה שוב או בקש הזמנה חדשה.');
+    }
+  };
+
+  const handleDeclineInvite = async (inviteId) => {
+    try {
+      await declineInvitation(inviteId);
+    } catch (error) {
+      console.error('Failed to decline invite', error);
+      toast.error('לא ניתן לדחות את ההזמנה. נסה שוב מאוחר יותר.');
     }
   };
 
@@ -225,7 +256,7 @@ export default function OrgSelection() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50 flex items-center justify-center px-4 py-10" dir="rtl">
       <div className="flex flex-col items-center gap-6 w-full">
-        <InviteList invites={incomingInvites} onAccept={handleAcceptInvite} />
+        <InviteList invites={incomingInvites} onAccept={handleAcceptInvite} onDecline={handleDeclineInvite} />
         <OrganizationList organizations={organizations} onSelect={handleSelect} />
         {!hasOrganizations && !hasInvites ? (
           <EmptyState onCreate={() => setIsCreateOpen(true)} />

@@ -9,6 +9,7 @@ This project is a Vite + React application for managing employees, work sessions
 - Organization invitations (sending, listing, accepting, declining, and revoking) flow through the privileged Azure Function at `/api/invitations`, which validates admin permissions against `org_memberships`, auto-expires stale rows, and updates statuses (`pending`, `accepted`, `declined`, `revoked`, `expired`). Existing Supabase users receive an in-app notification only, while new emails trigger `supabase.auth.admin.inviteUserByEmail` with the invitation token embedded in the accept-invite redirect and personalized metadata.
 - Invitation emails embed the `/#/accept-invite?token=<invitation>` redirect and include `inviter_name`/`organization_name` metadata so recipients land on the Accept Invitation page with contextual copy.
 - Admins and owners can send invites from **Settings → Org Members**, which surfaces a toast-enabled form, loads pending invitations on mount, and lets them revoke invites with inline loading states while members see a read-only directory.
+- The **Select Organization** page now lists pending invitations from `GET /api/invitations/incoming`, exposing accept/decline buttons wired to the secure API so invitees can respond without leaving the desktop app.
 
 ## Local development
 

@@ -12,6 +12,11 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
 import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
 import { useAuth } from '@/auth/AuthContext.jsx';
+import {
+  acceptInvitation as acceptInvitationRequest,
+  declineInvitation as declineInvitationRequest,
+  listIncomingInvitations,
+} from '@/api/invitations.js';
 import { createOrganization as createOrganizationRpc } from '@/api/organizations.js';
 import { mapSupabaseError } from '@/org/errors.js';
 import { fetchCurrentUser } from '@/shared/api/user.ts';
@@ -191,6 +196,28 @@ export function OrgProvider({ children }) {
   const configRequestRef = useRef(0);
   const tenantClientReady = Boolean(dataClient);
 
+  const resolveControlSession = useCallback(async () => {
+    if (session) {
+      return session;
+    }
+
+    if (!authClient) {
+      return null;
+    }
+
+    try {
+      const { data, error } = await authClient.auth.getSession();
+      if (error) {
+        console.warn('Failed to resolve Supabase session for control API calls', error);
+        return null;
+      }
+      return data?.session ?? null;
+    } catch (resolveError) {
+      console.warn('Failed to resolve Supabase session for control API calls', resolveError);
+      return null;
+    }
+  }, [session, authClient]);
+
   const resetState = useCallback(() => {
     setStatus('idle');
     setOrganizations([]);
@@ -222,33 +249,34 @@ export function OrgProvider({ children }) {
 
     try {
       const client = authClient;
-      const membershipPromise = client
+      const membershipResponse = await client
         .from('org_memberships')
         .select('id, role, org_id, user_id, created_at')
         .eq('user_id', user.id)
         .order('created_at', { ascending: true });
 
-      const invitesPromise = user.email
-        ? client
-            .from('org_invitations')
-            .select('id, org_id, email, status, invited_by, created_at, expires_at')
-            .eq('email', user.email.toLowerCase())
-            .in('status', ['pending', 'sent'])
-            .order('created_at', { ascending: true })
-        : Promise.resolve({ data: [], error: null });
-
-      const [membershipResponse, inviteResponse] = await Promise.all([membershipPromise, invitesPromise]);
-
       if (membershipResponse.error) throw membershipResponse.error;
-      if (inviteResponse.error) throw inviteResponse.error;
 
       const membershipData = membershipResponse.data || [];
-      const inviteData = inviteResponse.data || [];
+
+      let inviteRecords = [];
+      const controlSession = await resolveControlSession();
+
+      if (controlSession) {
+        try {
+          inviteRecords = await listIncomingInvitations({ session: controlSession });
+        } catch (incomingError) {
+          console.error('Failed to load incoming invitations', incomingError);
+          inviteRecords = [];
+        }
+      }
 
       const orgIds = Array.from(
         new Set([
           ...membershipData.map((record) => record.org_id).filter(Boolean),
-          ...inviteData.map((record) => record.org_id).filter(Boolean),
+          ...inviteRecords
+            .map((record) => record.orgId || record.org_id || record.organization?.id)
+            .filter(Boolean),
         ]),
       );
 
@@ -311,8 +339,19 @@ export function OrgProvider({ children }) {
 
       setOrgConnections(connectionMap);
 
-      const normalizedInvites = inviteData
-        .map((invite) => normalizeInvite(invite, organizationMap?.get(invite.org_id)))
+      const normalizedInvites = (inviteRecords || [])
+        .map((invite) => {
+          const orgId = invite.orgId || invite.org_id || invite.organization?.id || null;
+          const baseRecord = {
+            ...invite,
+            org_id: orgId,
+            invited_by: invite.invitedBy || invite.invited_by || null,
+            created_at: invite.createdAt || invite.created_at || null,
+            expires_at: invite.expiresAt || invite.expires_at || null,
+            organizations: invite.organization || invite.organizations || null,
+          };
+          return normalizeInvite(baseRecord, organizationMap?.get(orgId));
+        })
         .filter(Boolean);
 
       setOrganizations(normalizedOrganizations);
@@ -328,7 +367,7 @@ export function OrgProvider({ children }) {
     } finally {
       loadingRef.current = false;
     }
-  }, [authClient, user, resetState]);
+  }, [authClient, user, resetState, resolveControlSession]);
 
   const loadOrgDirectory = useCallback(
     async (orgId) => {
@@ -960,51 +999,58 @@ export function OrgProvider({ children }) {
     [requireAuthClient, activeOrgId, loadOrgDirectory, refreshOrganizations],
   );
 
-  const acceptInvite = useCallback(
-    async (inviteId) => {
-      if (!inviteId || !user) throw new Error('הזמנה אינה זמינה.');
-
-      const client = requireAuthClient();
-      const { data: inviteData, error: inviteError } = await client
-        .from('org_invitations')
-        .select('id, org_id, status')
-        .eq('id', inviteId)
-        .maybeSingle();
-
-      if (inviteError) throw inviteError;
-      if (!inviteData) throw new Error('ההזמנה אינה קיימת או פגה.');
-
-      if (inviteData.status !== 'pending' && inviteData.status !== 'sent') {
-        throw new Error('ההזמנה כבר טופלה.');
+  const acceptInvitation = useCallback(
+    async (invitationId) => {
+      const normalizedId = typeof invitationId === 'string' ? invitationId.trim() : '';
+      if (!normalizedId) {
+        throw new Error('ההזמנה אינה זמינה.');
       }
 
-      const now = new Date().toISOString();
+      const invitationRecord = incomingInvites.find((invite) => invite.id === normalizedId) || null;
+      const targetOrgId =
+        invitationRecord?.org_id || invitationRecord?.orgId || invitationRecord?.organization?.id || null;
 
-      const { error: membershipError } = await client
-        .from('org_memberships')
-        .insert({
-          org_id: inviteData.org_id,
-          user_id: user.id,
-          role: 'member',
-          created_at: now,
-        });
-
-      if (membershipError && membershipError.code !== '23505') {
-        throw membershipError;
+      const controlSession = await resolveControlSession();
+      if (!controlSession) {
+        throw new Error('נדרש חיבור פעיל כדי לקבל הזמנה.');
       }
 
-      const { error: updateError } = await client
-        .from('org_invitations')
-        .update({ status: 'accepted', accepted_at: now })
-        .eq('id', inviteId);
+      await acceptInvitationRequest(normalizedId, { session: controlSession });
 
-      if (updateError) throw updateError;
+      setIncomingInvites((prev) => prev.filter((invite) => invite.id !== normalizedId));
 
       await refreshOrganizations({ keepSelection: false });
-      await selectOrg(inviteData.org_id);
+
+      if (targetOrgId) {
+        await selectOrg(targetOrgId);
+      }
+
       toast.success('הצטרפת לארגון בהצלחה.');
     },
-    [requireAuthClient, user, refreshOrganizations, selectOrg],
+    [incomingInvites, resolveControlSession, refreshOrganizations, selectOrg],
+  );
+
+  const declineInvitation = useCallback(
+    async (invitationId) => {
+      const normalizedId = typeof invitationId === 'string' ? invitationId.trim() : '';
+      if (!normalizedId) {
+        throw new Error('ההזמנה אינה זמינה.');
+      }
+
+      const controlSession = await resolveControlSession();
+      if (!controlSession) {
+        throw new Error('נדרש חיבור פעיל כדי לדחות הזמנה.');
+      }
+
+      await declineInvitationRequest(normalizedId, { session: controlSession });
+
+      setIncomingInvites((prev) => prev.filter((invite) => invite.id !== normalizedId));
+
+      await refreshOrganizations({ keepSelection: true });
+
+      toast.success('ההזמנה נדחתה.');
+    },
+    [resolveControlSession, refreshOrganizations],
   );
 
   const activeOrgConnection = useMemo(() => {
@@ -1033,7 +1079,8 @@ export function OrgProvider({ children }) {
       inviteMember,
       revokeInvite,
       removeMember,
-      acceptInvite,
+      acceptInvitation,
+      declineInvitation,
       activeOrgHasConnection: Boolean(
         (activeOrgConnection?.supabaseUrl || activeOrgConfig?.supabaseUrl) &&
           (activeOrgConnection?.supabaseAnonKey || activeOrgConfig?.supabaseAnonKey),
@@ -1061,7 +1108,8 @@ export function OrgProvider({ children }) {
       inviteMember,
       revokeInvite,
       removeMember,
-      acceptInvite,
+      acceptInvitation,
+      declineInvitation,
       configStatus,
       activeOrgConfig,
       activeOrgConnection,

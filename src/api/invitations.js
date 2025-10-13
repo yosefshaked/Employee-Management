@@ -41,6 +41,14 @@ function normalizeInvitationRecord(record) {
     return null;
   }
   const email = typeof record.email === 'string' ? record.email.trim().toLowerCase() : '';
+  const organizationSource =
+    record.organization || record.organizations || record.org || record.org_info || null;
+  const organization = organizationSource && typeof organizationSource === 'object'
+    ? {
+        id: organizationSource.id || organizationSource.org_id || null,
+        name: typeof organizationSource.name === 'string' ? organizationSource.name : null,
+      }
+    : null;
   return {
     id: record.id || null,
     orgId: record.orgId || record.org_id || null,
@@ -49,6 +57,7 @@ function normalizeInvitationRecord(record) {
     invitedBy: record.invitedBy || record.invited_by || null,
     createdAt: record.createdAt || record.created_at || null,
     expiresAt: record.expiresAt || record.expires_at || null,
+    organization,
   };
 }
 
@@ -118,6 +127,31 @@ export async function listPendingInvitations(orgId, { session, signal } = {}) {
   }
 }
 
+export async function listIncomingInvitations({ session, signal } = {}) {
+  const activeSession = ensureSession(session);
+
+  try {
+    const response = await authenticatedFetch('invitations/incoming', {
+      method: 'GET',
+      session: activeSession,
+      signal,
+    });
+    const invitations = Array.isArray(response?.invitations) ? response.invitations : [];
+    return invitations.map(normalizeInvitationRecord).filter(Boolean);
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw error;
+    }
+    if (error?.status === 404) {
+      return [];
+    }
+    if (!error?.message) {
+      error.message = 'טעינת ההזמנות נכשלה. נסה שוב מאוחר יותר.';
+    }
+    throw error;
+  }
+}
+
 export async function revokeInvitation(invitationId, { session, signal } = {}) {
   const activeSession = ensureSession(session);
   const normalizedId = normalizeUuid(invitationId);
@@ -134,6 +168,48 @@ export async function revokeInvitation(invitationId, { session, signal } = {}) {
   } catch (error) {
     if (!error?.message) {
       error.message = 'ביטול ההזמנה נכשל. נסה שוב מאוחר יותר.';
+    }
+    throw error;
+  }
+}
+
+export async function acceptInvitation(invitationId, { session, signal } = {}) {
+  const activeSession = ensureSession(session);
+  const normalizedId = normalizeUuid(invitationId);
+  if (!normalizedId) {
+    throw new Error('חסר מזהה הזמנה תקין לאישור.');
+  }
+
+  try {
+    await authenticatedFetch(`invitations/${normalizedId}/accept`, {
+      method: 'POST',
+      session: activeSession,
+      signal,
+    });
+  } catch (error) {
+    if (!error?.message) {
+      error.message = 'אישור ההזמנה נכשל. נסה שוב מאוחר יותר.';
+    }
+    throw error;
+  }
+}
+
+export async function declineInvitation(invitationId, { session, signal } = {}) {
+  const activeSession = ensureSession(session);
+  const normalizedId = normalizeUuid(invitationId);
+  if (!normalizedId) {
+    throw new Error('חסר מזהה הזמנה תקין לדחייה.');
+  }
+
+  try {
+    await authenticatedFetch(`invitations/${normalizedId}/decline`, {
+      method: 'POST',
+      session: activeSession,
+      signal,
+    });
+  } catch (error) {
+    if (!error?.message) {
+      error.message = 'דחיית ההזמנה נכשלה. נסה שוב מאוחר יותר.';
     }
     throw error;
   }

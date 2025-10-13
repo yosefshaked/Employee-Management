@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.9.3**
-**Last Updated: 2025-10-23**
+**Version: 1.9.4**
+**Last Updated: 2025-10-24**
 
 ## 1. Vision & Purpose
 
@@ -76,6 +76,13 @@ The system is built on a modern client-server architecture, packaged as a standa
 - `OrgMembersCard.jsx` now loads pending invitations on mount, surfaces loading/error/empty states, and refreshes the list after every create or revoke action. Abort signals prevent state updates when the component unmounts.
 - Admins and owners see the invite form (with an accessible email label) and the pending list; members keep a read-only view of active users. Successful sends and revocations raise green toasts, while validation or network issues produce red toasts.
 - The pending list displays email, send date, and current status badge alongside a revoke button that enters a temporary "מבטל..." state while awaiting the API response.
+
+### 2.5. Organization Selection & Incoming Invitations
+
+- After authentication the `OrgProvider` calls `listIncomingInvitations()` from `src/api/invitations.js`, storing sanitized records in `incomingInvites` and refreshing them after every accept/decline action.
+- The context now relies on `GET /api/invitations/incoming` instead of direct Supabase reads when surfacing pending invites, keeping invitation visibility behind the secure control-plane API.
+- `src/Pages/OrgSelection.jsx` renders a prominent "Pending Invitations" card whenever invites exist, listing the organization name, invitee email, and accept/decline controls wired to the provider’s `acceptInvitation` / `declineInvitation` helpers.
+- Accepting an invite triggers the secure API, refreshes organization memberships, and navigates into the target org; declining updates the status server-side without leaving the selection screen.
 
 ---
 
