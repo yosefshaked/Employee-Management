@@ -27,7 +27,7 @@ export default function ActivityBadge({ label, color, variant = 'outline', class
   const isSolid = variant === 'solid';
   const backgroundColor = isSolid ? normalizedColor : buildOutlineBackground(normalizedColor);
   const textColor = isSolid ? '#FFFFFF' : normalizedColor;
-  const combinedClassName = `text-xs font-medium ${className}`.trim();
+  const combinedClassName = `w-fit text-xs font-medium ${className}`.trim();
 
   return (
     <Badge
