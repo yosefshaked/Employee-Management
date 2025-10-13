@@ -1,13 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, parseISO } from "date-fns";
 import { he } from "date-fns/locale";
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getColorForService } from '@/lib/colorUtils';
-import { isLeaveEntryType, getLeaveKindFromEntryType, HOLIDAY_TYPE_LABELS } from '@/lib/leave.js';
+import ActivityBadge from '@/components/ui/ActivityBadge.jsx';
+import { getActivityDisplayDetails } from '@/lib/activity-helpers.js';
+import { isLeaveEntryType } from '@/lib/leave.js';
 import { createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
 import { selectLeaveDayValue } from '@/selectors.js';
 import { getEmploymentScopeValue } from '@/constants/employment-scope.js';
@@ -34,21 +34,35 @@ export default function DetailedEntriesReport({
     leaveDayValueSelector: selectLeaveDayValue,
   }), [employees, workSessions, services, leavePayPolicy]);
 
+  const servicesById = useMemo(() => {
+    if (!Array.isArray(services)) {
+      return new Map();
+    }
+    const map = new Map();
+    services.forEach((service) => {
+      if (service && service.id != null) {
+        map.set(service.id, service);
+      }
+    });
+    return map;
+  }, [services]);
+
   if (isLoading) {
     return <Skeleton className="h-60 w-full" />;
   }
 
   const getEmployee = (employeeId) => employees.find(emp => emp.id === employeeId);
-  
-  const getServiceName = (session) => {
-    const employee = getEmployee(session.employee_id);
-    if (isLeaveEntryType(session.entry_type)) {
-      const kind = getLeaveKindFromEntryType(session.entry_type);
-      return HOLIDAY_TYPE_LABELS[kind] || 'חופשה';
-    }
-    if (employee?.employee_type === 'hourly' || employee?.employee_type === 'global') return 'שעות עבודה';
-    const service = services.find(s => s.id === session.service_id);
-    return service ? service.name : 'שירות לא ידוע';
+
+  const getService = (serviceId) => servicesById.get(serviceId);
+
+  const getActivityDetails = (session, employeeOverride) => {
+    const employee = employeeOverride || getEmployee(session.employee_id);
+    const service = getService(session.service_id);
+    return getActivityDisplayDetails({
+      ...session,
+      employee,
+      service,
+    });
   };
   
   const sortedSessions = [...sessions].sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -59,7 +73,7 @@ export default function DetailedEntriesReport({
     if (session.entry_type === 'hours') return parseFloat(session.hours) || 0;
     if (session.entry_type === 'session') {
       if (session.hours != null) return parseFloat(session.hours) || 0;
-      const service = services.find(s => s.id === session.service_id);
+      const service = getService(session.service_id);
       if (service?.duration_minutes) return (service.duration_minutes / 60) * (session.sessions_count || 0);
     }
     return 0;
@@ -69,7 +83,7 @@ export default function DetailedEntriesReport({
   const groupedSessions = sortedSessions.reduce((acc, session) => {
     let key;
     if (groupBy === 'date') key = session.date;
-    else if (groupBy === 'service') key = getServiceName(session);
+    else if (groupBy === 'service') key = getActivityDetails(session).label;
     else if (groupBy === 'employee') key = getEmployee(session.employee_id)?.name || 'לא ידוע';
     else if (groupBy === 'employeeType') key = EMPLOYEE_TYPE_LABELS[getEmployee(session.employee_id)?.employee_type] || 'לא ידוע';
     
@@ -93,40 +107,34 @@ export default function DetailedEntriesReport({
 
   const renderSessionRow = (session) => {
     const employee = getEmployee(session.employee_id);
+    const activityDetails = getActivityDetails(session, employee);
     const payment = resolvePayment(session);
     const employmentScopeValue = getEmploymentScopeValue(employee);
     const employmentScopeLabel = employmentScopeValue
       ? getEmploymentScopeLabel(employmentScopeValue)
       : '';
     const isHourlyOrGlobal = employee?.employee_type === 'hourly' || employee?.employee_type === 'global';
-    const serviceColorKey = employee?.employee_type === 'hourly' ? null : session.service_id;
-    const serviceColor = getColorForService(serviceColorKey) || '#3B82F6';
     return (
       <TableRow key={session.id} className="hover:bg-slate-50">
-        <TableCell className="font-medium">{employee?.name || 'לא ידוע'}</TableCell>
+        <TableCell className="font-medium text-center">{employee?.name || 'לא ידוע'}</TableCell>
         {showEmploymentScopeColumn ? (
-          <TableCell>{employmentScopeLabel || '—'}</TableCell>
+          <TableCell className="text-center">{employmentScopeLabel || '—'}</TableCell>
         ) : null}
-        <TableCell>{format(parseISO(session.date), 'dd/MM/yyyy', { locale: he })}</TableCell>
-        <TableCell>
-          <Badge
-            variant="outline"
-            className="font-medium"
-            style={{
-              backgroundColor: `${serviceColor}20`,
-              color: serviceColor,
-              borderColor: serviceColor,
-            }}
-          >
-            {getServiceName(session)}
-          </Badge>
+        <TableCell className="text-center">{format(parseISO(session.date), 'dd/MM/yyyy', { locale: he })}</TableCell>
+        <TableCell className="w-64 items-start text-center">
+          <ActivityBadge
+            label={activityDetails.label}
+            color={activityDetails.color}
+            variant={activityDetails.variant}
+            title={activityDetails.label}
+          />
         </TableCell>
-        <TableCell>
+        <TableCell className="text-center">
           {isHourlyOrGlobal ? `${session.hours || 0} שעות` : `${session.sessions_count || 0} מפגשים`}
         </TableCell>
-        <TableCell>{session.students_count || '-'}</TableCell>
-        <TableCell>₪{session.rate_used?.toFixed(2) || '0.00'}</TableCell>
-        <TableCell className="font-semibold">₪{payment.toFixed(2)}</TableCell>
+        <TableCell className="text-center">{session.students_count || '-'}</TableCell>
+        <TableCell className="text-center">₪{session.rate_used?.toFixed(2) || '0.00'}</TableCell>
+        <TableCell className="font-semibold text-center">₪{payment.toFixed(2)}</TableCell>
         <TableCell className="text-sm text-slate-600">{session.notes || '-'}</TableCell>
       </TableRow>
     );
@@ -161,15 +169,15 @@ export default function DetailedEntriesReport({
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50 hover:bg-slate-50">
-                  <TableHead>עובד</TableHead>
-                  {showEmploymentScopeColumn ? <TableHead>היקף משרה</TableHead> : null}
-                  <TableHead>תאריך</TableHead>
-                  <TableHead>סוג רישום</TableHead>
-                  <TableHead>כמות</TableHead>
-                  <TableHead>תלמידים</TableHead>
-                  <TableHead>תעריף</TableHead>
-                  <TableHead>סה״כ</TableHead>
-                  <TableHead>הערות</TableHead>
+                  <TableHead className="text-center">עובד</TableHead>
+                  {showEmploymentScopeColumn ? <TableHead className="text-center">היקף משרה</TableHead> : null}
+                  <TableHead className="text-center">תאריך</TableHead>
+                  <TableHead className="w-64 text-center">סוג רישום</TableHead>
+                  <TableHead className="text-center">כמות</TableHead>
+                  <TableHead className="text-center">תלמידים</TableHead>
+                  <TableHead className="text-center">תעריף</TableHead>
+                  <TableHead className="text-center">סה״כ</TableHead>
+                  <TableHead className="text-center">הערות</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>{sortedSessions.map(session => renderSessionRow(session))}</TableBody>

@@ -7,12 +7,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { format, parseISO } from "date-fns";
 import { he } from "date-fns/locale";
 import { Link } from "react-router-dom";
-import { getColorForService } from '@/lib/colorUtils';
 import { createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
 import { selectLeaveDayValue } from '@/selectors.js';
 import { isLeaveEntryType } from '@/lib/leave.js';
-
-const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
+import { getActivityDisplayDetails } from '@/lib/activity-helpers.js';
 
 export default function RecentActivity({ title = "פעילות אחרונה", sessions, employees, services, workSessions = [], leavePayPolicy, isLoading, showViewAllButton = true }) {
 
@@ -25,15 +23,6 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
   }), [employees, workSessions, services, leavePayPolicy]);
   
   const getEmployee = (employeeId) => employees.find(emp => emp.id === employeeId);
-
-  const getServiceName = (session) => {
-    const employee = getEmployee(session.employee_id);
-    if (employee?.employee_type === 'hourly' || employee?.employee_type === 'global') {
-      return "שעות עבודה";
-    }
-    // For instructors, use the service name from the session object itself, which we already fetched.
-    return session.service?.name || 'סוג לא ידוע';
-  };
 
   return (
     <Card className="bg-white/70 backdrop-blur-sm border-0 shadow-lg flex flex-col h-full">
@@ -61,11 +50,39 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
                   ? computedPayment
                   : (Number(session.total_payment) || 0))
                 : (Number(session.total_payment) || 0);
-              
+
+              const service = Array.isArray(services)
+                ? services.find((item) => item.id === session.service_id)
+                : undefined;
+              const activityDetails = getActivityDisplayDetails({
+                ...session,
+                employee,
+                service,
+              });
+              const activityLabel = activityDetails.label;
+              const activityVariant = activityDetails.variant === 'solid' ? 'solid' : 'outline';
+              const activityColor = typeof activityDetails.color === 'string' && activityDetails.color.trim().length > 0
+                ? activityDetails.color.trim()
+                : '#0F766E';
+              const isHexColor = activityColor.startsWith('#');
+              const outlineBackground = isHexColor ? `${activityColor}20` : 'transparent';
+              const badgeStyles = activityVariant === 'solid'
+                ? {
+                    backgroundColor: activityColor,
+                    color: '#FFFFFF',
+                    borderColor: activityColor,
+                  }
+                : {
+                    backgroundColor: outlineBackground,
+                    color: activityColor,
+                    borderColor: activityColor,
+                  };
+              const badgeVariantProp = activityVariant === 'solid' ? 'default' : 'outline';
+
               return (
                 <div key={session.id} className="flex items-center gap-3 p-3 rounded-lg bg-slate-50">
                   <div className="w-10 h-10 bg-gradient-to-r from-blue-400 to-green-400 rounded-full flex items-center justify-center flex-shrink-0"><User className="w-5 h-5 text-white" /></div>
-                  
+
                   <div className="flex-1 min-w-0 grid grid-cols-2 gap-x-2">
                     <div className="col-span-1">
                       <p className="font-semibold text-slate-900 truncate">{employee?.name || 'לא ידוע'}</p>
@@ -83,21 +100,13 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
                   </div>
 
                   <div className="flex-shrink-0 w-28 text-center">
-                    {session.entry_type === 'adjustment' && (
-                      <Badge variant="outline" className="text-xs w-full block truncate mb-1"
-                        title="התאמה"
-                        style={{ backgroundColor: '#EF444420', color: '#EF4444', borderColor: '#EF4444' }}>
-                        התאמה
-                      </Badge>
-                    )}
-                    <Badge variant="outline" className="text-xs w-full block truncate"
-                      title={getServiceName(session)}
-                      style={{
-                        backgroundColor: `${getColorForService(isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : session.service_id)}20`,
-                        color: getColorForService(isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : session.service_id),
-                        borderColor: getColorForService(isHourlyOrGlobal ? GENERIC_RATE_SERVICE_ID : session.service_id),
-                      }}>
-                      {getServiceName(session)}
+                    <Badge
+                      variant={badgeVariantProp}
+                      className="text-xs w-full block truncate"
+                      title={activityLabel}
+                      style={badgeStyles}
+                    >
+                      {activityLabel}
                     </Badge>
                   </div>
                 </div>
