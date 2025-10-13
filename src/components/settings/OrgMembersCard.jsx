@@ -47,7 +47,8 @@ export default function OrgMembersCard() {
     removeMember,
   } = useOrg();
   const { user } = useAuth();
-  const isAdmin = activeOrg?.membership?.role === 'admin';
+  const userRole = activeOrg?.membership?.role;
+  const canManageMembers = userRole === 'admin' || userRole === 'owner';
   const isLoadingInvites = pendingInvitesStatus === 'loading';
   const invitesFailed = pendingInvitesStatus === 'error';
   const hasPendingInvites = Array.isArray(pendingInvites) && pendingInvites.length > 0;
@@ -111,7 +112,7 @@ export default function OrgMembersCard() {
                       ) : null}
                     </div>
                   </div>
-                  {isAdmin && !isCurrentUser ? (
+                  {canManageMembers && !isCurrentUser ? (
                     <Button
                       type="button"
                       variant="ghost"
@@ -134,14 +135,14 @@ export default function OrgMembersCard() {
           </div>
         </section>
 
-        {isAdmin ? (
+        {canManageMembers ? (
           <section className="space-y-3">
             <h3 className="text-sm font-semibold text-slate-700">הזמן חבר חדש</h3>
             <InviteUserForm orgId={activeOrg.id} />
           </section>
         ) : null}
 
-        {isAdmin ? (
+        {canManageMembers ? (
           <section className="space-y-3">
             <h3 className="text-sm font-semibold text-slate-700">הזמנות ממתינות</h3>
             <div className="space-y-3">
