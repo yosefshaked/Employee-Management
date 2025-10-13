@@ -218,107 +218,6 @@ function pickFirstString(keys, ...sources) {
   return '';
 }
 
-function resolveInvitationEmailConfig(context) {
-  const env = readEnv(context);
-  const fallbackEnv = process.env ?? {};
-
-  const apiKey =
-    pickFirstString(['APP_SENDGRID_API_KEY', 'SENDGRID_API_KEY', 'APP_EMAIL_API_KEY'], env, fallbackEnv) || '';
-  const fromEmailRaw = pickFirstString(
-    ['APP_INVITE_EMAIL_FROM', 'APP_EMAIL_FROM', 'SENDGRID_FROM_EMAIL', 'EMAIL_FROM'],
-    env,
-    fallbackEnv,
-  );
-  const fromName = pickFirstString(
-    ['APP_INVITE_EMAIL_FROM_NAME', 'APP_EMAIL_FROM_NAME', 'SENDGRID_FROM_NAME', 'EMAIL_FROM_NAME'],
-    env,
-    fallbackEnv,
-  );
-  const templateId = pickFirstString(
-    ['APP_SENDGRID_INVITE_TEMPLATE_ID', 'APP_INVITE_TEMPLATE_ID', 'SENDGRID_INVITE_TEMPLATE_ID', 'SENDGRID_TEMPLATE_ID'],
-    env,
-    fallbackEnv,
-  );
-  const replyToEmailRaw = pickFirstString(
-    ['APP_INVITE_REPLY_TO', 'APP_EMAIL_REPLY_TO', 'SENDGRID_REPLY_TO_EMAIL', 'EMAIL_REPLY_TO'],
-    env,
-    fallbackEnv,
-  );
-  const replyToName = pickFirstString(
-    ['APP_INVITE_REPLY_TO_NAME', 'APP_EMAIL_REPLY_TO_NAME', 'SENDGRID_REPLY_TO_NAME', 'EMAIL_REPLY_TO_NAME'],
-    env,
-    fallbackEnv,
-  );
-  const subject = pickFirstString(
-    ['APP_INVITE_EMAIL_SUBJECT', 'APP_EMAIL_SUBJECT', 'SENDGRID_TEMPLATE_SUBJECT'],
-    env,
-    fallbackEnv,
-  );
-
-  return {
-    apiKey,
-    fromEmail: normalizeEmail(fromEmailRaw) ?? '',
-    fromName,
-    templateId,
-    replyToEmail: normalizeEmail(replyToEmailRaw) ?? '',
-    replyToName,
-    subject,
-  };
-}
-
-async function sendInvitationEmailWithSendGrid(config, payload) {
-  const { apiKey, fromEmail, fromName, templateId, replyToEmail, replyToName, subject } = config;
-  const { toEmail, dynamicTemplateData } = payload;
-
-  if (!apiKey || !fromEmail || !templateId || !toEmail) {
-    return {
-      error: new Error('missing_email_configuration'),
-    };
-  }
-
-  const message = {
-    personalizations: [
-      {
-        to: [{ email: toEmail }],
-        dynamic_template_data: dynamicTemplateData,
-      },
-    ],
-    from: fromName ? { email: fromEmail, name: fromName } : { email: fromEmail },
-    template_id: templateId,
-  };
-
-  if (replyToEmail) {
-    message.reply_to = replyToName ? { email: replyToEmail, name: replyToName } : { email: replyToEmail };
-  }
-
-  if (subject) {
-    message.subject = subject;
-  }
-
-  try {
-    const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(message),
-    });
-
-    if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      const error = new Error('sendgrid_request_failed');
-      error.status = response.status;
-      error.detail = detail;
-      return { error };
-    }
-    return { error: null };
-  } catch (err) {
-    const error = err instanceof Error ? err : new Error('sendgrid_request_error');
-    return { error };
-  }
-}
-
 function resolveAcceptInviteRedirect(context, requestedRedirect, token) {
   const fallbackEnv = process.env ?? {};
   const env = readEnv(context);
@@ -682,65 +581,20 @@ async function handleCreateInvitation(context, req, supabase) {
     return;
   }
 
-  const magicLinkResult = await supabase.auth.admin.generateLink({
-    type: 'magiclink',
+  const signInResult = await supabase.auth.signInWithOtp({
     email,
     options: {
-      redirectTo: acceptRedirect,
+      emailRedirectTo: acceptRedirect,
       data: inviteMetadata,
     },
   });
 
-  const actionLink = magicLinkResult.data?.properties?.action_link ?? null;
-  if (magicLinkResult.error || !actionLink) {
-    context.log?.error?.('invitations failed to generate magic link', {
+  if (signInResult.error) {
+    context.log?.error?.('invitations failed to send magic link', {
       orgId,
       email,
       invitationId: invitation.id,
-      message: magicLinkResult.error?.message ?? 'missing action link',
-    });
-    await markInvitationFailed(supabase, invitation.id);
-    respond(context, 502, { message: 'failed to generate invitation link' });
-    return;
-  }
-
-  const emailConfig = resolveInvitationEmailConfig(context);
-  if (!emailConfig.apiKey || !emailConfig.fromEmail || !emailConfig.templateId) {
-    context.log?.error?.('invitations missing email configuration', {
-      orgId,
-      email,
-      invitationId: invitation.id,
-    });
-    await markInvitationFailed(supabase, invitation.id);
-    respond(context, 500, { message: 'invitation email configuration missing' });
-    return;
-  }
-
-  const dynamicOverrides =
-    emailData && typeof emailData.dynamicTemplateData === 'object' ? emailData.dynamicTemplateData : null;
-  const dynamicTemplateData = {
-    ...inviteMetadata,
-    ...(dynamicOverrides ?? {}),
-    action_link: actionLink,
-    actionLink,
-    accept_redirect: acceptRedirect,
-    inviter_name: inviterName ?? inviteMetadata.inviter_name ?? null,
-    organization_name: organization.name ?? inviteMetadata.organization_name ?? null,
-  };
-
-  const emailSendResult = await sendInvitationEmailWithSendGrid(emailConfig, {
-    toEmail: email,
-    dynamicTemplateData,
-  });
-
-  if (emailSendResult.error) {
-    context.log?.error?.('invitations failed to send magic link email', {
-      orgId,
-      email,
-      invitationId: invitation.id,
-      message: emailSendResult.error.message,
-      status: emailSendResult.error.status ?? null,
-      detail: emailSendResult.error.detail ?? null,
+      message: signInResult.error.message,
     });
     await markInvitationFailed(supabase, invitation.id);
     respond(context, 502, { message: 'failed to send invitation email' });

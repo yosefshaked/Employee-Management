@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.9.1**
-**Last Updated: 2025-10-21**
+**Version: 1.9.2**
+**Last Updated: 2025-10-22**
 
 ## 1. Vision & Purpose
 
@@ -63,7 +63,7 @@ The system is built on a modern client-server architecture, packaged as a standa
 
 - The Azure Function at `/api/invitations` is the single entry point for creating, listing, validating, and actioning organization invites.
 - It instantiates a Supabase admin client with `APP_CONTROL_DB_URL` and `APP_CONTROL_DB_SERVICE_ROLE_KEY`, validates the caller’s JWT, and re-checks membership/role directly against `org_memberships` before performing any write.
-- `POST /api/invitations` accepts `{ orgId, email, expiresAt?, redirectTo?, emailData? }` from admins/owners, blocks duplicates or existing members, inserts a row into `org_invitations`, generates a Supabase admin `generateLink({ type: 'magiclink' })` with a redirect to `/#/accept-invite?token=<invitation>`, and sends a branded SendGrid email that uses the returned `action_link` as the CTA.
+- `POST /api/invitations` accepts `{ orgId, email, expiresAt?, redirectTo?, emailData? }` from admins/owners, blocks duplicates or existing members, inserts a row into `org_invitations`, and sends a Supabase-managed magic link via `supabase.auth.signInWithOtp({ email, options: { emailRedirectTo } })` that redirects to `/#/accept-invite?token=<invitation>` so both new and existing users follow the same CTA.
 - `GET /api/invitations` (admin-only) filters pending rows for the requested organization, auto-expires rows whose `expires_at` has passed, and returns sanitized invitation records.
 - `GET /api/invitations/token/:token` exposes a public lookup that verifies the token, checks expiry, and returns `{ orgName, email, status }` without leaking sensitive fields.
 - `POST /api/invitations/:id/accept` requires the invitee’s authenticated email to match the invitation, upserts an `org_memberships` row with role `member`, and marks the invite as `accepted`.
