@@ -7,13 +7,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { format, parseISO } from "date-fns";
 import { he } from "date-fns/locale";
 import { Link } from "react-router-dom";
-import { getColorForService } from '@/lib/colorUtils';
 import { createLeaveDayValueResolver, resolveLeaveSessionValue } from '@/lib/payroll.js';
 import { selectLeaveDayValue } from '@/selectors.js';
 import { isLeaveEntryType } from '@/lib/leave.js';
 import { getActivityDisplayDetails } from '@/lib/activity-helpers.js';
-
-const GENERIC_RATE_SERVICE_ID = '00000000-0000-0000-0000-000000000000';
 
 export default function RecentActivity({ title = "פעילות אחרונה", sessions, employees, services, workSessions = [], leavePayPolicy, isLoading, showViewAllButton = true }) {
 
@@ -59,21 +56,12 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
                 employee,
               });
               const activityLabel = activityDetails.label;
-              const badgeColorKey = (() => {
-                if (session.entry_type === 'adjustment') {
-                  return null;
-                }
-                if (employee?.employee_type === 'instructor' && session.service_id) {
-                  return session.service_id;
-                }
-                if (isHourlyOrGlobal || !session.service_id) {
-                  return GENERIC_RATE_SERVICE_ID;
-                }
-                return session.service_id;
-              })();
-              const badgeColor = badgeColorKey
-                ? getColorForService(badgeColorKey)
-                : '#EF4444';
+              const activityColor = typeof activityDetails.color === 'string' && activityDetails.color.trim().length > 0
+                ? activityDetails.color.trim()
+                : '#0F766E';
+              const badgeBackground = activityColor.startsWith('#')
+                ? `${activityColor}20`
+                : activityColor;
 
               return (
                 <div key={session.id} className="flex items-center gap-3 p-3 rounded-lg bg-slate-50">
@@ -101,11 +89,9 @@ export default function RecentActivity({ title = "פעילות אחרונה", se
                       className="text-xs w-full block truncate"
                       title={activityLabel}
                       style={{
-                        backgroundColor: session.entry_type === 'adjustment'
-                          ? '#EF444420'
-                          : `${badgeColor}20`,
-                        color: badgeColor,
-                        borderColor: badgeColor,
+                        backgroundColor: badgeBackground,
+                        color: activityColor,
+                        borderColor: activityColor,
                       }}
                     >
                       {activityLabel}
