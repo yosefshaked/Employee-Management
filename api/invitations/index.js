@@ -195,6 +195,37 @@ async function fetchOrganization(supabase, orgId) {
   return data;
 }
 
+async function checkExistingMembership(supabase, orgId, email) {
+  const { data, error } = await supabase
+    .from('org_memberships')
+    .select('user_id, users!inner(email)')
+    .eq('org_id', orgId)
+    .eq('users.email', email)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || 'failed_to_check_membership');
+  }
+
+  return Boolean(data);
+}
+
+async function findActiveInvitation(supabase, orgId, email) {
+  const { data, error } = await supabase
+    .from('org_invitations')
+    .select('id, status')
+    .eq('org_id', orgId)
+    .eq('email', email)
+    .in('status', ACTIVE_INVITE_STATUSES)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(error.message || 'failed_to_check_existing_invitation');
+  }
+
+  return data;
+}
+
 async function handlePost(context, req, supabase, user, env) {
   const body = parseRequestBody(req);
   const orgId = normalizeString(body.orgId || body.org_id);
@@ -239,6 +270,34 @@ async function handlePost(context, req, supabase, user, env) {
     return respond(context, 404, { message: 'organization_not_found' });
   }
 
+  try {
+    const membershipExists = await checkExistingMembership(supabase, orgId, email);
+    if (membershipExists) {
+      return respond(context, 409, { message: 'user_already_member' });
+    }
+  } catch (membershipLookupError) {
+    context.log?.error?.('invitations failed to check existing membership', {
+      message: membershipLookupError?.message,
+      orgId,
+      invitedEmail: email,
+    });
+    return respond(context, 500, { message: 'failed_to_check_membership' });
+  }
+
+  try {
+    const existingInvitation = await findActiveInvitation(supabase, orgId, email);
+    if (existingInvitation) {
+      return respond(context, 409, { message: 'invitation_already_pending' });
+    }
+  } catch (invitationLookupError) {
+    context.log?.error?.('invitations failed to check existing invitation', {
+      message: invitationLookupError?.message,
+      orgId,
+      invitedEmail: email,
+    });
+    return respond(context, 500, { message: 'failed_to_check_existing_invitation' });
+  }
+
   let inserted;
   try {
     const insertResult = await supabase
@@ -252,6 +311,9 @@ async function handlePost(context, req, supabase, user, env) {
       .single();
 
     if (insertResult.error) {
+      if (insertResult.error.code === '23505') {
+        return respond(context, 409, { message: 'invitation_already_pending' });
+      }
       throw new Error(insertResult.error.message || 'failed_to_create_invitation');
     }
 
