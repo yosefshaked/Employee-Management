@@ -370,138 +370,163 @@ async function sendInvitationEmail(supabase, email, redirectTo, metadata) {
 async function handlePost(context, req, supabase, user, env) {
   context.log('Invitations POST handler started', { userId: user?.id });
 
-  const body = parseRequestBody(req);
-  context.log('Invitations POST body parsed', { hasBody: Boolean(body), bodyKeys: Object.keys(body || {}) });
-
-  const orgId = normalizeString(body.orgId || body.org_id);
-  const email = normalizeEmail(body.email);
-
-  if (!orgId || !isValidOrgId(orgId)) {
-    context.log('Invitations POST invalid org id detected', { orgId });
-    return respond(context, 400, { message: 'invalid_org_id' });
-  }
-
-  if (!email || !isValidEmail(email)) {
-    context.log('Invitations POST invalid email detected', { orgId, email });
-    return respond(context, 400, { message: 'invalid_email' });
-  }
-
-  context.log('Invitations POST request body validated', { orgId, email });
-
-  let membershipRole;
-  try {
-    context.log('Invitations POST verifying membership role', { orgId, userId: user.id });
-    membershipRole = await ensureMembershipRole(supabase, orgId, user.id);
-    context.log('Invitations POST membership role resolved', { orgId, userId: user.id, membershipRole });
-  } catch (membershipError) {
-    context.log?.error?.('Invitations POST failed to verify membership', {
-      message: membershipError?.message,
-      orgId,
-      userId: user.id,
-    });
-    return respond(context, 500, { message: 'failed_to_verify_membership' });
-  }
-
-  if (!membershipRole || !isAdminRole(membershipRole)) {
-    context.log('Invitations POST forbidden for role', { orgId, userId: user.id, membershipRole });
-    return respond(context, 403, { message: 'forbidden' });
-  }
+  let orgId = null;
+  let email = null;
 
   try {
-    context.log('Invitations POST checking existing membership', { orgId, email });
-    const alreadyMember = await checkExistingMembership(supabase, orgId, email);
-    context.log('Invitations POST existing membership result', { orgId, email, alreadyMember });
-    if (alreadyMember) {
-      return respond(context, 409, { message: 'user_already_member' });
+    context.log('Invitations POST user authenticated', { hasUser: Boolean(user), userId: user?.id });
+
+    const body = parseRequestBody(req);
+    context.log('Invitations POST body parsed', { hasBody: Boolean(body), bodyKeys: Object.keys(body || {}) });
+
+    orgId = normalizeString(body.orgId || body.org_id);
+    email = normalizeEmail(body.email);
+
+    if (!orgId || !isValidOrgId(orgId)) {
+      context.log('Invitations POST invalid org id detected', { orgId });
+      return respond(context, 400, { message: 'invalid_org_id' });
     }
-  } catch (existingMembershipError) {
-    context.log?.error?.('Invitations POST failed to check membership', {
-      message: existingMembershipError?.message,
-      orgId,
-      email,
-    });
-    return respond(context, 500, { message: 'failed_to_check_membership' });
-  }
 
-  try {
-    context.log('Invitations POST checking active invitation', { orgId, email });
-    const activeInvite = await findActiveInvitation(supabase, orgId, email);
-    context.log('Invitations POST active invitation result', { orgId, email, hasActiveInvite: Boolean(activeInvite) });
-    if (activeInvite) {
-      return respond(context, 409, { message: 'invitation_already_pending' });
+    if (!email || !isValidEmail(email)) {
+      context.log('Invitations POST invalid email detected', { orgId, email });
+      return respond(context, 400, { message: 'invalid_email' });
     }
-  } catch (activeInviteError) {
-    context.log?.error?.('Invitations POST failed to check active invitation', {
-      message: activeInviteError?.message,
-      orgId,
-      email,
-    });
-    return respond(context, 500, { message: 'failed_to_check_existing_invitation' });
-  }
 
-  let invitationRow;
-  try {
-    context.log('Invitations POST inserting invitation', { orgId, email });
-    invitationRow = await createInvitation(supabase, {
-      org_id: orgId,
-      email,
-      invited_by: user.id,
-    });
-    context.log('Invitations POST invitation inserted', { invitationId: invitationRow?.id });
-  } catch (insertError) {
-    if (insertError?.code === '23505') {
-      context.log('Invitations POST insert hit unique violation', { orgId, email });
-      return respond(context, 409, { message: 'invitation_already_pending' });
+    context.log('Invitations POST request body validated', { orgId, email });
+
+    let membershipRole;
+    try {
+      context.log('Invitations POST verifying membership role', { orgId, userId: user.id });
+      membershipRole = await ensureMembershipRole(supabase, orgId, user.id);
+      context.log('Invitations POST membership role resolved', { orgId, userId: user.id, membershipRole });
+    } catch (membershipError) {
+      context.log?.error?.('Invitations POST failed to verify membership', {
+        message: membershipError?.message,
+        orgId,
+        userId: user.id,
+      });
+      return respond(context, 500, { message: 'failed_to_verify_membership' });
     }
-    context.log?.error?.('Invitations POST failed to create invitation', {
-      message: insertError?.message,
+
+    if (!membershipRole || !isAdminRole(membershipRole)) {
+      context.log('Invitations POST forbidden for role', { orgId, userId: user.id, membershipRole });
+      return respond(context, 403, { message: 'forbidden' });
+    }
+
+    try {
+      context.log('Invitations POST checking existing membership', { orgId, email });
+      const alreadyMember = await checkExistingMembership(supabase, orgId, email);
+      context.log('Invitations POST existing membership result', { orgId, email, alreadyMember });
+      if (alreadyMember) {
+        return respond(context, 409, { message: 'user_already_member' });
+      }
+    } catch (existingMembershipError) {
+      context.log?.error?.('Invitations POST failed to check membership', {
+        message: existingMembershipError?.message,
+        orgId,
+        email,
+      });
+      return respond(context, 500, { message: 'failed_to_check_membership' });
+    }
+
+    try {
+      context.log('Invitations POST checking active invitation', { orgId, email });
+      const activeInvite = await findActiveInvitation(supabase, orgId, email);
+      context.log('Invitations POST active invitation result', { orgId, email, hasActiveInvite: Boolean(activeInvite) });
+      if (activeInvite) {
+        return respond(context, 409, { message: 'invitation_already_pending' });
+      }
+    } catch (activeInviteError) {
+      context.log?.error?.('Invitations POST failed to check active invitation', {
+        message: activeInviteError?.message,
+        orgId,
+        email,
+      });
+      return respond(context, 500, { message: 'failed_to_check_existing_invitation' });
+    }
+
+    let invitationRow;
+    try {
+      context.log('Invitations POST inserting invitation', { orgId, email });
+      invitationRow = await createInvitation(supabase, {
+        org_id: orgId,
+        email,
+        invited_by: user.id,
+      });
+      context.log('Invitations POST invitation inserted', { invitationId: invitationRow?.id });
+    } catch (insertError) {
+      if (insertError?.code === '23505') {
+        context.log('Invitations POST insert hit unique violation', { orgId, email });
+        return respond(context, 409, { message: 'invitation_already_pending' });
+      }
+      context.log?.error?.('Invitations POST failed to create invitation', {
+        message: insertError?.message,
+        orgId,
+        email,
+      });
+      return respond(context, 500, { message: 'failed_to_create_invitation' });
+    }
+
+    const token = normalizeString(invitationRow?.token);
+    if (!token) {
+      context.log?.error?.('Invitations POST missing token after insert', { invitationId: invitationRow?.id });
+      return respond(context, 500, { message: 'failed_to_create_invitation' });
+    }
+
+    let organization = null;
+    try {
+      context.log('Invitations POST fetching organization details', { orgId });
+      organization = await fetchOrganization(supabase, orgId);
+      context.log('Invitations POST organization details fetched', { orgId, hasOrganization: Boolean(organization) });
+    } catch (organizationError) {
+      context.log?.warn?.('Invitations POST failed to fetch organization', {
+        message: organizationError?.message,
+        orgId,
+      });
+    }
+
+    const baseUrl = resolveAppBaseUrl(env);
+    const invitationLink = buildInvitationLink(baseUrl, token);
+    context.log('Invitations POST resolved invitation link', { token, invitationLink });
+
+    try {
+      const inviterName = extractInviterName(user);
+      context.log('Invitations POST dispatching email', {
+        invitationId: invitationRow.id,
+        email,
+        inviterName,
+        organizationName: organization?.name ?? null,
+        invitationLink,
+      });
+      await sendInvitationEmail(supabase, email, invitationLink, {
+        inviter_name: inviterName,
+        organization_name: organization?.name ?? null,
+      });
+      context.log('Invitations POST email dispatched', { invitationId: invitationRow.id });
+    } catch (emailError) {
+      context.log?.error?.('Invitations POST failed to send email', {
+        message: emailError?.message,
+        orgId,
+        invitationId: invitationRow.id,
+      });
+      return respond(context, 502, { message: 'failed_to_send_email' });
+    }
+
+    const normalizedInvitation = normalizeInvitationRow(invitationRow);
+    return respond(context, 201, {
+      invitation: normalizedInvitation,
+      organization: organization ?? { id: orgId, name: organization?.name ?? null },
+    });
+  } catch (error) {
+    context.log?.error?.('Invitations POST unexpected failure', {
+      message: error?.message,
+      stack: error?.stack,
       orgId,
       email,
+      userId: user?.id,
     });
-    return respond(context, 500, { message: 'failed_to_create_invitation' });
+    return respond(context, 500, { message: 'unexpected_error' });
   }
-
-  const token = normalizeString(invitationRow?.token);
-  if (!token) {
-    context.log?.error?.('Invitations POST missing token after insert', { invitationId: invitationRow?.id });
-    return respond(context, 500, { message: 'failed_to_create_invitation' });
-  }
-
-  let organization = null;
-  try {
-    organization = await fetchOrganization(supabase, orgId);
-  } catch (organizationError) {
-    context.log?.warn?.('Invitations POST failed to fetch organization', {
-      message: organizationError?.message,
-      orgId,
-    });
-  }
-
-  const baseUrl = resolveAppBaseUrl(env);
-  const invitationLink = buildInvitationLink(baseUrl, token);
-  context.log('Invitations POST resolved invitation link', { token, invitationLink });
-
-  try {
-    const inviterName = extractInviterName(user);
-    await sendInvitationEmail(supabase, email, invitationLink, {
-      inviter_name: inviterName,
-      organization_name: organization?.name ?? null,
-    });
-    context.log('Invitations POST email dispatched', { invitationId: invitationRow.id });
-  } catch (emailError) {
-    context.log?.error?.('Invitations POST failed to send email', {
-      message: emailError?.message,
-      orgId,
-      invitationId: invitationRow.id,
-    });
-    return respond(context, 502, { message: 'failed_to_send_email' });
-  }
-
-  const normalizedInvitation = normalizeInvitationRow(invitationRow);
-  return respond(context, 201, {
-    invitation: normalizedInvitation,
-    organization: organization ?? { id: orgId, name: organization?.name ?? null },
-  });
 }
 
 async function handleGet(context, req, supabase, userId) {
