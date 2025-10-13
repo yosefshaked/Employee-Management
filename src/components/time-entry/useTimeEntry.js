@@ -1262,10 +1262,10 @@ export function useTimeEntry({
           notes: notesValue,
           rate_used: rateUsed,
           total_payment: totalPayment,
+          entry_type: 'hours',
         };
 
         if (isHourlyOrGlobal) {
-          payloadBase.entry_type = 'hours';
           payloadBase.hours = Number.isFinite(hoursValue) ? hoursValue : 0;
           payloadBase.service_id = isHourly ? GENERIC_RATE_SERVICE_ID : null;
           payloadBase.sessions_count = null;
