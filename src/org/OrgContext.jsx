@@ -16,6 +16,7 @@ import { createOrganization as createOrganizationRpc } from '@/api/organizations
 import {
   createInvitation as createInvitationRequest,
   listPendingInvitations,
+  acceptInvitation as acceptInvitationRequest,
 } from '@/api/invitations.js';
 import { mapSupabaseError } from '@/org/errors.js';
 import { fetchCurrentUser } from '@/shared/api/user.ts';
@@ -977,49 +978,34 @@ export function OrgProvider({ children }) {
 
   const acceptInvite = useCallback(
     async (inviteId) => {
-      if (!inviteId || !user) throw new Error('הזמנה אינה זמינה.');
-
-      const client = requireAuthClient();
-      const { data: inviteData, error: inviteError } = await client
-        .from('org_invitations')
-        .select('id, org_id, status')
-        .eq('id', inviteId)
-        .maybeSingle();
-
-      if (inviteError) throw inviteError;
-      if (!inviteData) throw new Error('ההזמנה אינה קיימת או פגה.');
-
-      if (inviteData.status !== 'pending' && inviteData.status !== 'sent') {
-        throw new Error('ההזמנה כבר טופלה.');
+      if (!inviteId || !session || !user) {
+        throw new Error('הזמנה אינה זמינה.');
       }
 
-      const now = new Date().toISOString();
-
-      const { error: membershipError } = await client
-        .from('org_memberships')
-        .insert({
-          org_id: inviteData.org_id,
-          user_id: user.id,
-          role: 'member',
-          created_at: now,
+      let response;
+      try {
+        response = await acceptInvitationRequest({
+          session,
+          invitationId: inviteId,
         });
-
-      if (membershipError && membershipError.code !== '23505') {
-        throw membershipError;
+      } catch (error) {
+        throw error;
       }
 
-      const { error: updateError } = await client
-        .from('org_invitations')
-        .update({ status: 'accepted', accepted_at: now })
-        .eq('id', inviteId);
-
-      if (updateError) throw updateError;
+      const targetOrgId = response?.organization?.id
+        || response?.invitation?.org_id
+        || response?.invitation?.orgId
+        || null;
 
       await refreshOrganizations({ keepSelection: false });
-      await selectOrg(inviteData.org_id);
+
+      if (targetOrgId) {
+        await selectOrg(targetOrgId);
+      }
+
       toast.success('הצטרפת לארגון בהצלחה.');
     },
-    [requireAuthClient, user, refreshOrganizations, selectOrg],
+    [session, user, refreshOrganizations, selectOrg],
   );
 
   const activeOrgConnection = useMemo(() => {

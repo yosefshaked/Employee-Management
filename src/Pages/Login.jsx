@@ -12,7 +12,12 @@ export default function Login() {
   const [oauthInFlight, setOauthInFlight] = useState(null);
   const location = useLocation();
 
-  const redirectPath = location.state?.from?.pathname || '/Dashboard';
+  const redirectSource = location.state?.from;
+  const redirectPath = typeof redirectSource === 'string'
+    ? redirectSource
+    : redirectSource?.pathname
+      ? `${redirectSource.pathname}${redirectSource.search || ''}`
+      : '/Dashboard';
   const redirectMessage = location.state?.message || null;
 
   if (status === 'ready' && session) {

@@ -19,6 +19,7 @@ import { AuthProvider } from './auth/AuthContext.jsx';
 import AuthGuard from './auth/AuthGuard.jsx';
 import { OrgProvider } from './org/OrgContext.jsx';
 import OrgSelection from './Pages/OrgSelection.jsx';
+import AcceptInvitePage from './components/pages/AcceptInvitePage.jsx';
 
 function App({ config = null }) {
   console.log('[DEBUG 4] App component rendering.');
@@ -30,6 +31,7 @@ function App({ config = null }) {
             <HashRouter>
               <Routes>
                 <Route path="/login" element={<Login />} />
+                <Route path="/accept-invite" element={<AcceptInvitePage />} />
                 <Route element={<AuthGuard />}>
                   <Route path="/select-org" element={<OrgSelection />} />
                   <Route element={<Layout />}>

@@ -56,3 +56,75 @@ export async function listPendingInvitations({ session, orgId, signal } = {}) {
     signal,
   });
 }
+
+function normalizeToken(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim();
+}
+
+async function fetchJson(path, { method = 'GET', signal } = {}) {
+  const response = await fetch(`/api/${path}`, { method, signal });
+  let payload = null;
+
+  const contentType = response.headers?.get?.('content-type')
+    || response.headers?.get?.('Content-Type')
+    || '';
+  const isJson = typeof contentType === 'string' && contentType.toLowerCase().includes('application/json');
+
+  if (isJson) {
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const message = payload?.message || 'אירעה שגיאה בעת שליפת ההזמנה.';
+    const error = new Error(message);
+    error.status = response.status;
+    if (payload) {
+      error.data = payload;
+    }
+    throw error;
+  }
+
+  return payload;
+}
+
+export async function getInvitationByToken({ token, signal, session } = {}) {
+  const normalizedToken = normalizeToken(token);
+  if (!normalizedToken) {
+    throw new Error('קישור ההזמנה חסר או פגום.');
+  }
+
+  const encoded = encodeURIComponent(normalizedToken);
+  if (session) {
+    return authenticatedFetch(`invitations/token/${encoded}`, {
+      method: 'GET',
+      session,
+      signal,
+    });
+  }
+
+  return fetchJson(`invitations/token/${encoded}`, { method: 'GET', signal });
+}
+
+export async function acceptInvitation({ session, invitationId, signal } = {}) {
+  if (!session) {
+    throw new Error('נדרשת התחברות כדי להצטרף לארגון.');
+  }
+
+  const normalizedId = normalizeToken(invitationId);
+  if (!normalizedId) {
+    throw new Error('זיהוי הזמנה חסר.');
+  }
+
+  return authenticatedFetch(`invitations/${encodeURIComponent(normalizedId)}/accept`, {
+    method: 'POST',
+    session,
+    signal,
+  });
+}

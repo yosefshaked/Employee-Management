@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.7.7**
-**Last Updated: 2025-10-13**
+**Version: 1.7.8**
+**Last Updated: 2025-10-14**
 
 ## 1. Vision & Purpose
 
@@ -65,7 +65,9 @@ The system is built on a modern client-server architecture, packaged as a standa
 - **Endpoints:**
   - `POST /api/invitations` — Admin/owner only. Validates membership, inserts a new `org_invitations` row, retrieves the generated token, and dispatches the Supabase `inviteUserByEmail` message with `redirectTo` pointing to `#/accept-invite?token=...`.
   - `GET /api/invitations?orgId=<uuid>` — Admin/owner only. Returns all pending/sent invitations for the requested organization to power the Settings → Org Members view.
-- **Frontend Integration:** `InviteUserForm.jsx` and the refreshed `OrgMembersCard.jsx` consume `src/api/invitations.js` to send invitations and list pending rows with user-friendly status badges and loading/error states.
+  - `GET /api/invitations/token/<token>` — Public token validation. Returns invitation metadata (email, organization, expiration) so the Accept Invite page can render even without a session. Accepts optional bearer tokens for richer responses when available.
+  - `POST /api/invitations/{invitationId}/accept` — Authenticated recipients finalize membership. Confirms the session email matches the invite and updates both `org_memberships` and `org_invitations` atomically.
+- **Frontend Integration:** `InviteUserForm.jsx` and the refreshed `OrgMembersCard.jsx` consume `src/api/invitations.js` to send invitations and list pending rows with user-friendly status badges, loading, and error states. `src/components/pages/AcceptInvitePage.jsx` drives the `/accept-invite` route, loading invitations by token, branching between anonymous/login/mismatch experiences, and calling the secure accept endpoint before refreshing `OrgContext` and redirecting to the dashboard.
 - **Configuration:** The invitation link uses the first non-empty value among `APP_PUBLIC_URL`, `APP_BASE_URL`, `APP_SITE_URL`, `APP_WEB_URL`, `APP_DESKTOP_URL`, `APP_URL`, `PUBLIC_APP_URL`, or `PUBLIC_URL`. Ensure one of these environment variables is set to the SPA origin (e.g., `https://yourapp.com`).
 - **Security:** All role validation and email dispatch occur server-side. Tokens never leave the backend except through the email link, and responses exclude the raw token to avoid leakage through the admin dashboard.
 
