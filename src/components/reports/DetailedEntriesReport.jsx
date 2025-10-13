@@ -116,12 +116,12 @@ export default function DetailedEntriesReport({
     const isHourlyOrGlobal = employee?.employee_type === 'hourly' || employee?.employee_type === 'global';
     return (
       <TableRow key={session.id} className="hover:bg-slate-50">
-        <TableCell className="font-medium">{employee?.name || 'לא ידוע'}</TableCell>
+        <TableCell className="font-medium text-center">{employee?.name || 'לא ידוע'}</TableCell>
         {showEmploymentScopeColumn ? (
-          <TableCell>{employmentScopeLabel || '—'}</TableCell>
+          <TableCell className="text-center">{employmentScopeLabel || '—'}</TableCell>
         ) : null}
-        <TableCell>{format(parseISO(session.date), 'dd/MM/yyyy', { locale: he })}</TableCell>
-        <TableCell className="w-64 items-start">
+        <TableCell className="text-center">{format(parseISO(session.date), 'dd/MM/yyyy', { locale: he })}</TableCell>
+        <TableCell className="w-64 items-start text-center">
           <ActivityBadge
             label={activityDetails.label}
             color={activityDetails.color}
@@ -129,12 +129,12 @@ export default function DetailedEntriesReport({
             title={activityDetails.label}
           />
         </TableCell>
-        <TableCell>
+        <TableCell className="text-center">
           {isHourlyOrGlobal ? `${session.hours || 0} שעות` : `${session.sessions_count || 0} מפגשים`}
         </TableCell>
-        <TableCell>{session.students_count || '-'}</TableCell>
-        <TableCell>₪{session.rate_used?.toFixed(2) || '0.00'}</TableCell>
-        <TableCell className="font-semibold">₪{payment.toFixed(2)}</TableCell>
+        <TableCell className="text-center">{session.students_count || '-'}</TableCell>
+        <TableCell className="text-center">₪{session.rate_used?.toFixed(2) || '0.00'}</TableCell>
+        <TableCell className="font-semibold text-center">₪{payment.toFixed(2)}</TableCell>
         <TableCell className="text-sm text-slate-600">{session.notes || '-'}</TableCell>
       </TableRow>
     );
