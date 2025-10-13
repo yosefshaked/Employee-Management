@@ -17,6 +17,7 @@ const ADMIN_CLIENT_OPTIONS = {
 };
 
 const STATUS_PENDING = 'pending';
+const STATUS_SENT = 'sent';
 const STATUS_ACCEPTED = 'accepted';
 const STATUS_REVOKED = 'revoked';
 const STATUS_DECLINED = 'declined';
@@ -293,6 +294,16 @@ function sanitizeInvitation(row) {
   if (!row) {
     return null;
   }
+  const organizationSource = row.organization || row.organizations || row.org || null;
+  let organization = null;
+  if (organizationSource && typeof organizationSource === 'object') {
+    const organizationId = organizationSource.id ?? organizationSource.org_id ?? null;
+    const organizationName = typeof organizationSource.name === 'string' ? organizationSource.name : null;
+    organization = {
+      id: organizationId,
+      name: organizationName,
+    };
+  }
   return {
     id: row.id,
     orgId: row.org_id,
@@ -301,6 +312,7 @@ function sanitizeInvitation(row) {
     invitedBy: row.invited_by ?? null,
     createdAt: row.created_at ?? null,
     expiresAt: row.expires_at ?? null,
+    organization,
   };
 }
 
@@ -633,6 +645,51 @@ async function handleCreateInvitation(context, req, supabase) {
   });
 }
 
+async function handleListIncoming(context, req, supabase) {
+  const authUser = await getAuthenticatedUser(context, req, supabase);
+  if (!authUser) {
+    return;
+  }
+
+  const email = normalizeEmail(authUser.email);
+  if (!email) {
+    respond(context, 400, { message: 'missing email for incoming invitations' });
+    return;
+  }
+
+  const selectResult = await supabase
+    .from('org_invitations')
+    .select('id, org_id, email, status, invited_by, created_at, expires_at, organizations(id, name)')
+    .eq('email', email)
+    .in('status', [STATUS_PENDING, STATUS_SENT])
+    .order('created_at', { ascending: false });
+
+  if (selectResult.error) {
+    context.log?.error?.('invitations failed to list incoming invitations', {
+      email,
+      message: selectResult.error.message,
+    });
+    respond(context, 500, { message: 'failed to list invitations' });
+    return;
+  }
+
+  const invitations = [];
+  if (Array.isArray(selectResult.data)) {
+    for (const invitation of selectResult.data) {
+      if (isExpiredTimestamp(invitation.expires_at)) {
+        await markInvitationExpired(supabase, invitation.id);
+        continue;
+      }
+      const sanitized = sanitizeInvitation(invitation);
+      if (sanitized) {
+        invitations.push(sanitized);
+      }
+    }
+  }
+
+  respond(context, 200, { invitations });
+}
+
 async function handleListPending(context, req, supabase) {
   const authUser = await getAuthenticatedUser(context, req, supabase);
   if (!authUser) {
@@ -915,6 +972,11 @@ export default async function (context, req) {
 
   if (method === 'GET' && segments.length === 0) {
     await handleListPending(context, req, supabase);
+    return;
+  }
+
+  if (method === 'GET' && segments.length === 1 && segments[0] === 'incoming') {
+    await handleListIncoming(context, req, supabase);
     return;
   }
 
