@@ -1,171 +1,11 @@
 /* eslint-env node */
 import process from 'node:process';
+import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 import { json, resolveBearerAuthorization } from '../_shared/http.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ADMIN_ROLES = new Set(['admin', 'owner']);
 const ACTIVE_INVITE_STATUSES = ['pending', 'sent'];
-
-class InternalApiError extends Error {
-  constructor(message, status, payload) {
-    super(message || 'internal_api_error');
-    this.status = status ?? 500;
-    this.payload = payload ?? null;
-  }
-}
-
-async function parseJsonResponse(response) {
-  if (!response) {
-    return null;
-  }
-
-  const contentType = response.headers?.get?.('content-type') ?? response.headers?.get?.('Content-Type') ?? '';
-  const isJson = typeof contentType === 'string' && contentType.toLowerCase().includes('application/json');
-
-  try {
-    if (isJson) {
-      return await response.json();
-    }
-    const text = await response.text();
-    if (!text) {
-      return null;
-    }
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
-}
-
-function resolveControlApiBaseUrl(env) {
-  const candidates = [
-    env.CONTROL_API_URL,
-    env.CONTROL_DB_API_URL,
-    env.APP_CONTROL_API_URL,
-    env.INTERNAL_CONTROL_API_URL,
-    env.CONTROL_SERVICE_URL,
-  ];
-
-  for (const candidate of candidates) {
-    const normalized = normalizeString(candidate);
-    if (!normalized) {
-      continue;
-    }
-    return normalized.replace(/\/+$/, '');
-  }
-
-  return '';
-}
-
-function buildInternalApiUrl(baseUrl, path, query) {
-  const normalizedBase = `${baseUrl}/`.replace(/\/+/g, '/');
-  const trimmedPath = normalizeString(path).replace(/^\/+/, '');
-  const url = new URL(trimmedPath || '', normalizedBase);
-
-  if (query && typeof query === 'object') {
-    for (const [key, value] of Object.entries(query)) {
-      if (value === undefined || value === null) {
-        continue;
-      }
-
-      if (Array.isArray(value)) {
-        for (const entry of value) {
-          if (entry === undefined || entry === null) {
-            continue;
-          }
-          url.searchParams.append(key, String(entry));
-        }
-        continue;
-      }
-
-      url.searchParams.append(key, String(value));
-    }
-  }
-
-  return url.toString();
-}
-
-function buildAuthHeaders(authorizationHeader) {
-  if (!authorizationHeader) {
-    return undefined;
-  }
-
-  return {
-    Authorization: authorizationHeader,
-    'X-Supabase-Authorization': authorizationHeader,
-  };
-}
-
-function createInternalApiClient(context, env, authorizationHeader) {
-  const baseUrl = resolveControlApiBaseUrl(env);
-  if (!baseUrl) {
-    return null;
-  }
-
-  async function request(method, path, { query, body, headers: extraHeaders } = {}) {
-    const url = buildInternalApiUrl(baseUrl, path, query);
-    const headers = {
-      Accept: 'application/json',
-      ...(extraHeaders ?? {}),
-    };
-
-    const authHeaders = buildAuthHeaders(authorizationHeader);
-    if (authHeaders) {
-      for (const [key, value] of Object.entries(authHeaders)) {
-        if (value !== undefined && value !== null && !headers[key]) {
-          headers[key] = value;
-        }
-      }
-    }
-
-    const hasBody = body !== undefined && body !== null;
-    const serializedBody = hasBody ? JSON.stringify(body) : undefined;
-
-    if (hasBody) {
-      headers['Content-Type'] = 'application/json';
-    }
-
-    let response;
-    try {
-      response = await fetch(url, {
-        method,
-        headers,
-        body: serializedBody,
-      });
-    } catch (networkError) {
-      context.log?.error?.('control api request failed', {
-        method,
-        path,
-        message: networkError?.message,
-      });
-      throw new InternalApiError('control_api_unreachable', 502, {
-        message: networkError?.message,
-      });
-    }
-
-    const payload = await parseJsonResponse(response);
-
-    if (!response.ok) {
-      const message = payload?.message || 'control_api_error';
-      throw new InternalApiError(message, response.status, payload);
-    }
-
-    return { status: response.status, data: payload };
-  }
-
-  return {
-    baseUrl,
-    request,
-    get(path, options) {
-      return request('GET', path, options);
-    },
-    post(path, options) {
-      return request('POST', path, options);
-    },
-    patch(path, options) {
-      return request('PATCH', path, options);
-    },
-  };
-}
 
 function readEnv(context) {
   if (context?.env && typeof context.env === 'object') {
@@ -343,157 +183,191 @@ function normalizeInvitationRow(row) {
   };
 }
 
-async function ensureMembershipRole(controlApi, orgId, userId) {
-  try {
-    const { data } = await controlApi.get('/org_memberships', {
-      query: { org_id: orgId, user_id: userId },
-    });
-
-    const record = Array.isArray(data) ? data.find((entry) => entry && typeof entry === 'object') : data;
-    if (!record || typeof record !== 'object') {
-      return null;
-    }
-
-    return record.role ?? null;
-  } catch (error) {
-    if (error instanceof InternalApiError && (error.status === 404 || error.status === 204)) {
-      return null;
-    }
-    throw error;
-  }
+function resolveAdminConfig(env) {
+  return readSupabaseAdminConfig(env, {
+    supabaseUrl: env.APP_CONTROL_DB_URL,
+    serviceRoleKey: env.APP_CONTROL_DB_SERVICE_ROLE_KEY,
+  });
 }
 
-async function fetchOrganization(controlApi, orgId) {
-  try {
-    const { data } = await controlApi.get(`/organizations/${encodeURIComponent(orgId)}`);
-    if (!data || typeof data !== 'object') {
-      return null;
-    }
+async function ensureMembershipRole(supabase, orgId, userId) {
+  const { data, error } = await supabase
+    .from('org_memberships')
+    .select('role')
+    .eq('org_id', orgId)
+    .eq('user_id', userId)
+    .maybeSingle();
 
-    if (data.organization && typeof data.organization === 'object') {
-      return data.organization;
-    }
-
-    return data;
-  } catch (error) {
-    if (error instanceof InternalApiError && (error.status === 404 || error.status === 204)) {
-      return null;
-    }
+  if (error) {
     throw error;
   }
+
+  return data?.role ?? null;
 }
 
-async function checkExistingMembership(controlApi, orgId, email) {
-  try {
-    const { data } = await controlApi.get('/org_memberships', {
-      query: { org_id: orgId, email },
-    });
+async function fetchOrganization(supabase, orgId) {
+  const { data, error } = await supabase
+    .from('organizations')
+    .select('id, name')
+    .eq('id', orgId)
+    .maybeSingle();
 
-    if (Array.isArray(data)) {
-      return data.length > 0;
-    }
-
-    return Boolean(data);
-  } catch (error) {
-    if (error instanceof InternalApiError && (error.status === 404 || error.status === 204)) {
-      return false;
-    }
+  if (error) {
     throw error;
   }
-}
 
-async function findActiveInvitation(controlApi, orgId, email) {
-  try {
-    const { data } = await controlApi.get('/org_invitations', {
-      query: { org_id: orgId, email, status: ACTIVE_INVITE_STATUSES },
-    });
-
-    if (Array.isArray(data)) {
-      return data.find((entry) => entry && ACTIVE_INVITE_STATUSES.includes(entry.status));
-    }
-
-    if (data && typeof data === 'object' && ACTIVE_INVITE_STATUSES.includes(data.status)) {
-      return data;
-    }
-
+  if (!data) {
     return null;
-  } catch (error) {
-    if (error instanceof InternalApiError && (error.status === 404 || error.status === 204)) {
-      return null;
-    }
-    throw error;
   }
+
+  return { id: data.id ?? orgId, name: data.name ?? null };
 }
 
-async function createInvitation(controlApi, payload) {
-  const { data } = await controlApi.post('/org_invitations', { body: payload });
-  if (Array.isArray(data)) {
-    return data[0] ?? null;
+async function fetchOrganizationsMap(supabase, orgIds) {
+  if (!Array.isArray(orgIds) || !orgIds.length) {
+    return new Map();
   }
+
+  const { data, error } = await supabase
+    .from('organizations')
+    .select('id, name')
+    .in('id', orgIds);
+
+  if (error) {
+    throw error;
+  }
+
+  const map = new Map();
+  for (const row of data || []) {
+    if (!row || typeof row !== 'object') {
+      continue;
+    }
+    const id = row.id;
+    if (!id) {
+      continue;
+    }
+    map.set(id, { id, name: row.name ?? null });
+  }
+  return map;
+}
+
+async function checkExistingMembership(supabase, orgId, email) {
+  const { data: userResult, error: userError } = await supabase.auth.admin.getUserByEmail(email);
+  if (userError) {
+    throw userError;
+  }
+
+  const candidateUserId = userResult?.user?.id;
+  if (!candidateUserId) {
+    return false;
+  }
+
+  const { data, error } = await supabase
+    .from('org_memberships')
+    .select('id')
+    .eq('org_id', orgId)
+    .eq('user_id', candidateUserId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return Boolean(data);
+}
+
+async function findActiveInvitation(supabase, orgId, email) {
+  const { data, error } = await supabase
+    .from('org_invitations')
+    .select('*')
+    .eq('org_id', orgId)
+    .eq('email', email)
+    .in('status', ACTIVE_INVITE_STATUSES);
+
+  if (error) {
+    throw error;
+  }
+
+  if (!data) {
+    return null;
+  }
+
+  const rows = Array.isArray(data) ? data : [data];
+  return rows.find((row) => row && ACTIVE_INVITE_STATUSES.includes(row.status)) ?? null;
+}
+
+async function createInvitation(supabase, payload) {
+  const { data, error } = await supabase
+    .from('org_invitations')
+    .insert(payload)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
   return data ?? null;
 }
 
-async function sendInvitationEmail(controlApi, payload) {
-  return controlApi.post('/emails/invitations', { body: payload });
-}
+async function fetchInvitationById(supabase, invitationId) {
+  const { data, error } = await supabase
+    .from('org_invitations')
+    .select('*')
+    .eq('id', invitationId)
+    .maybeSingle();
 
-async function fetchInvitationById(controlApi, invitationId, authorizationHeader) {
-  try {
-    const { data } = await controlApi.get(`/org_invitations/${encodeURIComponent(invitationId)}`, {
-      headers: buildAuthHeaders(authorizationHeader),
-    });
-
-    if (!data) {
-      return null;
-    }
-
-    if (Array.isArray(data)) {
-      return data[0] ?? null;
-    }
-
-    return data;
-  } catch (error) {
-    if (error instanceof InternalApiError && (error.status === 404 || error.status === 204)) {
-      return null;
-    }
+  if (error) {
     throw error;
   }
+
+  return data ?? null;
 }
 
-async function fetchInvitationByToken(controlApi, token) {
-  try {
-    const { data } = await controlApi.get('/org_invitations', {
-      query: { token },
-    });
+async function fetchInvitationByToken(supabase, token) {
+  const { data, error } = await supabase
+    .from('org_invitations')
+    .select('*')
+    .eq('token', token)
+    .maybeSingle();
 
-    if (!data) {
-      return null;
-    }
-
-    const rows = Array.isArray(data) ? data : [data];
-    return rows.find((row) => row && typeof row === 'object' && normalizeString(row.token) === token) ?? null;
-  } catch (error) {
-    if (error instanceof InternalApiError && (error.status === 404 || error.status === 204)) {
-      return null;
-    }
+  if (error) {
     throw error;
   }
+
+  return data ?? null;
 }
 
-async function updateInvitationStatus(controlApi, invitationId, status, authorizationHeader) {
-  const { data } = await controlApi.patch(`/org_invitations/${encodeURIComponent(invitationId)}`, {
-    headers: buildAuthHeaders(authorizationHeader),
-    body: { status },
+async function updateInvitationStatus(supabase, invitationId, status) {
+  const { data, error } = await supabase
+    .from('org_invitations')
+    .update({ status })
+    .eq('id', invitationId)
+    .select('*')
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data ?? null;
+}
+
+async function sendInvitationEmail(supabase, email, redirectTo, metadata) {
+  const response = await supabase.auth.admin.inviteUserByEmail(email, {
+    redirectTo,
+    data: metadata,
   });
 
-  if (Array.isArray(data)) {
-    return data[0] ?? null;
+  if (response.error) {
+    throw response.error;
   }
 
-  return data ?? null;
+  return response.data ?? null;
 }
 
-async function handlePost(context, req, controlApi, user, env) {
+async function handlePost(context, req, supabase, user, env) {
   context.log('Invitations POST handler started', { userId: user?.id });
 
   const body = parseRequestBody(req);
@@ -517,168 +391,120 @@ async function handlePost(context, req, controlApi, user, env) {
   let membershipRole;
   try {
     context.log('Invitations POST verifying membership role', { orgId, userId: user.id });
-    membershipRole = await ensureMembershipRole(controlApi, orgId, user.id);
+    membershipRole = await ensureMembershipRole(supabase, orgId, user.id);
     context.log('Invitations POST membership role resolved', { orgId, userId: user.id, membershipRole });
   } catch (membershipError) {
-    context.log?.error?.('invitations failed to verify membership', {
+    context.log?.error?.('Invitations POST failed to verify membership', {
       message: membershipError?.message,
       orgId,
       userId: user.id,
-      status: membershipError instanceof InternalApiError ? membershipError.status : undefined,
     });
     return respond(context, 500, { message: 'failed_to_verify_membership' });
   }
 
   if (!membershipRole || !isAdminRole(membershipRole)) {
+    context.log('Invitations POST forbidden for role', { orgId, userId: user.id, membershipRole });
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  context.log('Invitations POST authorization confirmed', { orgId, userId: user.id, membershipRole });
-
-  let organization;
   try {
-    context.log('Invitations POST loading organization', { orgId });
-    organization = await fetchOrganization(controlApi, orgId);
-    context.log('Invitations POST organization loaded', { orgId, organizationFound: Boolean(organization) });
-  } catch (organizationError) {
-    context.log?.error?.('invitations failed to load organization', {
-      message: organizationError?.message,
-      orgId,
-    });
-    return respond(context, 500, { message: 'failed_to_load_organization' });
-  }
-
-  if (!organization) {
-    return respond(context, 404, { message: 'organization_not_found' });
-  }
-
-  try {
-    context.log('Invitations POST checking for existing membership', { orgId, invitedEmail: email });
-    const membershipExists = await checkExistingMembership(controlApi, orgId, email);
-    context.log('Invitations POST existing membership check complete', { orgId, invitedEmail: email, membershipExists });
-    if (membershipExists) {
+    context.log('Invitations POST checking existing membership', { orgId, email });
+    const alreadyMember = await checkExistingMembership(supabase, orgId, email);
+    context.log('Invitations POST existing membership result', { orgId, email, alreadyMember });
+    if (alreadyMember) {
       return respond(context, 409, { message: 'user_already_member' });
     }
-  } catch (membershipLookupError) {
-    context.log?.error?.('invitations failed to check existing membership', {
-      message: membershipLookupError?.message,
+  } catch (existingMembershipError) {
+    context.log?.error?.('Invitations POST failed to check membership', {
+      message: existingMembershipError?.message,
       orgId,
-      invitedEmail: email,
+      email,
     });
     return respond(context, 500, { message: 'failed_to_check_membership' });
   }
 
   try {
-    context.log('Invitations POST checking for existing invitation', { orgId, invitedEmail: email });
-    const existingInvitation = await findActiveInvitation(controlApi, orgId, email);
-    context.log('Invitations POST existing invitation check complete', {
-      orgId,
-      invitedEmail: email,
-      existingInvitationId: existingInvitation?.id ?? null,
-      existingInvitationStatus: existingInvitation?.status ?? null,
-    });
-    if (existingInvitation) {
+    context.log('Invitations POST checking active invitation', { orgId, email });
+    const activeInvite = await findActiveInvitation(supabase, orgId, email);
+    context.log('Invitations POST active invitation result', { orgId, email, hasActiveInvite: Boolean(activeInvite) });
+    if (activeInvite) {
       return respond(context, 409, { message: 'invitation_already_pending' });
     }
-  } catch (invitationLookupError) {
-    context.log?.error?.('invitations failed to check existing invitation', {
-      message: invitationLookupError?.message,
+  } catch (activeInviteError) {
+    context.log?.error?.('Invitations POST failed to check active invitation', {
+      message: activeInviteError?.message,
       orgId,
-      invitedEmail: email,
+      email,
     });
     return respond(context, 500, { message: 'failed_to_check_existing_invitation' });
   }
 
-  let inserted;
+  let invitationRow;
   try {
-    context.log('Invitations POST inserting new invitation', { orgId, invitedEmail: email, invitedBy: user.id });
-    inserted = await createInvitation(controlApi, {
+    context.log('Invitations POST inserting invitation', { orgId, email });
+    invitationRow = await createInvitation(supabase, {
       org_id: orgId,
       email,
       invited_by: user.id,
     });
-    context.log('Invitations POST insert succeeded', { orgId, invitedEmail: email, invitationId: inserted?.id });
+    context.log('Invitations POST invitation inserted', { invitationId: invitationRow?.id });
   } catch (insertError) {
-    context.log?.error?.('invitations failed to insert invitation', {
-      message: insertError?.message,
-      orgId,
-      invitedEmail: email,
-      status: insertError instanceof InternalApiError ? insertError.status : undefined,
-    });
-    if (insertError instanceof InternalApiError && insertError.status === 409) {
+    if (insertError?.code === '23505') {
+      context.log('Invitations POST insert hit unique violation', { orgId, email });
       return respond(context, 409, { message: 'invitation_already_pending' });
     }
+    context.log?.error?.('Invitations POST failed to create invitation', {
+      message: insertError?.message,
+      orgId,
+      email,
+    });
     return respond(context, 500, { message: 'failed_to_create_invitation' });
   }
 
-  if (!inserted || !inserted.token) {
-    context.log?.error?.('invitations insert did not return token', {
-      orgId,
-      invitedEmail: email,
-    });
+  const token = normalizeString(invitationRow?.token);
+  if (!token) {
+    context.log?.error?.('Invitations POST missing token after insert', { invitationId: invitationRow?.id });
     return respond(context, 500, { message: 'failed_to_create_invitation' });
+  }
+
+  let organization = null;
+  try {
+    organization = await fetchOrganization(supabase, orgId);
+  } catch (organizationError) {
+    context.log?.warn?.('Invitations POST failed to fetch organization', {
+      message: organizationError?.message,
+      orgId,
+    });
   }
 
   const baseUrl = resolveAppBaseUrl(env);
-  context.log('Invitations POST resolved base URL', { orgId, baseUrl });
-  if (!baseUrl) {
-    context.log?.error?.('invitations missing application base URL');
-    return respond(context, 500, { message: 'server_misconfigured' });
-  }
-
-  const invitationLink = buildInvitationLink(baseUrl, inserted.token);
-  const inviterName = extractInviterName(user);
-  const organizationName = normalizeString(organization.name) || null;
-
-  context.log('Invitations POST prepared email payload', {
-    orgId,
-    invitationId: inserted.id,
-    token: inserted.token,
-    redirectTo: invitationLink,
-    inviterName,
-    organizationName,
-  });
+  const invitationLink = buildInvitationLink(baseUrl, token);
+  context.log('Invitations POST resolved invitation link', { token, invitationLink });
 
   try {
-    context.log('Invitations POST dispatching invite email', { orgId, invitedEmail: email, redirectTo: invitationLink, token: inserted.token });
-    await sendInvitationEmail(controlApi, {
-      invitation_id: inserted.id,
-      org_id: orgId,
-      email,
-      token: inserted.token,
-      redirect_to: invitationLink,
+    const inviterName = extractInviterName(user);
+    await sendInvitationEmail(supabase, email, invitationLink, {
       inviter_name: inviterName,
-      organization_name: organizationName,
+      organization_name: organization?.name ?? null,
     });
-    context.log('Invitations POST invite email dispatched', {
-      orgId,
-      invitedEmail: email,
-    });
+    context.log('Invitations POST email dispatched', { invitationId: invitationRow.id });
   } catch (emailError) {
-    context.log?.error?.('invitations failed to dispatch email', {
+    context.log?.error?.('Invitations POST failed to send email', {
       message: emailError?.message,
       orgId,
-      invitedEmail: email,
-      status: emailError instanceof InternalApiError ? emailError.status : undefined,
+      invitationId: invitationRow.id,
     });
     return respond(context, 502, { message: 'failed_to_send_email' });
   }
 
-  const normalizedInvitation = normalizeInvitationRow(inserted);
-  context.log('Invitations POST completed successfully', {
-    orgId,
-    invitationId: normalizedInvitation?.id,
-  });
+  const normalizedInvitation = normalizeInvitationRow(invitationRow);
   return respond(context, 201, {
     invitation: normalizedInvitation,
-    organization: {
-      id: organization.id,
-      name: organizationName,
-    },
+    organization: organization ?? { id: orgId, name: organization?.name ?? null },
   });
 }
 
-async function handleGet(context, req, controlApi, userId, authorizationHeader) {
+async function handleGet(context, req, supabase, userId) {
   const query = req?.query ?? {};
   const orgCandidate = query.orgId || query.org_id;
   const orgId = normalizeString(orgCandidate);
@@ -689,13 +515,12 @@ async function handleGet(context, req, controlApi, userId, authorizationHeader) 
 
   let membershipRole;
   try {
-    membershipRole = await ensureMembershipRole(controlApi, orgId, userId);
+    membershipRole = await ensureMembershipRole(supabase, orgId, userId);
   } catch (membershipError) {
-    context.log?.error?.('invitations failed to verify membership on list', {
+    context.log?.error?.('Invitations GET failed to verify membership', {
       message: membershipError?.message,
       orgId,
       userId,
-      status: membershipError instanceof InternalApiError ? membershipError.status : undefined,
     });
     return respond(context, 500, { message: 'failed_to_verify_membership' });
   }
@@ -706,32 +531,32 @@ async function handleGet(context, req, controlApi, userId, authorizationHeader) 
 
   let invitations = [];
   try {
-    const { data } = await controlApi.get('/org_invitations', {
-      query: { org_id: orgId, status: ACTIVE_INVITE_STATUSES },
-      headers: buildAuthHeaders(authorizationHeader),
-    });
+    const { data, error } = await supabase
+      .from('org_invitations')
+      .select('*')
+      .eq('org_id', orgId)
+      .in('status', ACTIVE_INVITE_STATUSES)
+      .order('created_at', { ascending: true });
 
-    const rows = Array.isArray(data) ? data : (data ? [data] : []);
+    if (error) {
+      throw error;
+    }
+
+    const rows = Array.isArray(data) ? data : data ? [data] : [];
     invitations = rows.map((row) => normalizeInvitationRow(row)).filter(Boolean);
   } catch (listError) {
-    if (listError instanceof InternalApiError && (listError.status === 404 || listError.status === 204)) {
-      invitations = [];
-    } else {
-      context.log?.error?.('invitations failed to list invitations', {
-        message: listError?.message,
-        orgId,
-        userId,
-        status: listError instanceof InternalApiError ? listError.status : undefined,
-      });
-      return respond(context, 500, { message: 'failed_to_list_invitations' });
-    }
+    context.log?.error?.('Invitations GET failed to list invitations', {
+      message: listError?.message,
+      orgId,
+      userId,
+    });
+    return respond(context, 500, { message: 'failed_to_list_invitations' });
   }
 
-  const normalized = invitations;
-  return respond(context, 200, { invitations: normalized });
+  return respond(context, 200, { invitations });
 }
 
-async function handleTokenLookup(context, controlApi, token) {
+async function handleTokenLookup(context, supabase, token) {
   const normalizedToken = normalizeString(token);
   if (!normalizedToken || !UUID_PATTERN.test(normalizedToken)) {
     return respond(context, 400, { message: 'invalid_token' });
@@ -739,11 +564,10 @@ async function handleTokenLookup(context, controlApi, token) {
 
   let invitation;
   try {
-    invitation = await fetchInvitationByToken(controlApi, normalizedToken);
+    invitation = await fetchInvitationByToken(supabase, normalizedToken);
   } catch (lookupError) {
-    context.log?.error?.('invitations token lookup failed', {
+    context.log?.error?.('Invitations token lookup failed', {
       message: lookupError?.message,
-      status: lookupError instanceof InternalApiError ? lookupError.status : undefined,
     });
     return respond(context, 500, { message: 'failed_to_lookup_invitation' });
   }
@@ -756,9 +580,9 @@ async function handleTokenLookup(context, controlApi, token) {
   let organization = null;
   if (organizationId) {
     try {
-      organization = await fetchOrganization(controlApi, organizationId);
+      organization = await fetchOrganization(supabase, organizationId);
     } catch (organizationError) {
-      context.log?.warn?.('invitations token lookup organization fetch failed', {
+      context.log?.warn?.('Invitations token lookup organization fetch failed', {
         message: organizationError?.message,
         organizationId,
       });
@@ -781,7 +605,7 @@ async function handleTokenLookup(context, controlApi, token) {
   });
 }
 
-async function handleAccept(context, controlApi, user, authorizationHeader, invitationId) {
+async function handleAccept(context, supabase, user, invitationId) {
   const normalizedInvitationId = normalizeString(invitationId);
   if (!normalizedInvitationId || !UUID_PATTERN.test(normalizedInvitationId)) {
     return respond(context, 400, { message: 'invalid_invitation_id' });
@@ -794,11 +618,10 @@ async function handleAccept(context, controlApi, user, authorizationHeader, invi
 
   let invitation;
   try {
-    invitation = await fetchInvitationById(controlApi, normalizedInvitationId, authorizationHeader);
+    invitation = await fetchInvitationById(supabase, normalizedInvitationId);
   } catch (invitationError) {
-    context.log?.error?.('invitations accept failed to load invitation', {
+    context.log?.error?.('Invitations accept failed to load invitation', {
       message: invitationError?.message,
-      status: invitationError instanceof InternalApiError ? invitationError.status : undefined,
       invitationId: normalizedInvitationId,
     });
     return respond(context, 500, { message: 'failed_to_load_invitation' });
@@ -827,22 +650,24 @@ async function handleAccept(context, controlApi, user, authorizationHeader, invi
   }
 
   try {
-    await controlApi.post('/org_memberships', {
-      headers: buildAuthHeaders(authorizationHeader),
-      body: {
+    const { error: membershipError } = await supabase
+      .from('org_memberships')
+      .insert({
         org_id: orgId,
         user_id: user.id,
         email: userEmail,
         role: 'member',
-      },
-    });
+      });
+
+    if (membershipError) {
+      throw membershipError;
+    }
   } catch (membershipError) {
-    if (membershipError instanceof InternalApiError && membershipError.status === 409) {
+    if (membershipError?.code === '23505') {
       return respond(context, 409, { message: 'user_already_member' });
     }
-    context.log?.error?.('invitations accept failed to create membership', {
+    context.log?.error?.('Invitations accept failed to create membership', {
       message: membershipError?.message,
-      status: membershipError instanceof InternalApiError ? membershipError.status : undefined,
       invitationId: normalizedInvitationId,
     });
     return respond(context, 500, { message: 'failed_to_create_membership' });
@@ -850,11 +675,10 @@ async function handleAccept(context, controlApi, user, authorizationHeader, invi
 
   let updatedInvitation = null;
   try {
-    updatedInvitation = await updateInvitationStatus(controlApi, normalizedInvitationId, 'accepted', authorizationHeader);
+    updatedInvitation = await updateInvitationStatus(supabase, normalizedInvitationId, 'accepted');
   } catch (updateError) {
-    context.log?.error?.('invitations accept failed to update invitation', {
+    context.log?.error?.('Invitations accept failed to update invitation', {
       message: updateError?.message,
-      status: updateError instanceof InternalApiError ? updateError.status : undefined,
       invitationId: normalizedInvitationId,
     });
     return respond(context, 500, { message: 'failed_to_update_invitation' });
@@ -862,9 +686,9 @@ async function handleAccept(context, controlApi, user, authorizationHeader, invi
 
   let organization;
   try {
-    organization = await fetchOrganization(controlApi, orgId);
+    organization = await fetchOrganization(supabase, orgId);
   } catch (organizationError) {
-    context.log?.warn?.('invitations accept organization fetch failed', {
+    context.log?.warn?.('Invitations accept organization fetch failed', {
       message: organizationError?.message,
       orgId,
     });
@@ -879,7 +703,7 @@ async function handleAccept(context, controlApi, user, authorizationHeader, invi
   });
 }
 
-async function handleIncoming(context, controlApi, user, authorizationHeader) {
+async function handleIncoming(context, supabase, user) {
   const userEmail = normalizeEmail(user?.email);
   if (!userEmail) {
     return respond(context, 400, { message: 'user_missing_email' });
@@ -887,80 +711,47 @@ async function handleIncoming(context, controlApi, user, authorizationHeader) {
 
   let invitations = [];
   try {
-    const { data } = await controlApi.get('/org_invitations', {
-      query: { email: userEmail, status: ACTIVE_INVITE_STATUSES },
-      headers: buildAuthHeaders(authorizationHeader),
-    });
+    const { data, error } = await supabase
+      .from('org_invitations')
+      .select('*')
+      .eq('email', userEmail)
+      .in('status', ACTIVE_INVITE_STATUSES)
+      .order('created_at', { ascending: true });
 
-    const rows = Array.isArray(data) ? data : data ? [data] : [];
-    const normalizedRows = [];
-    const sourceRows = [];
-
-    for (const row of rows) {
-      const normalized = normalizeInvitationRow(row);
-      if (!normalized) {
-        continue;
-      }
-      normalizedRows.push(normalized);
-      sourceRows.push(row);
+    if (error) {
+      throw error;
     }
 
-    const orgIds = Array.from(new Set(normalizedRows.map((row) => row.org_id).filter(Boolean)));
-    const orgMap = new Map();
-
-    await Promise.all(
-      orgIds.map(async (orgId) => {
-        try {
-          const organization = await fetchOrganization(controlApi, orgId);
-          if (organization) {
-            orgMap.set(orgId, organization);
-          }
-        } catch (organizationError) {
-          context.log?.warn?.('invitations incoming organization fetch failed', {
-            message: organizationError?.message,
-            orgId,
-          });
-        }
-      }),
-    );
-
-    invitations = normalizedRows.map((row, index) => {
-      const source = sourceRows[index] || {};
-      const directOrganization =
-        (source.organization && typeof source.organization === 'object' && source.organization)
-        || (source.organizations && typeof source.organizations === 'object' && source.organizations)
-        || null;
-
-      const orgId = row.org_id;
-      const resolvedOrganization = directOrganization || orgMap.get(orgId) || null;
-
-      return {
-        ...row,
-        organization: resolvedOrganization
-          ? { id: resolvedOrganization.id ?? orgId, name: resolvedOrganization.name ?? null }
-          : orgId
-            ? { id: orgId, name: null }
-            : null,
-      };
+    invitations = (data || []).map((row) => normalizeInvitationRow(row)).filter(Boolean);
+  } catch (listError) {
+    context.log?.error?.('Invitations incoming failed to list invitations', {
+      message: listError?.message,
+      userId: user.id,
     });
-  } catch (incomingError) {
-    if (incomingError instanceof InternalApiError && incomingError.status === 404) {
-      invitations = [];
-    } else if (incomingError instanceof InternalApiError && incomingError.status === 204) {
-      invitations = [];
-    } else {
-      context.log?.error?.('invitations incoming lookup failed', {
-        message: incomingError?.message,
-        status: incomingError instanceof InternalApiError ? incomingError.status : undefined,
+    return respond(context, 500, { message: 'failed_to_list_invitations' });
+  }
+
+  const orgIds = Array.from(new Set(invitations.map((invite) => invite.org_id).filter(Boolean)));
+  let orgMap = new Map();
+  if (orgIds.length) {
+    try {
+      orgMap = await fetchOrganizationsMap(supabase, orgIds);
+    } catch (organizationError) {
+      context.log?.warn?.('Invitations incoming organization fetch failed', {
+        message: organizationError?.message,
       });
-      return respond(context, 500, { message: 'failed_to_list_invitations' });
     }
   }
 
-  return respond(context, 200, { invitations });
+  const enriched = invitations.map((invite) => ({
+    ...invite,
+    organization: orgMap.get(invite.org_id) ?? { id: invite.org_id, name: null },
+  }));
+
+  return respond(context, 200, { invitations: enriched });
 }
 
-async function handleRevoke(context, controlApi, userId, authorizationHeader, invitationId) {
+async function handleRevoke(context, supabase, userId, invitationId) {
   const normalizedInvitationId = normalizeString(invitationId);
   if (!normalizedInvitationId || !UUID_PATTERN.test(normalizedInvitationId)) {
     return respond(context, 400, { message: 'invalid_invitation_id' });
@@ -968,11 +759,10 @@ async function handleRevoke(context, controlApi, userId, authorizationHeader, in
 
   let invitation;
   try {
-    invitation = await fetchInvitationById(controlApi, normalizedInvitationId, authorizationHeader);
+    invitation = await fetchInvitationById(supabase, normalizedInvitationId);
   } catch (invitationError) {
-    context.log?.error?.('invitations revoke failed to load invitation', {
+    context.log?.error?.('Invitations revoke failed to load invitation', {
       message: invitationError?.message,
-      status: invitationError instanceof InternalApiError ? invitationError.status : undefined,
       invitationId: normalizedInvitationId,
     });
     return respond(context, 500, { message: 'failed_to_load_invitation' });
@@ -982,18 +772,17 @@ async function handleRevoke(context, controlApi, userId, authorizationHeader, in
     return respond(context, 404, { message: 'invitation_not_found' });
   }
 
-  const orgId = invitation.org_id ?? invitation.organization_id ?? null;
+  const orgId = invitation.org_id ?? invitation.organization_id;
   if (!orgId || !isValidOrgId(String(orgId))) {
     return respond(context, 409, { message: 'invitation_missing_org' });
   }
 
   let membershipRole;
   try {
-    membershipRole = await ensureMembershipRole(controlApi, orgId, userId);
+    membershipRole = await ensureMembershipRole(supabase, orgId, userId);
   } catch (membershipError) {
-    context.log?.error?.('invitations revoke failed to verify membership', {
+    context.log?.error?.('Invitations revoke failed to verify membership', {
       message: membershipError?.message,
-      status: membershipError instanceof InternalApiError ? membershipError.status : undefined,
       orgId,
       userId,
     });
@@ -1004,16 +793,11 @@ async function handleRevoke(context, controlApi, userId, authorizationHeader, in
     return respond(context, 403, { message: 'forbidden' });
   }
 
-  if (invitation.status === 'revoked') {
-    return respond(context, 204, null);
-  }
-
   try {
-    await updateInvitationStatus(controlApi, normalizedInvitationId, 'revoked', authorizationHeader);
+    await updateInvitationStatus(supabase, normalizedInvitationId, 'revoked');
   } catch (updateError) {
-    context.log?.error?.('invitations revoke failed to update invitation', {
+    context.log?.error?.('Invitations revoke failed to update invitation', {
       message: updateError?.message,
-      status: updateError instanceof InternalApiError ? updateError.status : undefined,
       invitationId: normalizedInvitationId,
     });
     return respond(context, 500, { message: 'failed_to_update_invitation' });
@@ -1022,7 +806,7 @@ async function handleRevoke(context, controlApi, userId, authorizationHeader, in
   return respond(context, 204, null);
 }
 
-async function handleDecline(context, controlApi, user, authorizationHeader, invitationId) {
+async function handleDecline(context, supabase, user, invitationId) {
   const normalizedInvitationId = normalizeString(invitationId);
   if (!normalizedInvitationId || !UUID_PATTERN.test(normalizedInvitationId)) {
     return respond(context, 400, { message: 'invalid_invitation_id' });
@@ -1035,11 +819,10 @@ async function handleDecline(context, controlApi, user, authorizationHeader, inv
 
   let invitation;
   try {
-    invitation = await fetchInvitationById(controlApi, normalizedInvitationId, authorizationHeader);
+    invitation = await fetchInvitationById(supabase, normalizedInvitationId);
   } catch (invitationError) {
-    context.log?.error?.('invitations decline failed to load invitation', {
+    context.log?.error?.('Invitations decline failed to load invitation', {
       message: invitationError?.message,
-      status: invitationError instanceof InternalApiError ? invitationError.status : undefined,
       invitationId: normalizedInvitationId,
     });
     return respond(context, 500, { message: 'failed_to_load_invitation' });
@@ -1063,11 +846,10 @@ async function handleDecline(context, controlApi, user, authorizationHeader, inv
   }
 
   try {
-    await updateInvitationStatus(controlApi, normalizedInvitationId, 'declined', authorizationHeader);
+    await updateInvitationStatus(supabase, normalizedInvitationId, 'declined');
   } catch (updateError) {
-    context.log?.error?.('invitations decline failed to update invitation', {
+    context.log?.error?.('Invitations decline failed to update invitation', {
       message: updateError?.message,
-      status: updateError instanceof InternalApiError ? updateError.status : undefined,
       invitationId: normalizedInvitationId,
     });
     return respond(context, 500, { message: 'failed_to_update_invitation' });
@@ -1081,73 +863,67 @@ export default async function (context, req) {
   const { tail } = parseInvitationRoute(req);
   const method = String(req?.method || 'GET').toUpperCase();
 
+  const adminConfig = resolveAdminConfig(env);
+  if (!adminConfig?.supabaseUrl || !adminConfig?.serviceRoleKey) {
+    context.log?.error?.('Invitations API missing Supabase admin credentials');
+    return respond(context, 500, { message: 'server_misconfigured' });
+  }
+
+  const supabase = createSupabaseAdminClient(adminConfig);
+
   if (method === 'GET' && tail[0] === 'token') {
     if (!tail[1]) {
       return respond(context, 400, { message: 'invalid_token' });
     }
 
-    const controlApi = createInternalApiClient(context, env, undefined);
-    if (!controlApi) {
-      context.log?.error?.('invitations missing control API base URL');
-      return respond(context, 500, { message: 'server_misconfigured' });
-    }
-
-    return handleTokenLookup(context, controlApi, tail[1]);
+    return handleTokenLookup(context, supabase, tail[1]);
   }
 
   const authorization = resolveBearerAuthorization(req);
   if (!authorization?.token) {
-    context.log?.warn?.('invitations missing bearer token');
+    context.log?.warn?.('Invitations API missing bearer token');
     return respond(context, 401, { message: 'missing_bearer' });
   }
 
-  const controlApi = createInternalApiClient(context, env, authorization.header);
-  if (!controlApi) {
-    context.log?.error?.('invitations missing control API base URL');
-    return respond(context, 500, { message: 'server_misconfigured' });
-  }
-
-  let user;
+  let authResult;
   try {
-    const { data } = await controlApi.get('/auth/user');
-    if (data && typeof data === 'object') {
-      user = data.user && typeof data.user === 'object' ? data.user : data;
-    }
-  } catch (userError) {
-    context.log?.error?.('invitations failed to resolve user from control API', {
-      message: userError?.message,
-      status: userError instanceof InternalApiError ? userError.status : undefined,
+    authResult = await supabase.auth.getUser(authorization.token);
+  } catch (authError) {
+    context.log?.error?.('Invitations API failed to validate token', {
+      message: authError?.message,
     });
     return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
-  if (!user || !user.id) {
-    context.log?.warn?.('invitations control API did not return user');
+  if (authResult.error || !authResult.data?.user?.id) {
+    context.log?.warn?.('Invitations API token did not resolve to user');
     return respond(context, 401, { message: 'invalid_or_expired_token' });
   }
 
+  const user = authResult.data.user;
+
   if (method === 'GET' && (!tail.length || tail[0] === '')) {
-    return handleGet(context, req, controlApi, user.id, authorization.header);
+    return handleGet(context, req, supabase, user.id);
   }
 
   if (method === 'GET' && tail.length === 1 && tail[0] === 'incoming') {
-    return handleIncoming(context, controlApi, user, authorization.header);
+    return handleIncoming(context, supabase, user);
   }
 
   if (method === 'POST' && (!tail.length || tail[0] === '')) {
-    return handlePost(context, req, controlApi, user, env);
+    return handlePost(context, req, supabase, user, env);
   }
 
   if (method === 'POST' && tail.length === 2 && tail[1] === 'accept') {
-    return handleAccept(context, controlApi, user, authorization.header, tail[0]);
+    return handleAccept(context, supabase, user, tail[0]);
   }
 
   if (method === 'POST' && tail.length === 2 && tail[1] === 'decline') {
-    return handleDecline(context, controlApi, user, authorization.header, tail[0]);
+    return handleDecline(context, supabase, user, tail[0]);
   }
 
   if (method === 'DELETE' && tail.length === 1 && tail[0]) {
-    return handleRevoke(context, controlApi, user.id, authorization.header, tail[0]);
+    return handleRevoke(context, supabase, user.id, tail[0]);
   }
 
   return respond(context, 405, { message: 'method_not_allowed' }, { Allow: 'GET, POST, DELETE' });

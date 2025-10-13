@@ -1,7 +1,7 @@
 # תיק פרויקט: מערכת ניהול שכר ועובדים
 
-**גרסה: 1.7.8**
-**תאריך עדכון אחרון: 2025-10-14**
+**גרסה: 1.7.9**
+**תאריך עדכון אחרון: 2025-10-15**
 
 ## 1. חזון ומטרה
 
@@ -68,7 +68,7 @@
   - `GET /api/invitations/token/<token>` — זמין גם ללא התחברות. מחזיר פרטי הזמנה (אימייל, ארגון, תפוגה) כדי שאפשר יהיה להציג את עמוד הקבלה גם למשתמש אנונימי. אם נשלח Bearer, מתקבלות מטא-נתונים נוספים.
   - `POST /api/invitations/{invitationId}/accept` — דורש התחברות. בודק שהאימייל שב-session תואם להזמנה, מעדכן את סטטוס ההזמנה ומוסיף חברות ל-`org_memberships`.
 - **שילוב Frontend:** `InviteUserForm.jsx` ו-`OrgMembersCard.jsx` המעודכן משתמשים ב-`src/api/invitations.js` לשליחת הזמנות ולהצגת רשימת ההמתנה עם תגים ידידותיים ומצבי טעינה/שגיאה ברורים. רכיב `src/components/pages/AcceptInvitePage.jsx` מפעיל את הנתיב `/accept-invite`, טוען הזמנות לפי טוקן, מציג מסכי אנונימי/מתחבר/חוסר התאמה, ומפעיל את נקודת הקצה המאובטחת לקבלת ההזמנה לפני רענון `OrgContext` וניווט ללוח הבקרה.
-- **תצורה:** קישור ההזמנה נבנה מהערך הראשון שאינו ריק מתוך אחד המשתנים `APP_PUBLIC_URL`, `APP_BASE_URL`, `APP_SITE_URL`, `APP_WEB_URL`, `APP_DESKTOP_URL`, `APP_URL`, `PUBLIC_APP_URL` או `PUBLIC_URL`. יש להגדיר אחד מהם לכתובת ה-SPA (למשל `https://yourapp.com`).
+- **תצורה:** קישור ההזמנה נבנה מהערך הראשון שאינו ריק מתוך אחד המשתנים `APP_PUBLIC_URL`, `APP_BASE_URL`, `APP_SITE_URL`, `APP_WEB_URL`, `APP_DESKTOP_URL`, `APP_URL`, `PUBLIC_APP_URL` או `PUBLIC_URL`. יש להגדיר אחד מהם לכתובת ה-SPA (למשל `https://yourapp.com`). פונקציית Azure מתחברת ישירות ל-Control DB באמצעות מפתח השירות של Supabase המוגדר במשתנים `APP_CONTROL_DB_URL` ו-`APP_CONTROL_DB_SERVICE_ROLE_KEY`.
 - **אבטחה:** כל בדיקות ההרשאות ושליחת הדוא"ל מתבצעות בצד השרת. הטוקן אינו נכלל בתגובות ה-API כדי למנוע דליפה דרך לוח הניהול; הוא נשלח רק בדוא"ל למוזמן.
 
 ---
