@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.7.5**
-**Last Updated: 2025-10-15**
+**Version: 1.9.0**
+**Last Updated: 2025-10-20**
 
 ## 1. Vision & Purpose
 
@@ -58,6 +58,24 @@ The system is built on a modern client-server architecture, packaged as a standa
 - **Key Decryption:** Using the server-side secret `APP_ORG_CREDENTIALS_ENCRYPTION_KEY`, the function decrypts the dedicated key and creates a privileged `tenantClient` scoped to the tenant’s Data DB with the `app_user` role.
 - **Database Action:** All reads and writes execute through this server-only `tenantClient`. The function performs the requested query (e.g., selecting ordered services or inserting work sessions) and captures any errors.
 - **Response:** The function returns a JSON payload to the frontend, translating Supabase errors into standardized API messages. The UI never holds the dedicated key nor performs direct writes, ensuring RLS and auditing remain intact.
+
+### 2.3. Organization Invitations API
+
+- The Azure Function at `/api/invitations` is the single entry point for creating, listing, validating, and actioning organization invites.
+- It instantiates a Supabase admin client with `APP_CONTROL_DB_URL` and `APP_CONTROL_DB_SERVICE_ROLE_KEY`, validates the caller’s JWT, and re-checks membership/role directly against `org_memberships` before performing any write.
+- `POST /api/invitations` accepts `{ orgId, email, expiresAt?, redirectTo?, emailData? }` from admins/owners, blocks duplicates or existing members, inserts a row into `org_invitations`, and then calls `supabase.auth.admin.inviteUserByEmail` with metadata `{ orgId, orgName, invitationId, invitationToken }`.
+- `GET /api/invitations` (admin-only) filters pending rows for the requested organization, auto-expires rows whose `expires_at` has passed, and returns sanitized invitation records.
+- `GET /api/invitations/token/:token` exposes a public lookup that verifies the token, checks expiry, and returns `{ orgName, email, status }` without leaking sensitive fields.
+- `POST /api/invitations/:id/accept` requires the invitee’s authenticated email to match the invitation, upserts an `org_memberships` row with role `member`, and marks the invite as `accepted`.
+- `POST /api/invitations/:id/decline` verifies the caller and flips the status to `declined`; `DELETE /api/invitations/:id` allows admins to revoke pending invites.
+- Status lifecycle: `pending` → (`accepted` | `declined` | `revoked` | `expired` | `failed`). Expired invites are updated server-side before responses so the UI never shows stale entries.
+
+### 2.4. Settings → Org Members Invitation UI
+
+- `src/api/invitations.js` wraps the Azure Function endpoints with `createInvitation`, `listPendingInvitations`, and `revokeInvitation`, validating UUIDs/emails and surfacing localized error messages when requests fail.
+- `OrgMembersCard.jsx` now loads pending invitations on mount, surfaces loading/error/empty states, and refreshes the list after every create or revoke action. Abort signals prevent state updates when the component unmounts.
+- Admins and owners see the invite form (with an accessible email label) and the pending list; members keep a read-only view of active users. Successful sends and revocations raise green toasts, while validation or network issues produce red toasts.
+- The pending list displays email, send date, and current status badge alongside a revoke button that enters a temporary "מבטל..." state while awaiting the API response.
 
 ---
 

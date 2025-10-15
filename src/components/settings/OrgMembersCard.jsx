@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,7 @@ import { AlertTriangle, MailPlus, Trash2, UserMinus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
+import { createInvitation, listPendingInvitations, revokeInvitation as revokeInvitationRequest } from '@/api/invitations.js';
 
 function formatDate(isoString) {
   if (!isoString) return '';
@@ -23,39 +24,108 @@ function formatDate(isoString) {
 }
 
 export default function OrgMembersCard() {
-  const { activeOrg, members, pendingInvites, inviteMember, revokeInvite, removeMember } = useOrg();
-  const { user } = useAuth();
+  const { activeOrg, members, removeMember } = useOrg();
+  const { user, session } = useAuth();
   const [email, setEmail] = useState('');
   const [isInviting, setIsInviting] = useState(false);
-  const isAdmin = activeOrg?.membership?.role === 'admin';
+  const [pendingInvites, setPendingInvites] = useState([]);
+  const [isInvitesLoading, setIsInvitesLoading] = useState(false);
+  const [invitesError, setInvitesError] = useState(null);
+  const [revokingId, setRevokingId] = useState(null);
+  const activeOrgId = activeOrg?.id || null;
+  const role = activeOrg?.membership?.role || '';
+  const canManageOrgMembers = useMemo(() => {
+    if (typeof role !== 'string') {
+      return false;
+    }
+    const normalizedRole = role.toLowerCase();
+    return normalizedRole === 'admin' || normalizedRole === 'owner';
+  }, [role]);
 
-  if (!activeOrg) {
-    return null;
-  }
+  const refreshInvitations = useCallback(
+    async ({ signal, suppressToast } = {}) => {
+      if (!canManageOrgMembers || !activeOrgId) {
+        setPendingInvites([]);
+        setInvitesError(null);
+        return;
+      }
+      if (!session) {
+        setInvitesError('נדרש חיבור כדי לטעון הזמנות.');
+        return;
+      }
+
+      setIsInvitesLoading(true);
+      setInvitesError(null);
+      try {
+        const invitations = await listPendingInvitations(activeOrgId, { session, signal });
+        if (!signal?.aborted) {
+          setPendingInvites(invitations);
+        }
+      } catch (error) {
+        if (error?.name === 'AbortError') {
+          return;
+        }
+        const message = error?.message || 'טעינת ההזמנות נכשלה. נסה שוב.';
+        if (!signal?.aborted) {
+          setInvitesError(message);
+          if (!suppressToast) {
+            toast.error(message);
+          }
+        }
+      } finally {
+        if (!signal?.aborted) {
+          setIsInvitesLoading(false);
+        }
+      }
+    },
+    [activeOrgId, canManageOrgMembers, session],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    refreshInvitations({ signal: controller.signal, suppressToast: true });
+    return () => {
+      controller.abort();
+    };
+  }, [refreshInvitations]);
 
   const handleInvite = async (event) => {
     event.preventDefault();
-    if (!isAdmin || !email.trim()) return;
+    if (!canManageOrgMembers || !email.trim()) return;
+    if (!session) {
+      toast.error('נדרש חיבור לחשבון כדי לשלוח הזמנה.');
+      return;
+    }
 
     setIsInviting(true);
     try {
-      await inviteMember(activeOrg.id, email.trim());
+      await createInvitation(activeOrgId, email.trim(), { session });
+      toast.success('ההזמנה נשלחה בהצלחה.');
       setEmail('');
+      await refreshInvitations({ suppressToast: true });
     } catch (error) {
       console.error('Failed to send invitation', error);
-      toast.error('שליחת ההזמנה נכשלה. ודא שהכתובת תקינה ונסה שוב.');
+      toast.error(error?.message || 'שליחת ההזמנה נכשלה. ודא שהכתובת תקינה ונסה שוב.');
     } finally {
       setIsInviting(false);
     }
   };
 
   const handleRevoke = async (inviteId) => {
+    if (!inviteId || !session) {
+      toast.error('לא ניתן לבטל הזמנה ללא התחברות.');
+      return;
+    }
+    setRevokingId(inviteId);
     try {
-      await revokeInvite(inviteId);
+      await revokeInvitationRequest(inviteId, { session });
       toast.success('ההזמנה בוטלה.');
+      await refreshInvitations({ suppressToast: true });
     } catch (error) {
       console.error('Failed to revoke invite', error);
-      toast.error('לא ניתן לבטל את ההזמנה. נסה שוב.');
+      toast.error(error?.message || 'לא ניתן לבטל את ההזמנה. נסה שוב.');
+    } finally {
+      setRevokingId(null);
     }
   };
 
@@ -68,6 +138,10 @@ export default function OrgMembersCard() {
       toast.error('הסרת החבר נכשלה.');
     }
   };
+
+  if (!activeOrg) {
+    return null;
+  }
 
   return (
     <Card className="border-0 shadow-xl bg-white/90" dir="rtl">
@@ -104,7 +178,7 @@ export default function OrgMembersCard() {
                       ) : null}
                     </div>
                   </div>
-                  {isAdmin && !isCurrentUser ? (
+                  {canManageOrgMembers && !isCurrentUser ? (
                     <Button
                       type="button"
                       variant="ghost"
@@ -127,18 +201,23 @@ export default function OrgMembersCard() {
           </div>
         </section>
 
-        {isAdmin ? (
+        {canManageOrgMembers ? (
           <section className="space-y-3">
             <h3 className="text-sm font-semibold text-slate-700">הזמן חבר חדש</h3>
             <form className="flex flex-col md:flex-row gap-3" onSubmit={handleInvite}>
-              <Input
-                type="email"
-                dir="ltr"
-                placeholder="manager@example.com"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
-                required
-              />
+              <div className="flex-1">
+                <label htmlFor="invite-email" className="sr-only">אימייל להזמנה</label>
+                <Input
+                  id="invite-email"
+                  type="email"
+                  dir="ltr"
+                  className="w-full"
+                  placeholder="manager@example.com"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  required
+                />
+              </div>
               <Button type="submit" className="gap-2" disabled={isInviting}>
                 {isInviting ? 'שולח...' : (
                   <>
@@ -151,11 +230,18 @@ export default function OrgMembersCard() {
           </section>
         ) : null}
 
-        {isAdmin ? (
+        {canManageOrgMembers ? (
           <section className="space-y-3">
             <h3 className="text-sm font-semibold text-slate-700">הזמנות ממתינות</h3>
             <div className="space-y-3">
-              {pendingInvites?.length ? (
+              {isInvitesLoading ? (
+                <p className="text-xs text-slate-500" role="status">טוען הזמנות...</p>
+              ) : invitesError ? (
+                <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2" role="alert">
+                  <AlertTriangle className="w-4 h-4" aria-hidden="true" />
+                  <span>{invitesError}</span>
+                </div>
+              ) : pendingInvites?.length ? (
                 pendingInvites.map((invite) => (
                   <div
                     key={invite.id}
@@ -163,16 +249,22 @@ export default function OrgMembersCard() {
                   >
                     <div className="text-right space-y-1">
                       <p className="text-sm font-medium text-slate-900" dir="ltr">{invite.email}</p>
-                      <p className="text-xs text-slate-500">נשלח: {formatDate(invite.created_at)}</p>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                        <span>נשלח: {formatDate(invite.createdAt || invite.created_at)}</span>
+                        <Badge variant="outline" className="text-slate-600 border-slate-200 bg-slate-50">
+                          {invite.status === 'pending' ? 'ממתין' : invite.status}
+                        </Badge>
+                      </div>
                     </div>
                     <Button
                       type="button"
                       variant="ghost"
                       className="text-slate-600 hover:bg-slate-100 gap-2"
                       onClick={() => handleRevoke(invite.id)}
+                      disabled={revokingId === invite.id}
                     >
                       <Trash2 className="w-4 h-4" />
-                      בטל הזמנה
+                      {revokingId === invite.id ? 'מבטל...' : 'בטל הזמנה'}
                     </Button>
                   </div>
                 ))
