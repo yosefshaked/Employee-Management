@@ -1,7 +1,8 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.10.0**
-**Last Updated: 2025-10-21**
+
+**Version: 1.9.0**
+**Last Updated: 2025-10-15**
 
 ## 1. Vision & Purpose
 
