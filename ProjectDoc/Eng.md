@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.9.0**
-**Last Updated: 2025-10-20**
+**Version: 1.10.0**
+**Last Updated: 2025-10-21**
 
 ## 1. Vision & Purpose
 
@@ -76,6 +76,13 @@ The system is built on a modern client-server architecture, packaged as a standa
 - `OrgMembersCard.jsx` now loads pending invitations on mount, surfaces loading/error/empty states, and refreshes the list after every create or revoke action. Abort signals prevent state updates when the component unmounts.
 - Admins and owners see the invite form (with an accessible email label) and the pending list; members keep a read-only view of active users. Successful sends and revocations raise green toasts, while validation or network issues produce red toasts.
 - The pending list displays email, send date, and current status badge alongside a revoke button that enters a temporary "מבטל..." state while awaiting the API response.
+
+### 2.5. Invitation Registration Completion Flow
+
+- Invitation emails now deep-link new users to `/#/complete-registration?token_hash=<supabase>&invitation_token=<internal>`, which renders the dedicated **CompleteRegistrationPage** component.
+- On mount the page parses `token_hash` and immediately calls `supabase.auth.verifyOtp({ type: 'invite', token_hash })` through the shared auth client. A successful response establishes the Supabase session so the user is fully authenticated before interacting with the form.
+- After verification the UI presents a branded password form (new password + confirmation). Client-side validation enforces non-empty fields and matching values before calling `supabase.auth.updateUser({ password })`.
+- Once the password is saved the app automatically redirects to `/#/accept-invite`, forwarding the `invitation_token` query parameter so the organization invitation flow can finalize acceptance without re-fetching control-plane metadata.
 
 ---
 
