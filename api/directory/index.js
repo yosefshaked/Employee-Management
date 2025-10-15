@@ -1,6 +1,6 @@
 /* eslint-env node */
 import process from 'node:process';
-import { json, resolveBearerAuthorization } from '../_shared/http.js';
+import { json, resolveHeaderValue } from '../_shared/http.js';
 import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -31,6 +31,32 @@ function normalizeUuid(value) {
     return null;
   }
   return UUID_PATTERN.test(candidate) ? candidate : null;
+}
+
+function extractBearerToken(rawValue) {
+  if (!rawValue) {
+    return null;
+  }
+
+  const segments = String(rawValue)
+    .split(',')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  for (const segment of segments) {
+    if (segment.toLowerCase().startsWith('bearer ')) {
+      const token = segment.slice('bearer '.length).trim();
+      if (token) {
+        return token;
+      }
+    }
+
+    if (!segment.includes(' ')) {
+      return segment;
+    }
+  }
+
+  return null;
 }
 
 function deriveNameFromMetadata(metadata) {
@@ -180,8 +206,23 @@ async function fetchProfileMap(context, supabase, members) {
 export default async function (context, req) {
   context.log?.info?.('directory API invoked');
 
-  const authorization = resolveBearerAuthorization(req);
-  if (!authorization?.token) {
+  const headerCandidates = [
+    'X-Supabase-Authorization',
+    'x-supabase-auth',
+    'Authorization',
+  ];
+
+  let bearerToken = null;
+  for (const headerName of headerCandidates) {
+    const rawValue = resolveHeaderValue(req, headerName);
+    const candidate = extractBearerToken(rawValue);
+    if (candidate) {
+      bearerToken = candidate;
+      break;
+    }
+  }
+
+  if (!bearerToken) {
     context.log?.warn?.('directory missing bearer token');
     return respond(context, 401, { message: 'missing bearer' });
   }
@@ -197,7 +238,7 @@ export default async function (context, req) {
 
   let authResult;
   try {
-    authResult = await supabase.auth.getUser(authorization.token);
+    authResult = await supabase.auth.getUser(bearerToken);
   } catch (error) {
     context.log?.error?.('directory failed to validate token', { message: error?.message });
     return respond(context, 401, { message: 'invalid or expired token' });
