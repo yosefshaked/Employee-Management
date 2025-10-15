@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.11.0**
-**Last Updated: 2025-10-22**
+**Version: 1.11.1**
+**Last Updated: 2025-10-15**
 
 ## 1. Vision & Purpose
 
@@ -76,6 +76,7 @@ The system is built on a modern client-server architecture, packaged as a standa
 - `OrgMembersCard.jsx` now loads pending invitations on mount, surfaces loading/error/empty states, and refreshes the list after every create or revoke action. Abort signals prevent state updates when the component unmounts.
 - Admins and owners see the invite form (with an accessible email label) and the pending list; members keep a read-only view of active users. Successful sends and revocations raise green toasts, while validation or network issues produce red toasts.
 - The pending list displays email, send date, and current status badge alongside a revoke button that enters a temporary "מבטל..." state while awaiting the API response.
+- A dedicated Azure Function at `GET /api/directory` now verifies the caller's membership with the service-role client before returning the full organization roster and pending invites so the OrgContext refresh instantly reflects new members.
 
 ### 2.5. Invitation Registration Completion Flow
 

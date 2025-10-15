@@ -10,6 +10,7 @@ This project is a Vite + React application for managing employees, work sessions
 - Admins and owners can send invites from **Settings → Org Members**, which surfaces a toast-enabled form, loads pending invitations on mount, and lets them revoke invites with inline loading states while members see a read-only directory.
 - Invitation emails now send new users to the branded `/#/complete-registration` flow, which verifies the Supabase invite token, collects a new password, and forwards the original `invitation_token` to `/#/accept-invite` for final acceptance.
 - The `/#/accept-invite` experience validates the invitation token, surfaces login/registration calls to action when no session exists, blocks mismatched accounts until they sign out, and lets the correct user accept (redirecting to the Dashboard) or decline the invite via the secure `/api/invitations` endpoints.
+- The organization directory inside **Settings → Org Members** now hydrates via the privileged `/api/directory` endpoint so every acceptance immediately reflects the full roster and pending invites without requiring a manual reload.
 
 ## Local development
 
