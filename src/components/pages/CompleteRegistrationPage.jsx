@@ -2,29 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { LockKeyhole, ShieldCheck } from 'lucide-react';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
-
-const INVITATION_TOKEN_KEYS = ['invitation_token', 'invitationToken', 'invite_token', 'inviteToken'];
-
-function extractTokens(search) {
-  const params = new URLSearchParams(search);
-  const tokenHash = params.get('token_hash') ?? params.get('tokenHash') ?? '';
-
-  let invitationTokenKey = null;
-  let invitationTokenValue = '';
-  for (const key of INVITATION_TOKEN_KEYS) {
-    if (params.has(key)) {
-      invitationTokenKey = key;
-      invitationTokenValue = params.get(key) ?? '';
-      break;
-    }
-  }
-
-  return {
-    tokenHash,
-    invitationTokenKey,
-    invitationTokenValue,
-  };
-}
+import { buildInvitationSearch, extractRegistrationTokens } from '@/lib/invite-tokens.js';
 
 export default function CompleteRegistrationPage() {
   const location = useLocation();
@@ -32,7 +10,7 @@ export default function CompleteRegistrationPage() {
   const { authClient } = useSupabase();
 
   const { tokenHash, invitationTokenKey, invitationTokenValue } = useMemo(
-    () => extractTokens(location.search),
+    () => extractRegistrationTokens(location.search),
     [location.search],
   );
 
@@ -127,12 +105,8 @@ export default function CompleteRegistrationPage() {
         throw error;
       }
 
-      const redirectParams = new URLSearchParams();
-      if (invitationTokenValue) {
-        redirectParams.set(invitationTokenKey ?? 'invitation_token', invitationTokenValue);
-      }
-      const search = redirectParams.toString();
-      navigate(`/accept-invite${search ? `?${search}` : ''}`, { replace: true });
+      const search = buildInvitationSearch(invitationTokenValue, invitationTokenKey);
+      navigate(`/accept-invite${search}`, { replace: true });
     } catch (error) {
       console.error('Failed to set password during registration completion', error);
       setSubmissionError('שמירת הסיסמה נכשלה. נסה שוב או פנה לתמיכה.');

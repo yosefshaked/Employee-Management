@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.10.0**
-**Last Updated: 2025-10-21**
+**Version: 1.11.0**
+**Last Updated: 2025-10-22**
 
 ## 1. Vision & Purpose
 
@@ -83,6 +83,14 @@ The system is built on a modern client-server architecture, packaged as a standa
 - On mount the page parses `token_hash` and immediately calls `supabase.auth.verifyOtp({ type: 'invite', token_hash })` through the shared auth client. A successful response establishes the Supabase session so the user is fully authenticated before interacting with the form.
 - After verification the UI presents a branded password form (new password + confirmation). Client-side validation enforces non-empty fields and matching values before calling `supabase.auth.updateUser({ password })`.
 - Once the password is saved the app automatically redirects to `/#/accept-invite`, forwarding the `invitation_token` query parameter so the organization invitation flow can finalize acceptance without re-fetching control-plane metadata.
+
+### 2.6. Invitation Acceptance Experience
+
+- The `/components/pages/AcceptInvitePage.jsx` module orchestrates the secure acceptance flow at `/#/accept-invite`.
+- On mount it parses the `invitation_token`, fetches the invitation via `getInvitationByToken(token)`, and displays branded loading and error states while handling expired or invalid links.
+- Scenario A (no active Supabase session): the page surfaces the organization name, invitation email, and provides "Log In" and "Complete Registration" buttons that preserve the invitation token when redirecting to the relevant routes.
+- Scenario B (active session, matching email): the app enables "Accept" and "Decline" actions wired to `acceptInvitation` / `declineInvitation`, shows localized API errors, and on success either redirects to the Dashboard (accept) or confirms the decline.
+- Scenario C (active session, mismatched email): a warning banner instructs the user to sign out. The "Switch Account" button calls `signOut` and redirects back to `/login` with contextual guidance while retaining the invitation token.
 
 ---
 
