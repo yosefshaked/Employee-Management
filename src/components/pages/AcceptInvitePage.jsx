@@ -4,6 +4,7 @@ import { AlertCircle, Building2, Check, Loader2, LogIn, LogOut, ShieldCheck, Use
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { acceptInvitation, declineInvitation, getInvitationByToken } from '@/api/invitations.js';
 import { buildInvitationSearch, extractRegistrationTokens } from '@/lib/invite-tokens.js';
+import { useOrg } from '@/org/OrgContext.jsx';
 
 const STATUS_LOADING = 'loading';
 const STATUS_ERROR = 'error';
@@ -13,6 +14,7 @@ export default function AcceptInvitePage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { status: authStatus, session, user, signOut } = useAuth();
+  const { refreshOrganizations, selectOrg } = useOrg();
 
   const { tokenHash, invitationTokenKey, invitationTokenValue } = useMemo(
     () => extractRegistrationTokens(location.search),
@@ -88,6 +90,15 @@ export default function AcceptInvitePage() {
     setActionState('accepting');
     try {
       await acceptInvitation(invitation.id, { session });
+      const newOrgId = invitation?.orgId || null;
+      try {
+        await refreshOrganizations();
+        if (newOrgId) {
+          await selectOrg(newOrgId);
+        }
+      } catch (refreshError) {
+        console.error('Failed to refresh organizations after accepting invite', refreshError);
+      }
       setDecision('accepted');
       navigate('/Dashboard', { replace: true });
     } catch (error) {
