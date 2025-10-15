@@ -8,6 +8,7 @@ This project is a Vite + React application for managing employees, work sessions
 - Creating leave from Time Entry always writes both a `WorkSessions` row and a linked `LeaveBalances` ledger entry (`work_session_id`), and the secure API keeps the two tables synchronized on delete/restore actions.
 - Organization invitations (sending, listing, accepting, declining, and revoking) flow through the privileged Azure Function at `/api/invitations`, which validates admin permissions against `org_memberships`, auto-expires stale rows, and updates statuses (`pending`, `accepted`, `declined`, `revoked`, `expired`, `failed`).
 - Admins and owners can send invites from **Settings → Org Members**, which surfaces a toast-enabled form, loads pending invitations on mount, and lets them revoke invites with inline loading states while members see a read-only directory.
+- Invitees landing on `/#/accept-invite?token=...` are guided through the Accept Invitation page, which validates tokens anonymously, prompts unauthenticated users to sign in or create an account, matches authenticated emails to the invite, and issues `accept`/`decline` actions through the secure API before refreshing organization context.
 
 ## Local development
 

@@ -37,4 +37,5 @@
 - The Employees → Vacations & Holidays tab is read-only; use the Time Entry flow for any leave creation or adjustments and rely on the collapsible history rows for review.
 - Reports CSV export (`Reports.jsx`) now uses `buildCsvRows` with the column order defined in `CSV_HEADERS`; update that helper when adding or reordering export columns.
 - `/api/invitations` is the control-plane API for organization invites. It uses `APP_CONTROL_DB_URL` and `APP_CONTROL_DB_SERVICE_ROLE_KEY` for the Supabase admin client, enforces admin/owner membership before writes, auto-expires pending rows once `expires_at` passes, and updates statuses to `accepted`, `declined`, `revoked`, `expired`, or `failed`.
+- The Accept Invitation flow lives at `src/components/pages/AcceptInvitePage.jsx` with the public route `/#/accept-invite?token=...`. The page must rely on the helpers in `src/api/invitations.js` for token lookup, accept, and decline actions and should redirect to `/Dashboard` after a successful acceptance.
 

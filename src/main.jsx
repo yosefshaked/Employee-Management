@@ -15,6 +15,7 @@ import { SupabaseProvider } from './context/SupabaseContext.jsx';
 import { isAuthClientInitialized } from './lib/supabase-manager.js';
 import Diagnostics from './runtime/Diagnostics.jsx';
 import Login from './Pages/Login.jsx';
+import AcceptInvitePage from './components/pages/AcceptInvitePage.jsx';
 import { AuthProvider } from './auth/AuthContext.jsx';
 import AuthGuard from './auth/AuthGuard.jsx';
 import { OrgProvider } from './org/OrgContext.jsx';
@@ -30,6 +31,7 @@ function App({ config = null }) {
             <HashRouter>
               <Routes>
                 <Route path="/login" element={<Login />} />
+                <Route path="/accept-invite" element={<AcceptInvitePage />} />
                 <Route element={<AuthGuard />}>
                   <Route path="/select-org" element={<OrgSelection />} />
                   <Route element={<Layout />}>

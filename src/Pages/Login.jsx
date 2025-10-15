@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { LogIn, Mail, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
@@ -12,11 +12,20 @@ export default function Login() {
   const [oauthInFlight, setOauthInFlight] = useState(null);
   const location = useLocation();
 
-  const redirectPath = location.state?.from?.pathname || '/Dashboard';
+  const redirectSource = location.state?.from;
+  const redirectPath = redirectSource?.pathname
+    ? `${redirectSource.pathname}${redirectSource.search || ''}${redirectSource.hash || ''}`
+    : '/Dashboard';
   const redirectMessage = location.state?.message || null;
+  const redirectState = useMemo(() => {
+    if (!location.state?.inviteToken) {
+      return undefined;
+    }
+    return { inviteToken: location.state.inviteToken };
+  }, [location.state?.inviteToken]);
 
   if (status === 'ready' && session) {
-    return <Navigate to={redirectPath} replace />;
+    return <Navigate to={redirectPath} replace state={redirectState} />;
   }
 
   const handleEmailSignIn = async (event) => {

@@ -1,7 +1,7 @@
 # Project Documentation: Employee & Payroll Management System
 
-**Version: 1.9.0**
-**Last Updated: 2025-10-20**
+**Version: 1.10.0**
+**Last Updated: 2025-10-21**
 
 ## 1. Vision & Purpose
 
@@ -72,10 +72,18 @@ The system is built on a modern client-server architecture, packaged as a standa
 
 ### 2.4. Settings → Org Members Invitation UI
 
-- `src/api/invitations.js` wraps the Azure Function endpoints with `createInvitation`, `listPendingInvitations`, and `revokeInvitation`, validating UUIDs/emails and surfacing localized error messages when requests fail.
+- `src/api/invitations.js` wraps the Azure Function endpoints with `createInvitation`, `listPendingInvitations`, `revokeInvitation`, and the Accept Invite page helpers `getInvitationByToken`, `acceptInvitation`, `declineInvitation`. Each helper validates identifiers/emails and emits localized error messaging when requests fail.
 - `OrgMembersCard.jsx` now loads pending invitations on mount, surfaces loading/error/empty states, and refreshes the list after every create or revoke action. Abort signals prevent state updates when the component unmounts.
 - Admins and owners see the invite form (with an accessible email label) and the pending list; members keep a read-only view of active users. Successful sends and revocations raise green toasts, while validation or network issues produce red toasts.
 - The pending list displays email, send date, and current status badge alongside a revoke button that enters a temporary "מבטל..." state while awaiting the API response.
+
+### 2.5. Accept Invitation Page
+
+- Route: `/#/accept-invite?token=...` renders `src/components/pages/AcceptInvitePage.jsx`, allowing invitees to complete the onboarding flow straight from their email link.
+- On mount the page parses the invite token, calls `getInvitationByToken`, and shows a spinner until the response resolves. Invalid, expired, or revoked tokens render an accessible error card with guidance back to the login screen.
+- If no session is active the page displays the organization name and offers "Create a new account" and "Log in" buttons. Both push to `/login` while preserving the invite token via router state so the user returns to the accept page after authenticating.
+- When the authenticated email matches the invitation email, the UI exposes "Accept" and "Decline" buttons. Accept triggers `acceptInvitation`, refreshes memberships through `OrgContext.refreshOrganizations`, and redirects to the dashboard; decline records the refusal and routes the user back to their workspace.
+- If the logged-in email differs from the invitee email, the page blocks acceptance and offers a "Log Out" button that signs the user out and redirects them to `/login` with the preserved token so they can switch accounts.
 
 ---
 

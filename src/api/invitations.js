@@ -138,3 +138,95 @@ export async function revokeInvitation(invitationId, { session, signal } = {}) {
     throw error;
   }
 }
+
+export async function getInvitationByToken(token, { signal } = {}) {
+  const rawToken = typeof token === 'string' ? token.trim() : '';
+  if (!rawToken) {
+    throw new Error('קישור הזמנה חסר או שאינו תקין.');
+  }
+
+  const encodedToken = encodeURIComponent(rawToken);
+
+  try {
+    const response = await fetch(`/api/invitations/token/${encodedToken}`, {
+      method: 'GET',
+      signal,
+      headers: {
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      let serverMessage = '';
+      try {
+        const problem = await response.json();
+        serverMessage = typeof problem?.message === 'string' ? problem.message : '';
+      } catch {
+        serverMessage = '';
+      }
+      const message = serverMessage || 'ההזמנה אינה זמינה או שפג תוקפה.';
+      throw new Error(message);
+    }
+
+    const payload = await response.json();
+    const normalized = normalizeInvitationRecord(payload?.invitation ?? payload);
+    if (!normalized) {
+      throw new Error('השרת החזיר תגובה חסרה.');
+    }
+    return normalized;
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw error;
+    }
+    if (!error?.message) {
+      error.message = 'טעינת ההזמנה נכשלה. נסה שוב מאוחר יותר.';
+    }
+    throw error;
+  }
+}
+
+export async function acceptInvitation(invitationId, { session, signal } = {}) {
+  const activeSession = ensureSession(session);
+  const normalizedId = normalizeUuid(invitationId);
+  if (!normalizedId) {
+    throw new Error('חסר מזהה הזמנה לקבלה.');
+  }
+
+  try {
+    const response = await authenticatedFetch(`invitations/${normalizedId}/accept`, {
+      method: 'POST',
+      session: activeSession,
+      signal,
+    });
+    const normalized = normalizeInvitationRecord(response?.invitation ?? response);
+    return normalized;
+  } catch (error) {
+    if (!error?.message) {
+      error.message = 'אישור ההזמנה נכשל. בדוק את החשבון ונסה שוב.';
+    }
+    throw error;
+  }
+}
+
+export async function declineInvitation(invitationId, { session, signal } = {}) {
+  const activeSession = ensureSession(session);
+  const normalizedId = normalizeUuid(invitationId);
+  if (!normalizedId) {
+    throw new Error('חסר מזהה הזמנה לדחייה.');
+  }
+
+  try {
+    const response = await authenticatedFetch(`invitations/${normalizedId}/decline`, {
+      method: 'POST',
+      session: activeSession,
+      signal,
+    });
+    const normalized = normalizeInvitationRecord(response?.invitation ?? response);
+    return normalized;
+  } catch (error) {
+    if (!error?.message) {
+      error.message = 'דחיית ההזמנה נכשלה. נסה שוב מאוחר יותר.';
+    }
+    throw error;
+  }
+}
