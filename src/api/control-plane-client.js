@@ -32,40 +32,14 @@ function buildUrl(path, params = {}) {
   return url.toString();
 }
 
-function extractAccessToken(session) {
-  if (!session || typeof session !== 'object') {
-    return null;
-  }
-
-  if (typeof session.access_token === 'string' && session.access_token.length > 0) {
-    return session.access_token;
-  }
-
-  if (
-    session.session
-    && typeof session.session === 'object'
-    && typeof session.session.access_token === 'string'
-    && session.session.access_token.length > 0
-  ) {
-    return session.session.access_token;
-  }
-
-  return null;
-}
-
-async function resolveAccessToken(client, providedSession) {
-  const directToken = extractAccessToken(providedSession);
-  if (directToken) {
-    return directToken;
-  }
-
+async function resolveAccessToken(client) {
   const { data, error } = await client.auth.getSession();
   if (error) {
     const sessionError = new Error('טעינת ההרשאות נכשלה. התחבר מחדש ונסה שוב.');
     sessionError.cause = error;
     throw sessionError;
   }
-  const token = extractAccessToken(data?.session);
+  const token = data?.session?.access_token;
   if (!token) {
     throw new Error('נדרש חיבור פעיל כדי לבצע פעולה זו. התחבר מחדש ונסה שוב.');
   }
@@ -74,9 +48,9 @@ async function resolveAccessToken(client, providedSession) {
 
 function normalizeRequestOptions(options) {
   if (!options || typeof options !== 'object') {
-    return { params: {}, headers: undefined, signal: undefined, body: undefined, session: undefined };
+    return { params: {}, headers: undefined, signal: undefined, body: undefined };
   }
-  const knownKeys = new Set(['params', 'headers', 'signal', 'body', 'session']);
+  const knownKeys = new Set(['params', 'headers', 'signal', 'body']);
   const optionKeys = Object.keys(options);
   const containsKnownKey = optionKeys.some((key) => knownKeys.has(key));
   if (containsKnownKey) {
@@ -85,22 +59,15 @@ function normalizeRequestOptions(options) {
       headers: options.headers,
       signal: options.signal,
       body: options.body,
-      session: options.session,
     };
   }
-  return { params: options, headers: undefined, signal: undefined, body: undefined, session: undefined };
+  return { params: options, headers: undefined, signal: undefined, body: undefined };
 }
 
 async function authedRequest(method, path, options = {}) {
   const client = getAuthClient();
-  const {
-    params,
-    headers: customHeaders,
-    signal,
-    body,
-    session: providedSession,
-  } = normalizeRequestOptions(options);
-  const token = await resolveAccessToken(client, providedSession);
+  const { params, headers: customHeaders, signal, body } = normalizeRequestOptions(options);
+  const token = await resolveAccessToken(client);
   const url = buildUrl(path, params);
 
   const headers = new Headers(customHeaders || {});
