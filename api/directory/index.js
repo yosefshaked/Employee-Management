@@ -1,8 +1,29 @@
 /* eslint-env node */
+import process from 'node:process';
 import { json, resolveSupabaseAccessToken } from '../_shared/http.js';
-import { getControlPlaneAdminClient } from '../_shared/supabase-admin.js';
+import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function readEnv(context) {
+  if (context?.env && typeof context.env === 'object') {
+    return context.env;
+  }
+  return process.env ?? {};
+}
+
+function selectStringCandidate(source, key) {
+  if (!source || typeof source !== 'object') {
+    return '';
+  }
+
+  const value = source[key];
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+
+  return '';
+}
 
 function respond(context, status, body, extraHeaders = {}) {
   const response = json(status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
@@ -172,9 +193,20 @@ async function fetchProfileMap(context, supabase, members) {
 export default async function (context, req) {
   context.log?.info?.('directory API invoked');
 
-  const { client: supabase, config: adminConfig, error: adminError } = getControlPlaneAdminClient(context);
+  const env = readEnv(context);
+  const fallbackEnv = process.env ?? {};
+  const controlSupabaseUrl =
+    selectStringCandidate(env, 'APP_CONTROL_DB_URL') || selectStringCandidate(fallbackEnv, 'APP_CONTROL_DB_URL') || undefined;
+  const controlServiceRoleKey =
+    selectStringCandidate(env, 'APP_CONTROL_DB_SERVICE_ROLE_KEY') ||
+    selectStringCandidate(fallbackEnv, 'APP_CONTROL_DB_SERVICE_ROLE_KEY') ||
+    undefined;
 
-  if (!supabase || adminError || !adminConfig?.supabaseUrl) {
+  const adminConfig = readSupabaseAdminConfig(env, {
+    supabaseUrl: controlSupabaseUrl,
+    serviceRoleKey: controlServiceRoleKey,
+  });
+  if (!adminConfig.supabaseUrl || !adminConfig.serviceRoleKey) {
     context.log?.error?.('directory missing Supabase admin credentials');
     return respond(context, 500, { message: 'server_misconfigured' });
   }
@@ -187,6 +219,8 @@ export default async function (context, req) {
     context.log?.warn?.('directory missing Supabase bearer token');
     return respond(context, 401, { message: 'missing bearer' });
   }
+
+  const supabase = createSupabaseAdminClient(adminConfig);
 
   let authResult;
   try {

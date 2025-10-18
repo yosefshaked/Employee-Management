@@ -6,12 +6,6 @@ const FALLBACK_HEADERS = {
   Accept: 'application/json',
 };
 
-const CONTROL_URL_KEYS = ['APP_CONTROL_DB_URL', 'CONTROL_DB_URL'];
-const CONTROL_SERVICE_ROLE_KEYS = ['APP_CONTROL_DB_SERVICE_ROLE_KEY', 'CONTROL_DB_SERVICE_ROLE_KEY'];
-
-let cachedControlPlaneClient = null;
-let cachedControlPlaneConfig = null;
-
 function normalizeSource(source) {
   if (!source || typeof source !== 'object') {
     return {};
@@ -99,57 +93,4 @@ export function getSupabaseAdminClient(source, overrides, options) {
     return null;
   }
   return createSupabaseAdminClient(config, options);
-}
-
-function selectControlPlaneValue(candidate, keys) {
-  for (const key of keys) {
-    if (Object.prototype.hasOwnProperty.call(candidate, key) && typeof candidate[key] === 'string' && candidate[key].trim()) {
-      return candidate[key].trim();
-    }
-  }
-  return '';
-}
-
-function readControlPlaneAdminConfig(source = {}, overrides = {}) {
-  const mergedSource = normalizeSource(source);
-  const envSource = normalizeSource(process?.env);
-  const overrideSource = normalizeSource(overrides);
-
-  const supabaseUrl =
-    selectControlPlaneValue(overrideSource, ['supabaseUrl', ...CONTROL_URL_KEYS]) ||
-    selectControlPlaneValue(mergedSource, ['supabaseUrl', ...CONTROL_URL_KEYS]) ||
-    selectControlPlaneValue(envSource, ['supabaseUrl', ...CONTROL_URL_KEYS]) ||
-    '';
-
-  const serviceRoleKey =
-    selectControlPlaneValue(overrideSource, ['serviceRoleKey', ...CONTROL_SERVICE_ROLE_KEYS]) ||
-    selectControlPlaneValue(mergedSource, ['serviceRoleKey', ...CONTROL_SERVICE_ROLE_KEYS]) ||
-    selectControlPlaneValue(envSource, ['serviceRoleKey', ...CONTROL_SERVICE_ROLE_KEYS]) ||
-    '';
-
-  return {
-    supabaseUrl: supabaseUrl || null,
-    serviceRoleKey: serviceRoleKey || null,
-  };
-}
-
-export function getControlPlaneAdminClient(source, overrides, options) {
-  const config = readControlPlaneAdminConfig(source, overrides);
-
-  if (!config.supabaseUrl || !config.serviceRoleKey) {
-    return { client: null, config, error: new Error('missing_control_plane_credentials') };
-  }
-
-  const hasDifferentConfig =
-    !cachedControlPlaneClient ||
-    !cachedControlPlaneConfig ||
-    cachedControlPlaneConfig.supabaseUrl !== config.supabaseUrl ||
-    cachedControlPlaneConfig.serviceRoleKey !== config.serviceRoleKey;
-
-  if (hasDifferentConfig) {
-    cachedControlPlaneClient = createSupabaseAdminClient(config, options);
-    cachedControlPlaneConfig = config;
-  }
-
-  return { client: cachedControlPlaneClient, config, error: null };
 }
