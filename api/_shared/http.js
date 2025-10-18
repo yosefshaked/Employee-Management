@@ -1,8 +1,63 @@
+import { Buffer } from 'node:buffer';
+
 const DEFAULT_AUTH_HEADER_NAMES = [
   'x-supabase-authorization',
   'x-supabase-auth',
   'authorization',
 ];
+
+function toBase64UrlString(segment) {
+  if (!segment) {
+    return '';
+  }
+
+  const normalized = segment.replace(/-/g, '+').replace(/_/g, '/');
+  const paddingNeeded = (4 - (normalized.length % 4)) % 4;
+  return normalized + '='.repeat(paddingNeeded);
+}
+
+function decodeJwtPayload(token) {
+  if (typeof token !== 'string') {
+    return null;
+  }
+
+  const segments = token.split('.');
+  if (segments.length < 2) {
+    return null;
+  }
+
+  try {
+    const payloadSegment = toBase64UrlString(segments[1]);
+    const json = Buffer.from(payloadSegment, 'base64').toString('utf8');
+    const payload = JSON.parse(json);
+    if (!payload || typeof payload !== 'object') {
+      return null;
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function extractHostname(value) {
+  if (!value || typeof value !== 'string') {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.hostname ? url.hostname.toLowerCase() : null;
+  } catch {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    if (/^[a-z0-9.-]+$/i.test(trimmed)) {
+      return trimmed.toLowerCase();
+    }
+    return null;
+  }
+}
 
 function normalizeHeaderValue(rawValue) {
   if (!rawValue) {
@@ -135,6 +190,81 @@ function readHeader(headers, name) {
     }
   }
   return null;
+}
+
+function collectHeaderValues(request, name) {
+  const values = [];
+  const visited = new Set();
+
+  function addValue(raw) {
+    const normalized = normalizeHeaderValue(raw);
+    if (typeof normalized !== 'string' || normalized.length === 0) {
+      return;
+    }
+    if (visited.has(normalized)) {
+      return;
+    }
+    visited.add(normalized);
+    values.push(normalized);
+  }
+
+  const direct = resolveHeaderValue(request, name);
+  if (direct) {
+    addValue(direct);
+  }
+
+  const headers = request?.headers;
+  if (headers && headers !== request) {
+    const nested = resolveHeaderValue(headers, name);
+    if (nested) {
+      addValue(nested);
+    }
+  }
+
+  const rawHeaders = request?.rawHeaders;
+  if (Array.isArray(rawHeaders)) {
+    for (let index = 0; index < rawHeaders.length - 1; index += 2) {
+      const rawName = rawHeaders[index];
+      if (typeof rawName !== 'string') {
+        continue;
+      }
+      if (rawName.toLowerCase() !== String(name).toLowerCase()) {
+        continue;
+      }
+      addValue(rawHeaders[index + 1]);
+    }
+  }
+
+  return values;
+}
+
+function extractBearerTokens(rawValue) {
+  const normalized = normalizeHeaderValue(rawValue);
+  if (typeof normalized !== 'string') {
+    return [];
+  }
+
+  const tokens = [];
+  const segments = normalized
+    .split(',')
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  for (const segment of segments) {
+    if (segment.toLowerCase().startsWith('bearer ')) {
+      const token = segment.slice('bearer '.length).trim();
+      if (token) {
+        tokens.push(token);
+      }
+      continue;
+    }
+
+    if (!segment.includes(' ')) {
+      tokens.push(segment);
+    }
+  }
+
+  return tokens;
 }
 
 export function resolveHeaderValue(source, name) {
@@ -324,6 +454,50 @@ export function resolveBearerAuthorization(request) {
   }
 
   return null;
+}
+
+export function resolveSupabaseAccessToken(request, { supabaseUrl, headerNames = DEFAULT_AUTH_HEADER_NAMES } = {}) {
+  const expectedHost = extractHostname(supabaseUrl);
+  const names = Array.isArray(headerNames) && headerNames.length ? headerNames : DEFAULT_AUTH_HEADER_NAMES;
+
+  const candidateTokens = [];
+  const seenTokens = new Set();
+
+  for (const name of names) {
+    const headerValues = collectHeaderValues(request, name);
+    for (const headerValue of headerValues) {
+      const tokens = extractBearerTokens(headerValue);
+      for (const token of tokens) {
+        if (!token || seenTokens.has(token)) {
+          continue;
+        }
+        seenTokens.add(token);
+        candidateTokens.push({ token, headerName: name });
+      }
+    }
+  }
+
+  if (candidateTokens.length === 0) {
+    return null;
+  }
+
+  if (expectedHost) {
+    for (const candidate of candidateTokens) {
+      const payload = decodeJwtPayload(candidate.token);
+      if (!payload) {
+        continue;
+      }
+
+      const issuerHost = extractHostname(payload.iss);
+      const audienceHost = extractHostname(payload.aud);
+
+      if (issuerHost === expectedHost || audienceHost === expectedHost) {
+        return candidate.token;
+      }
+    }
+  }
+
+  return candidateTokens[0]?.token ?? null;
 }
 
 function ensureJsonSerializable(value) {
