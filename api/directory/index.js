@@ -12,6 +12,19 @@ function readEnv(context) {
   return process.env ?? {};
 }
 
+function selectStringCandidate(source, key) {
+  if (!source || typeof source !== 'object') {
+    return '';
+  }
+
+  const value = source[key];
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+
+  return '';
+}
+
 function respond(context, status, body, extraHeaders = {}) {
   const response = json(status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
   context.res = response;
@@ -181,7 +194,18 @@ export default async function (context, req) {
   context.log?.info?.('directory API invoked');
 
   const env = readEnv(context);
-  const adminConfig = readSupabaseAdminConfig(env);
+  const fallbackEnv = process.env ?? {};
+  const controlSupabaseUrl =
+    selectStringCandidate(env, 'APP_CONTROL_DB_URL') || selectStringCandidate(fallbackEnv, 'APP_CONTROL_DB_URL') || undefined;
+  const controlServiceRoleKey =
+    selectStringCandidate(env, 'APP_CONTROL_DB_SERVICE_ROLE_KEY') ||
+    selectStringCandidate(fallbackEnv, 'APP_CONTROL_DB_SERVICE_ROLE_KEY') ||
+    undefined;
+
+  const adminConfig = readSupabaseAdminConfig(env, {
+    supabaseUrl: controlSupabaseUrl,
+    serviceRoleKey: controlServiceRoleKey,
+  });
   if (!adminConfig.supabaseUrl || !adminConfig.serviceRoleKey) {
     context.log?.error?.('directory missing Supabase admin credentials');
     return respond(context, 500, { message: 'server_misconfigured' });
