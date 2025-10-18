@@ -157,6 +157,8 @@ export default function OrgMembersCard() {
           <div className="space-y-3">
             {(members || []).map((member) => {
               const isCurrentUser = member.user_id === user?.id;
+              const normalizedRole = typeof member.role === 'string' ? member.role.toLowerCase() : '';
+              const roleLabel = normalizedRole === 'admin' || normalizedRole === 'owner' ? 'מנהל' : 'חבר';
               return (
                 <div
                   key={member.id || member.user_id}
@@ -173,7 +175,7 @@ export default function OrgMembersCard() {
                       <span>הצטרף: {formatDate(member.joined_at)}</span>
                       {member.role ? (
                         <Badge variant="outline" className="text-blue-700 border-blue-200 bg-blue-50">
-                          {member.role === 'admin' ? 'מנהל' : 'חבר'}
+                          {roleLabel}
                         </Badge>
                       ) : null}
                     </div>

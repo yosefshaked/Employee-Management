@@ -14,7 +14,6 @@ import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.j
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { createOrganization as createOrganizationRpc } from '@/api/organizations.js';
 import { mapSupabaseError } from '@/org/errors.js';
-import { fetchCurrentUser } from '@/shared/api/user.ts';
 
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const LEGACY_STORAGE_PREFIX = 'employee-management:last-org';
@@ -125,40 +124,6 @@ function normalizeMember(record) {
     joined_at: record.joined_at || record.created_at || null,
     status: record.status || 'active',
   };
-}
-
-function isPlainObject(value) {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function deriveNameFromMetadata(metadata) {
-  if (!isPlainObject(metadata)) {
-    return null;
-  }
-
-  const trimmedFullName = typeof metadata.full_name === 'string' ? metadata.full_name.trim() : '';
-  if (trimmedFullName) {
-    return trimmedFullName;
-  }
-
-  const trimmedName = typeof metadata.name === 'string' ? metadata.name.trim() : '';
-  if (trimmedName) {
-    return trimmedName;
-  }
-
-  const given = typeof metadata.given_name === 'string' ? metadata.given_name.trim() : '';
-  const family = typeof metadata.family_name === 'string' ? metadata.family_name.trim() : '';
-  const combined = [given, family].filter(Boolean).join(' ');
-  if (combined) {
-    return combined;
-  }
-
-  const preferred = typeof metadata.preferred_username === 'string' ? metadata.preferred_username.trim() : '';
-  if (preferred) {
-    return preferred;
-  }
-
-  return null;
 }
 
 export function OrgProvider({ children }) {
@@ -338,83 +303,52 @@ export function OrgProvider({ children }) {
         return;
       }
 
-      if (!authClient) {
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        setOrgMembers([]);
+        setOrgInvites([]);
         return;
       }
 
       try {
-        const client = authClient;
-        const [membersResponse, invitesResponse] = await Promise.all([
-          client
-            .from('org_memberships')
-            .select('id, org_id, user_id, role, created_at')
-            .eq('org_id', orgId)
-            .order('created_at', { ascending: true }),
-          client
-            .from('org_invitations')
-            .select('id, org_id, email, status, invited_by, created_at, expires_at')
-            .eq('org_id', orgId)
-            .in('status', ['pending', 'sent'])
-            .order('created_at', { ascending: true }),
-        ]);
+        const params = new URLSearchParams({ orgId });
+        const response = await fetch(`/api/directory?${params.toString()}`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
 
-        if (membersResponse.error) throw membersResponse.error;
-        if (invitesResponse.error) throw invitesResponse.error;
+        const rawText = await response.text();
+        let payload = null;
 
-        const membersData = membersResponse.data || [];
-        const userIds = membersData.map((member) => member.user_id).filter(Boolean);
-        const profileMap = new Map();
-
-        if (userIds.length) {
-          const idSet = new Set(userIds);
-          const accessToken = session?.access_token || null;
-
-          if (accessToken) {
-            try {
-              const currentProfile = await fetchCurrentUser({ accessToken });
-              if (currentProfile?.id && idSet.has(currentProfile.id)) {
-                const metadata = currentProfile.raw_user_meta_data;
-                const derivedName = deriveNameFromMetadata(metadata) || currentProfile.email || null;
-
-                profileMap.set(currentProfile.id, {
-                  id: currentProfile.id,
-                  email: currentProfile.email || null,
-                  full_name: derivedName,
-                  name: derivedName,
-                });
-              }
-            } catch (profileError) {
-              console.warn('Failed to load current user profile via /api/users/me', profileError);
-            }
-          } else {
-            console.warn('Skipped /api/users/me profile fetch due to missing access token.');
+        if (rawText) {
+          try {
+            payload = JSON.parse(rawText);
+          } catch (parseError) {
+            console.error('Failed to parse /api/directory response', parseError);
           }
         }
 
-        const normalizedMembers = membersData
-          .map((member) => {
-            const profile = profileMap.get(member.user_id);
-            if (profile) {
-              return normalizeMember({
-                ...member,
-                profile,
-                profiles: profile,
-                user_profile: profile,
-              });
-            }
-            return normalizeMember(member);
-          })
-          .filter(Boolean);
+        if (!response.ok) {
+          const message = payload?.message || 'טעינת פרטי הארגון נכשלה. נסו שוב.';
+          throw new Error(message);
+        }
+
+        const membersData = Array.isArray(payload?.members) ? payload.members : [];
+        const invitesData = Array.isArray(payload?.invites) ? payload.invites : [];
+
+        const normalizedMembers = membersData.map((member) => normalizeMember(member)).filter(Boolean);
+        const normalizedInvites = invitesData.map((invite) => normalizeInvite(invite)).filter(Boolean);
 
         setOrgMembers(normalizedMembers);
-        setOrgInvites((invitesResponse.data || []).map((invite) => normalizeInvite(invite)).filter(Boolean));
+        setOrgInvites(normalizedInvites);
       } catch (directoryError) {
         console.error('Failed to load organization directory', directoryError);
         setOrgMembers([]);
         setOrgInvites([]);
       }
     },
-    [authClient, session],
+    [session],
   );
 
   const fetchOrgRuntimeConfig = useCallback(async (orgId) => {

@@ -52,6 +52,13 @@ function normalizeInvitationRecord(record) {
   };
 }
 
+function normalizeToken(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim();
+}
+
 export async function createInvitation(orgId, email, { session, expiresAt, redirectTo, emailData, signal } = {}) {
   const activeSession = ensureSession(session);
   const normalizedOrgId = normalizeOrgId(orgId);
@@ -90,6 +97,50 @@ export async function createInvitation(orgId, email, { session, expiresAt, redir
     }
     throw error;
   }
+}
+
+export async function getInvitationByToken(token, { signal } = {}) {
+  const normalizedToken = normalizeToken(token);
+  if (!normalizedToken) {
+    throw new Error('קישור ההזמנה חסר אסימון תקין.');
+  }
+
+  const response = await fetch(`/api/invitations/token/${encodeURIComponent(normalizedToken)}`, {
+    method: 'GET',
+    signal,
+    headers: { Accept: 'application/json' },
+  });
+
+  let payload = null;
+  const contentType = response.headers?.get?.('content-type') || response.headers?.get?.('Content-Type') || '';
+  if (typeof contentType === 'string' && contentType.toLowerCase().includes('application/json')) {
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const message = payload?.message
+      || (response.status === 404
+        ? 'ההזמנה לא נמצאה. ודא שהקישור שלך מעודכן.'
+        : response.status === 410
+          ? 'תוקף ההזמנה פג. בקש ממנהל הארגון לשלוח קישור חדש.'
+          : 'טעינת פרטי ההזמנה נכשלה. נסה שוב מאוחר יותר.');
+    const error = new Error(message);
+    error.status = response.status;
+    if (payload) {
+      error.data = payload;
+    }
+    throw error;
+  }
+
+  const normalized = normalizeInvitationRecord(payload?.invitation);
+  if (!normalized) {
+    throw new Error('השרת החזיר נתוני הזמנה חסרים.');
+  }
+  return normalized;
 }
 
 export async function listPendingInvitations(orgId, { session, signal } = {}) {
@@ -134,6 +185,58 @@ export async function revokeInvitation(invitationId, { session, signal } = {}) {
   } catch (error) {
     if (!error?.message) {
       error.message = 'ביטול ההזמנה נכשל. נסה שוב מאוחר יותר.';
+    }
+    throw error;
+  }
+}
+
+export async function acceptInvitation(invitationId, { session, signal } = {}) {
+  const activeSession = ensureSession(session);
+  const normalizedId = normalizeUuid(invitationId);
+  if (!normalizedId) {
+    throw new Error('ההזמנה שחצה אתך אינה תקינה לאישור.');
+  }
+
+  try {
+    await authenticatedFetch(`invitations/${normalizedId}/accept`, {
+      method: 'POST',
+      session: activeSession,
+      signal,
+    });
+  } catch (error) {
+    if (error?.status === 403) {
+      error.message = 'כתובת האימייל של החשבון אינה תואמת להזמנה.';
+    } else if (error?.status === 409) {
+      error.message = 'ההזמנה כבר עובדה. רענן את הדף לבדיקה.';
+    } else if (error?.status === 410) {
+      error.message = 'תוקף ההזמנה פג. בקש מאתנו קישור חדש.';
+    } else if (!error?.message) {
+      error.message = 'אישור ההזמנה נכשל. נסה שוב מאוחר יותר.';
+    }
+    throw error;
+  }
+}
+
+export async function declineInvitation(invitationId, { session, signal } = {}) {
+  const activeSession = ensureSession(session);
+  const normalizedId = normalizeUuid(invitationId);
+  if (!normalizedId) {
+    throw new Error('ההזמנה שחצה אתך אינה תקינה לדחייה.');
+  }
+
+  try {
+    await authenticatedFetch(`invitations/${normalizedId}/decline`, {
+      method: 'POST',
+      session: activeSession,
+      signal,
+    });
+  } catch (error) {
+    if (error?.status === 403) {
+      error.message = 'כתובת האימייל של החשבון אינה תואמת להזמנה.';
+    } else if (error?.status === 409) {
+      error.message = 'ההזמנה כבר עובדה. רענן את הדף לבדיקה.';
+    } else if (!error?.message) {
+      error.message = 'דחיית ההזמנה נכשלה. נסה שוב מאוחר יותר.';
     }
     throw error;
   }
