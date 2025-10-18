@@ -14,7 +14,6 @@ import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.j
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { createOrganization as createOrganizationRpc } from '@/api/organizations.js';
 import { mapSupabaseError } from '@/org/errors.js';
-import { authedGet } from '@/api/control-plane-client.js';
 
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const LEGACY_STORAGE_PREFIX = 'employee-management:last-org';
@@ -298,14 +297,43 @@ export function OrgProvider({ children }) {
 
   const loadOrgDirectory = useCallback(
     async (orgId) => {
-      if (!orgId || !user) {
+      if (!orgId) {
+        setOrgMembers([]);
+        setOrgInvites([]);
+        return;
+      }
+
+      const accessToken = session?.access_token;
+      if (!accessToken) {
         setOrgMembers([]);
         setOrgInvites([]);
         return;
       }
 
       try {
-        const payload = await authedGet('/api/directory', { orgId });
+        const params = new URLSearchParams({ orgId });
+        const response = await fetch(`/api/directory?${params.toString()}`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        const rawText = await response.text();
+        let payload = null;
+
+        if (rawText) {
+          try {
+            payload = JSON.parse(rawText);
+          } catch (parseError) {
+            console.error('Failed to parse /api/directory response', parseError);
+          }
+        }
+
+        if (!response.ok) {
+          const message = payload?.message || 'טעינת פרטי הארגון נכשלה. נסו שוב.';
+          throw new Error(message);
+        }
+
         const membersData = Array.isArray(payload?.members) ? payload.members : [];
         const invitesData = Array.isArray(payload?.invites) ? payload.invites : [];
 
@@ -320,7 +348,7 @@ export function OrgProvider({ children }) {
         setOrgInvites([]);
       }
     },
-    [user],
+    [session],
   );
 
   const fetchOrgRuntimeConfig = useCallback(async (orgId) => {
