@@ -1,114 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
-import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
-
-const CONTROL_STORAGE_KEY = 'app-main-auth-session';
-
-let cachedCredentials = null;
-let credentialsPromise = null;
-let controlClient = null;
-let clientPromise = null;
-
-function readEnvCandidate(env, key) {
-  const value = env?.[key];
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
-}
-
-function resolveEnvCredentials() {
-  const env = typeof import.meta !== 'undefined' ? import.meta.env ?? {} : {};
-  const supabaseUrl =
-    readEnvCandidate(env, 'APP_SUPABASE_URL') ||
-    readEnvCandidate(env, 'VITE_APP_SUPABASE_URL') ||
-    readEnvCandidate(env, 'PUBLIC_APP_SUPABASE_URL') ||
-    readEnvCandidate(env, 'SUPABASE_URL');
-  const supabaseAnonKey =
-    readEnvCandidate(env, 'APP_SUPABASE_ANON_KEY') ||
-    readEnvCandidate(env, 'VITE_APP_SUPABASE_ANON_KEY') ||
-    readEnvCandidate(env, 'PUBLIC_APP_SUPABASE_ANON_KEY') ||
-    readEnvCandidate(env, 'SUPABASE_ANON_KEY');
-
-  if (supabaseUrl && supabaseAnonKey) {
-    return { supabaseUrl, supabaseAnonKey };
-  }
-  return null;
-}
-
-function resolveWindowCredentials() {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-  const preloaded = window.__RUNTIME_CONFIG__;
-  const supabaseUrl = typeof preloaded?.supabaseUrl === 'string' ? preloaded.supabaseUrl.trim() : '';
-  const supabaseAnonKey = typeof preloaded?.supabaseAnonKey === 'string'
-    ? preloaded.supabaseAnonKey.trim()
-    : '';
-
-  if (supabaseUrl && supabaseAnonKey) {
-    return { supabaseUrl, supabaseAnonKey };
-  }
-  return null;
-}
-
-async function fetchControlCredentials() {
-  if (cachedCredentials) {
-    return cachedCredentials;
-  }
-  if (credentialsPromise) {
-    return credentialsPromise;
-  }
-
-  const envCredentials = resolveEnvCredentials();
-  if (envCredentials) {
-    cachedCredentials = envCredentials;
-    return cachedCredentials;
-  }
-
-  const windowCredentials = resolveWindowCredentials();
-  if (windowCredentials) {
-    cachedCredentials = windowCredentials;
-    return cachedCredentials;
-  }
-
-  credentialsPromise = (async () => {
-    const config = await loadRuntimeConfig();
-    if (!config?.supabaseUrl || !config?.supabaseAnonKey) {
-      throw new MissingRuntimeConfigError('חסר חיבור לבקרת Supabase. ודא שהפונקציה /api/config זמינה.');
-    }
-    cachedCredentials = {
-      supabaseUrl: config.supabaseUrl,
-      supabaseAnonKey: config.supabaseAnonKey,
-    };
-    return cachedCredentials;
-  })().finally(() => {
-    credentialsPromise = null;
-  });
-
-  return credentialsPromise;
-}
-
-async function ensureControlClient() {
-  if (controlClient) {
-    return controlClient;
-  }
-  if (clientPromise) {
-    return clientPromise;
-  }
-
-  clientPromise = (async () => {
-    const credentials = await fetchControlCredentials();
-    controlClient = createClient(credentials.supabaseUrl, credentials.supabaseAnonKey, {
-      auth: {
-        storageKey: CONTROL_STORAGE_KEY,
-        persistSession: true,
-        autoRefreshToken: true,
-      },
-    });
-    return controlClient;
-  })().finally(() => {
-    clientPromise = null;
-  });
-
-  return clientPromise;
-}
+import { getAuthClient } from '@/lib/supabase-manager.js';
 
 function buildUrl(path, params = {}) {
   const searchParams = new URLSearchParams();
@@ -175,7 +65,7 @@ function normalizeRequestOptions(options) {
 }
 
 async function authedRequest(method, path, options = {}) {
-  const client = await ensureControlClient();
+  const client = getAuthClient();
   const { params, headers: customHeaders, signal, body } = normalizeRequestOptions(options);
   const token = await resolveAccessToken(client);
   const url = buildUrl(path, params);
@@ -211,7 +101,7 @@ async function authedRequest(method, path, options = {}) {
   if (expectsJson) {
     try {
       payload = await response.json();
-    } catch (error) {
+    } catch {
       if (response.ok) {
         throw new Error('השרת החזיר נתונים בלתי צפויים.');
       }
@@ -251,6 +141,6 @@ export async function authedPut(path, body, options = {}) {
   return authedRequest('PUT', path, { ...options, body });
 }
 
-export async function getControlPlaneClient() {
-  return ensureControlClient();
+export function getControlPlaneClient() {
+  return getAuthClient();
 }
