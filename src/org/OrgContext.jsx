@@ -305,7 +305,10 @@ export function OrgProvider({ children }) {
       }
 
       try {
-        const payload = await authedGet('/api/directory', { orgId });
+        const payload = await authedGet('/api/directory', {
+          params: { orgId },
+          session,
+        });
         const membersData = Array.isArray(payload?.members) ? payload.members : [];
         const invitesData = Array.isArray(payload?.invites) ? payload.invites : [];
 
@@ -320,7 +323,7 @@ export function OrgProvider({ children }) {
         setOrgInvites([]);
       }
     },
-    [user],
+    [session, user],
   );
 
   const fetchOrgRuntimeConfig = useCallback(async (orgId) => {

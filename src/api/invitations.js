@@ -80,7 +80,7 @@ export async function createInvitation(orgId, email, { session, expiresAt, redir
   }
 
   try {
-    const response = await authedPost('/api/invitations', payload, { signal });
+    const response = await authedPost('/api/invitations', payload, { signal, session });
     const normalized = normalizeInvitationRecord(response?.invitation);
     if (!normalized) {
       throw new Error('השרת לא החזיר נתוני הזמנה תקינים.');
@@ -143,7 +143,11 @@ export async function listPendingInvitations(orgId, { session, signal } = {}) {
   const normalizedOrgId = normalizeOrgId(orgId);
 
   try {
-    const response = await authedGet('/api/invitations', { params: { orgId: normalizedOrgId }, signal });
+    const response = await authedGet('/api/invitations', {
+      params: { orgId: normalizedOrgId },
+      signal,
+      session,
+    });
     const invitations = Array.isArray(response?.invitations) ? response.invitations : [];
     return invitations
       .map(normalizeInvitationRecord)
@@ -167,7 +171,7 @@ export async function revokeInvitation(invitationId, { session, signal } = {}) {
   }
 
   try {
-    await authedDelete(`/api/invitations/${normalizedId}`, { signal });
+    await authedDelete(`/api/invitations/${normalizedId}`, { signal, session });
   } catch (error) {
     if (!error?.message) {
       error.message = 'ביטול ההזמנה נכשל. נסה שוב מאוחר יותר.';
@@ -184,7 +188,7 @@ export async function acceptInvitation(invitationId, { session, signal } = {}) {
   }
 
   try {
-    await authedPost(`/api/invitations/${normalizedId}/accept`, undefined, { signal });
+    await authedPost(`/api/invitations/${normalizedId}/accept`, undefined, { signal, session });
   } catch (error) {
     if (error?.status === 403) {
       error.message = 'כתובת האימייל של החשבון אינה תואמת להזמנה.';
@@ -207,7 +211,7 @@ export async function declineInvitation(invitationId, { session, signal } = {}) 
   }
 
   try {
-    await authedPost(`/api/invitations/${normalizedId}/decline`, undefined, { signal });
+    await authedPost(`/api/invitations/${normalizedId}/decline`, undefined, { signal, session });
   } catch (error) {
     if (error?.status === 403) {
       error.message = 'כתובת האימייל של החשבון אינה תואמת להזמנה.';
