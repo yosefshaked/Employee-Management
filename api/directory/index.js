@@ -142,47 +142,78 @@ async function requireOrgMembership(context, supabase, orgId, userId) {
   return membershipResult.data;
 }
 
-async function fetchOrgMembers(context, supabase, orgId) {
-  const result = await supabase
-    .from('org_memberships')
-    .select(
-      'id, org_id, user_id, role, created_at, profiles:profiles(id, email, full_name, name)',
-    )
-    .eq('org_id', orgId)
-    .order('created_at', { ascending: true });
+function logSupabaseQueryFailure(context, req, userId, stage, error) {
+  const payload = {
+    message: `Directory: Supabase query failed while ${stage}.`,
+    context: {
+      invocationId: context.invocationId,
+      method: req?.method,
+      url: req?.url,
+      query: req?.query,
+    },
+    user: userId ? { id: userId } : undefined,
+    error: {
+      message: error?.message,
+      code: error?.code,
+      details: error?.details,
+      hint: error?.hint,
+    },
+  };
 
-  if (result.error) {
-    context.log?.error?.('directory failed to load members', {
-      orgId,
-      message: result.error.message,
-    });
+  if (typeof context.log?.error === 'function') {
+    context.log.error(payload);
+  } else if (typeof context.log === 'function') {
+    context.log(payload);
+  } else {
+    console.error(payload);
+  }
+}
+
+async function fetchOrgMembers(context, req, supabase, orgId, userId) {
+  try {
+    const result = await supabase
+      .from('org_memberships')
+      .select('*, users:user_id(id, email)')
+      .eq('org_id', orgId)
+      .order('created_at', { ascending: true });
+
+    if (result.error) {
+      logSupabaseQueryFailure(context, req, userId, 'fetching members', result.error);
+      respond(context, 500, { message: 'failed to load members' });
+      return null;
+    }
+
+    return Array.isArray(result.data) ? result.data : [];
+  } catch (error) {
+    logSupabaseQueryFailure(context, req, userId, 'fetching members', error);
     respond(context, 500, { message: 'failed to load members' });
     return null;
   }
-
-  return Array.isArray(result.data) ? result.data : [];
 }
 
-async function fetchPendingInvitations(context, supabase, orgId) {
-  const result = await supabase
-    .from('org_invitations')
-    .select(
-      'id, org_id, email, status, invited_by, created_at, expires_at, organization:organizations(id, name)',
-    )
-    .eq('org_id', orgId)
-    .in('status', ['pending', 'sent'])
-    .order('created_at', { ascending: true });
+async function fetchPendingInvitations(context, req, supabase, orgId, userId) {
+  try {
+    const result = await supabase
+      .from('org_invitations')
+      .select(
+        'id, org_id, email, status, invited_by, created_at, expires_at, organization:organizations(id, name)',
+      )
+      .eq('org_id', orgId)
+      .in('status', ['pending', 'sent'])
+      .order('created_at', { ascending: true });
 
-  if (result.error) {
-    context.log?.error?.('directory failed to load invitations', {
-      orgId,
-      message: result.error.message,
-    });
+    if (result.error) {
+      logSupabaseQueryFailure(context, req, userId, 'fetching invitations', result.error);
+      respond(context, 500, { message: 'failed to load invitations' });
+      return null;
+    }
+
+    return Array.isArray(result.data) ? result.data : [];
+  } catch (error) {
+    logSupabaseQueryFailure(context, req, userId, 'fetching invitations', error);
     respond(context, 500, { message: 'failed to load invitations' });
     return null;
   }
-
-  return Array.isArray(result.data) ? result.data : [];
 }
 
 export default async function directory(context, req) {
@@ -209,12 +240,12 @@ export default async function directory(context, req) {
     return;
   }
 
-  const members = await fetchOrgMembers(context, supabase, orgId);
+  const members = await fetchOrgMembers(context, req, supabase, orgId, authUser.id);
   if (!members) {
     return;
   }
 
-  const invitations = await fetchPendingInvitations(context, supabase, orgId);
+  const invitations = await fetchPendingInvitations(context, req, supabase, orgId, authUser.id);
   if (!invitations) {
     return;
   }
