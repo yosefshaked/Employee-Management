@@ -165,6 +165,28 @@ export function getCurrentConfig() {
   };
 }
 
+export function getPrimaryControlConfig() {
+  const cached = CACHE.get('app');
+
+  if (cached?.supabaseUrl && cached?.supabaseAnonKey) {
+    return {
+      supabaseUrl: cached.supabaseUrl,
+      supabaseAnonKey: cached.supabaseAnonKey,
+      source: cached.source || null,
+    };
+  }
+
+  if (currentConfig?.supabaseUrl && currentConfig?.supabaseAnonKey && !currentConfig?.orgId) {
+    return {
+      supabaseUrl: currentConfig.supabaseUrl,
+      supabaseAnonKey: currentConfig.supabaseAnonKey,
+      source: currentConfig.source || null,
+    };
+  }
+
+  return null;
+}
+
 export async function waitConfigReady() {
   return readyPromise;
 }

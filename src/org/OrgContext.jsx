@@ -10,7 +10,7 @@ import React, {
 import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
-import { getCurrentConfig, loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
+import { getPrimaryControlConfig, loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
 import { useRuntimeConfig } from '@/runtime/RuntimeConfigContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { createOrganization as createOrganizationRpc } from '@/api/organizations.js';
@@ -185,7 +185,7 @@ function resolveControlAccessToken(credential) {
   }
 
   const payload = decodeJwtPayload(token);
-  const config = getCurrentConfig();
+  const config = getPrimaryControlConfig();
 
   if (!config?.supabaseUrl) {
     throw new Error('החיבור למסד הבקרה אינו זמין. נסה לרענן את ההגדרות ונסה שוב.');

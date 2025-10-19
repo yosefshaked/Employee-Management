@@ -1,4 +1,4 @@
-import { getCurrentConfig } from '@/runtime/config.js';
+import { getPrimaryControlConfig } from '@/runtime/config.js';
 
 function base64UrlDecode(segment) {
   if (typeof segment !== 'string') {
@@ -58,7 +58,7 @@ export function resolveControlAccessToken(credential) {
   }
 
   const payload = decodeJwtPayload(token);
-  const config = getCurrentConfig();
+  const config = getPrimaryControlConfig();
 
   if (!config?.supabaseUrl) {
     throw new Error('החיבור למסד הבקרה אינו זמין. נסה לרענן את ההגדרות ונסה שוב.');
