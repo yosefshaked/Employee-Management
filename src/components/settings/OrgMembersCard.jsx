@@ -8,6 +8,16 @@ import { toast } from 'sonner';
 import { useOrg } from '@/org/OrgContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { createInvitation, listPendingInvitations, revokeInvitation as revokeInvitationRequest } from '@/api/invitations.js';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 function formatDate(isoString) {
   if (!isoString) return '';
@@ -41,6 +51,9 @@ export default function OrgMembersCard() {
     const normalizedRole = role.toLowerCase();
     return normalizedRole === 'admin' || normalizedRole === 'owner';
   }, [role]);
+
+  const [memberToRemove, setMemberToRemove] = useState(null);
+  const [isRemovingMember, setIsRemovingMember] = useState(false);
 
   const refreshInvitations = useCallback(
     async ({ signal, suppressToast } = {}) => {
@@ -129,15 +142,49 @@ export default function OrgMembersCard() {
     }
   };
 
-  const handleRemoveMember = async (membershipId) => {
+  const openRemoveDialog = useCallback((member) => {
+    setMemberToRemove(member);
+  }, []);
+
+  const handleRemoveDialogChange = useCallback(
+    (open) => {
+      if (open) {
+        return;
+      }
+      if (!isRemovingMember) {
+        setMemberToRemove(null);
+      }
+    },
+    [isRemovingMember],
+  );
+
+  const handleCancelRemove = useCallback(() => {
+    if (!isRemovingMember) {
+      setMemberToRemove(null);
+    }
+  }, [isRemovingMember]);
+
+  const handleConfirmRemove = useCallback(async () => {
+    if (!memberToRemove?.id) {
+      return;
+    }
+    if (!session) {
+      toast.error('לא ניתן להסיר חבר ללא התחברות.');
+      return;
+    }
+
+    setIsRemovingMember(true);
     try {
-      await removeMember(membershipId);
+      await removeMember(memberToRemove.id, { session });
       toast.success('החבר הוסר מהארגון.');
+      setMemberToRemove(null);
     } catch (error) {
       console.error('Failed to remove member', error);
-      toast.error('הסרת החבר נכשלה.');
+      toast.error(error?.message || 'הסרת החבר נכשלה. נסה שוב.');
+    } finally {
+      setIsRemovingMember(false);
     }
-  };
+  }, [memberToRemove, removeMember, session]);
 
   if (!activeOrg) {
     return null;
@@ -183,7 +230,7 @@ export default function OrgMembersCard() {
                       type="button"
                       variant="ghost"
                       className="text-red-600 hover:bg-red-50 gap-2"
-                      onClick={() => handleRemoveMember(member.id)}
+                      onClick={() => openRemoveDialog(member)}
                     >
                       <UserMinus className="w-4 h-4" />
                       הסר מהארגון
@@ -275,6 +322,30 @@ export default function OrgMembersCard() {
           </section>
         ) : null}
       </CardContent>
+      <AlertDialog open={Boolean(memberToRemove)} onOpenChange={handleRemoveDialogChange}>
+        <AlertDialogContent dir="rtl" className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>הסרת חבר מהארגון</AlertDialogTitle>
+            <AlertDialogDescription>
+              {memberToRemove?.name || memberToRemove?.email
+                ? `האם להסיר את ${memberToRemove?.name || memberToRemove?.email} מהארגון?`
+                : 'האם להסיר את החבר שנבחר מהארגון?'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex flex-row-reverse gap-2 sm:flex-row">
+            <AlertDialogCancel onClick={handleCancelRemove} disabled={isRemovingMember}>
+              בטל
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmRemove}
+              disabled={isRemovingMember}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              כן, הסר
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

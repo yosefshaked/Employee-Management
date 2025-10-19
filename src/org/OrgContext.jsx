@@ -128,15 +128,33 @@ function normalizeMember(record) {
   };
 }
 
-async function authenticatedFetch(path, { params, session: _session, accessToken: _accessToken, ...options } = {}) {
-  const authClient = getAuthClient();
-  const { data, error } = await authClient.auth.getSession();
+async function authenticatedFetch(path, { params, session: sessionOverride, accessToken: accessTokenOverride, ...options } = {}) {
+  let token = null;
 
-  if (error) {
-    throw new Error('Authentication token not found.');
+  if (sessionOverride && typeof sessionOverride === 'object') {
+    const candidateToken =
+      sessionOverride.access_token ||
+      sessionOverride.accessToken ||
+      (sessionOverride.user && sessionOverride.user.access_token);
+    if (typeof candidateToken === 'string' && candidateToken.trim()) {
+      token = candidateToken.trim();
+    }
   }
 
-  const token = data?.session?.access_token || null;
+  if (!token && typeof accessTokenOverride === 'string' && accessTokenOverride.trim()) {
+    token = accessTokenOverride.trim();
+  }
+
+  if (!token) {
+    const authClient = getAuthClient();
+    const { data, error } = await authClient.auth.getSession();
+
+    if (error) {
+      throw new Error('Authentication token not found.');
+    }
+
+    token = data?.session?.access_token || null;
+  }
 
   if (!token) {
     throw new Error('Authentication token not found.');
@@ -1036,20 +1054,23 @@ export function OrgProvider({ children }) {
   );
 
   const removeMember = useCallback(
-    async (membershipId) => {
-      if (!membershipId) return;
-      const client = requireAuthClient();
-      const { error } = await client
-        .from('org_memberships')
-        .delete()
-        .eq('id', membershipId);
-      if (error) throw error;
+    async (membershipId, options = {}) => {
+      if (!membershipId) {
+        return;
+      }
+
+      const { session: sessionOverride } = options || {};
+      await authenticatedFetch(`/api/memberships/${membershipId}`, {
+        method: 'DELETE',
+        session: sessionOverride || session || null,
+      });
+
       if (activeOrgId) {
         await loadOrgDirectory(activeOrgId);
         await refreshOrganizations();
       }
     },
-    [requireAuthClient, activeOrgId, loadOrgDirectory, refreshOrganizations],
+    [session, activeOrgId, loadOrgDirectory, refreshOrganizations],
   );
 
   const acceptInvite = useCallback(
