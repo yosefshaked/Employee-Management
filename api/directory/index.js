@@ -173,7 +173,7 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
   try {
     const result = await supabase
       .from('org_memberships')
-      .select('*, users(id, email)')
+      .select('*, profiles(id, email, full_name)')
       .eq('org_id', orgId)
       .order('created_at', { ascending: true });
 
