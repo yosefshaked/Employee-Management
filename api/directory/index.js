@@ -171,19 +171,49 @@ function logSupabaseQueryFailure(context, req, userId, stage, error) {
 
 async function fetchOrgMembers(context, req, supabase, orgId, userId) {
   try {
-    const result = await supabase
+    const membershipsResult = await supabase
       .from('org_memberships')
-      .select('*, profiles(id, email, full_name)')
+      .select('id, org_id, user_id, role, created_at')
       .eq('org_id', orgId)
       .order('created_at', { ascending: true });
 
-    if (result.error) {
-      logSupabaseQueryFailure(context, req, userId, 'fetching members', result.error);
+    if (membershipsResult.error) {
+      logSupabaseQueryFailure(context, req, userId, 'fetching membership rows', membershipsResult.error);
       respond(context, 500, { message: 'failed to load members' });
       return null;
     }
 
-    return Array.isArray(result.data) ? result.data : [];
+    const memberships = Array.isArray(membershipsResult.data) ? membershipsResult.data : [];
+    const userIds = Array.from(
+      new Set(
+        memberships
+          .map((membership) => membership.user_id)
+          .filter((value) => typeof value === 'string' && value.trim().length > 0),
+      ),
+    );
+
+    let profiles = [];
+    if (userIds.length > 0) {
+      const profilesResult = await supabase
+        .from('profiles')
+        .select('id, email, full_name')
+        .in('id', userIds);
+
+      if (profilesResult.error) {
+        logSupabaseQueryFailure(context, req, userId, 'fetching member profiles', profilesResult.error);
+        respond(context, 500, { message: 'failed to load members' });
+        return null;
+      }
+
+      profiles = Array.isArray(profilesResult.data) ? profilesResult.data : [];
+    }
+
+    const profileMap = new Map(profiles.map((profile) => [profile.id, profile]));
+
+    return memberships.map((membership) => ({
+      ...membership,
+      profile: profileMap.get(membership.user_id) ?? null,
+    }));
   } catch (error) {
     logSupabaseQueryFailure(context, req, userId, 'fetching members', error);
     respond(context, 500, { message: 'failed to load members' });
