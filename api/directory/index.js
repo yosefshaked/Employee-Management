@@ -119,7 +119,7 @@ async function getAuthenticatedUser(context, req, supabase) {
 async function requireOrgMembership(context, supabase, orgId, userId) {
   const membershipResult = await supabase
     .from('org_memberships')
-    .select('role, status')
+    .select('id, role')
     .eq('org_id', orgId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -134,7 +134,7 @@ async function requireOrgMembership(context, supabase, orgId, userId) {
     return null;
   }
 
-  if (!membershipResult.data || membershipResult.data.status !== 'active') {
+  if (!membershipResult.data) {
     respond(context, 403, { message: 'forbidden' });
     return null;
   }
@@ -146,7 +146,7 @@ async function fetchOrgMembers(context, supabase, orgId) {
   const result = await supabase
     .from('org_memberships')
     .select(
-      'id, org_id, user_id, role, status, invited_at, joined_at, created_at, profiles:profiles(id, email, full_name, name)',
+      'id, org_id, user_id, role, created_at, profiles:profiles(id, email, full_name, name)',
     )
     .eq('org_id', orgId)
     .order('created_at', { ascending: true });
