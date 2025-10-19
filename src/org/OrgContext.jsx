@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
 import { getCurrentConfig, loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
+import { useRuntimeConfig } from '@/runtime/RuntimeConfigContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { createOrganization as createOrganizationRpc } from '@/api/organizations.js';
 import { mapSupabaseError } from '@/org/errors.js';
@@ -301,6 +302,7 @@ export function OrgProvider({ children }) {
     dataClient,
     setActiveOrg: setSupabaseActiveOrg,
   } = useSupabase();
+  const runtimeConfig = useRuntimeConfig();
   const requireAuthClient = useCallback(() => {
     if (!authClient) {
       throw new Error('לקוח Supabase אינו זמין. נסו שוב לאחר שהחיבור הושלם.');
@@ -322,6 +324,14 @@ export function OrgProvider({ children }) {
   const lastUserIdRef = useRef(null);
   const configRequestRef = useRef(0);
   const tenantClientReady = Boolean(dataClient);
+  const hasRuntimeConfig = Boolean(runtimeConfig?.supabaseUrl && runtimeConfig?.supabaseAnonKey);
+  const activeOrgConfigReady = Boolean(
+    activeOrgId &&
+      configStatus === 'success' &&
+      activeOrgConfig?.orgId === activeOrgId &&
+      activeOrgConfig?.supabaseUrl &&
+      activeOrgConfig?.supabaseAnonKey,
+  );
 
   const resetState = useCallback(() => {
     setStatus('idle');
@@ -655,6 +665,10 @@ export function OrgProvider({ children }) {
   );
 
   useEffect(() => {
+    if (!hasRuntimeConfig) {
+      return;
+    }
+
     if (authStatus === 'loading') {
       return;
     }
@@ -685,7 +699,17 @@ export function OrgProvider({ children }) {
         if (existing) {
           applyActiveOrg(existing);
           writeStoredOrgId(user?.id ?? null, existing.id);
-          await loadOrgDirectory(existing.id);
+          if (
+            configStatus === 'success' &&
+            activeOrgConfig?.orgId === existing.id &&
+            activeOrgConfig?.supabaseUrl &&
+            activeOrgConfig?.supabaseAnonKey
+          ) {
+            await loadOrgDirectory(existing.id);
+          } else {
+            setOrgMembers([]);
+            setOrgInvites([]);
+          }
         } else {
           applyActiveOrg(null);
           setOrgMembers([]);
@@ -704,9 +728,25 @@ export function OrgProvider({ children }) {
     return () => {
       isActive = false;
     };
-  }, [authStatus, authClient, user, loadMemberships, determineStatus, resetState, applyActiveOrg, loadOrgDirectory]);
+  }, [
+    authStatus,
+    authClient,
+    user,
+    loadMemberships,
+    determineStatus,
+    resetState,
+    applyActiveOrg,
+    loadOrgDirectory,
+    hasRuntimeConfig,
+    configStatus,
+    activeOrgConfig,
+  ]);
 
   useEffect(() => {
+    if (!hasRuntimeConfig) {
+      return;
+    }
+
     if (!activeOrgId) {
       setOrgMembers([]);
       setOrgInvites([]);
@@ -714,6 +754,12 @@ export function OrgProvider({ children }) {
     }
 
     if (!session) {
+      return;
+    }
+
+    if (!activeOrgConfigReady) {
+      setOrgMembers([]);
+      setOrgInvites([]);
       return;
     }
 
@@ -735,7 +781,7 @@ export function OrgProvider({ children }) {
     return () => {
       abortController.abort();
     };
-  }, [activeOrgId, session, loadOrgDirectory]);
+  }, [activeOrgId, session, loadOrgDirectory, hasRuntimeConfig, activeOrgConfigReady]);
 
   useEffect(() => {
     if (!activeOrgId) return;
