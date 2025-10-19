@@ -1,5 +1,3 @@
-import { resolveControlAccessToken } from '@/lib/api-client.js'
-
 export type CurrentUserProfile = {
   id: string
   email: string | null
@@ -34,12 +32,11 @@ function buildHeaders(options: FetchCurrentUserOptions) {
     accept: 'application/json',
   }
 
-  if (options.accessToken) {
-    const rawToken = options.accessToken.startsWith('Bearer ')
-      ? options.accessToken.slice('Bearer '.length)
-      : options.accessToken
-    const token = resolveControlAccessToken(rawToken)
-    const bearer = `Bearer ${token}`
+  if (typeof options.accessToken === 'string' && options.accessToken.trim()) {
+    const trimmed = options.accessToken.trim()
+    const bearer = trimmed.startsWith('Bearer ')
+      ? trimmed
+      : `Bearer ${trimmed}`
     headers.authorization = bearer
     headers.Authorization = bearer
     headers['x-supabase-authorization'] = bearer

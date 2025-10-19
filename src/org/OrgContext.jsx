@@ -10,11 +10,12 @@ import React, {
 import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
+import { getAuthClient } from '@/lib/supabase-manager.js';
 import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
+import { useRuntimeConfig } from '@/runtime/RuntimeConfigContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { createOrganization as createOrganizationRpc } from '@/api/organizations.js';
 import { mapSupabaseError } from '@/org/errors.js';
-import { fetchCurrentUser } from '@/shared/api/user.ts';
 
 const ACTIVE_ORG_STORAGE_KEY = 'active_org_id';
 const LEGACY_STORAGE_PREFIX = 'employee-management:last-org';
@@ -127,38 +128,95 @@ function normalizeMember(record) {
   };
 }
 
-function isPlainObject(value) {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+async function authenticatedFetch(path, { params, session: _session, accessToken: _accessToken, ...options } = {}) {
+  const authClient = getAuthClient();
+  const { data, error } = await authClient.auth.getSession();
 
-function deriveNameFromMetadata(metadata) {
-  if (!isPlainObject(metadata)) {
-    return null;
+  if (error) {
+    throw new Error('Authentication token not found.');
   }
 
-  const trimmedFullName = typeof metadata.full_name === 'string' ? metadata.full_name.trim() : '';
-  if (trimmedFullName) {
-    return trimmedFullName;
+  const token = data?.session?.access_token || null;
+
+  if (!token) {
+    throw new Error('Authentication token not found.');
   }
 
-  const trimmedName = typeof metadata.name === 'string' ? metadata.name.trim() : '';
-  if (trimmedName) {
-    return trimmedName;
+  const bearer = `Bearer ${token}`;
+
+  const { headers: customHeaders = {}, body, ...rest } = options || {};
+  const headers = {
+    'Content-Type': 'application/json',
+    ...customHeaders,
+  };
+
+  headers.Authorization = bearer;
+  headers.authorization = bearer;
+  headers['X-Supabase-Authorization'] = bearer;
+  headers['x-supabase-authorization'] = bearer;
+  headers['x-supabase-auth'] = bearer;
+
+  let requestBody = body;
+  if (requestBody && typeof requestBody === 'object' && !(requestBody instanceof FormData)) {
+    requestBody = JSON.stringify(requestBody);
   }
 
-  const given = typeof metadata.given_name === 'string' ? metadata.given_name.trim() : '';
-  const family = typeof metadata.family_name === 'string' ? metadata.family_name.trim() : '';
-  const combined = [given, family].filter(Boolean).join(' ');
-  if (combined) {
-    return combined;
+  let normalizedPath = String(path || '');
+  if (!normalizedPath.startsWith('/api/')) {
+    normalizedPath = `/api/${normalizedPath.replace(/^\/+/, '')}`;
   }
 
-  const preferred = typeof metadata.preferred_username === 'string' ? metadata.preferred_username.trim() : '';
-  if (preferred) {
-    return preferred;
+  if (params && typeof params === 'object' && Object.keys(params).length > 0) {
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value === undefined || value === null) {
+        return;
+      }
+      if (Array.isArray(value)) {
+        value.forEach((item) => {
+          if (item !== undefined && item !== null) {
+            searchParams.append(key, String(item));
+          }
+        });
+        return;
+      }
+      searchParams.set(key, String(value));
+    });
+
+    const queryString = searchParams.toString();
+    if (queryString) {
+      normalizedPath = `${normalizedPath.split('?')[0]}?${queryString}`;
+    }
   }
 
-  return null;
+  const response = await fetch(normalizedPath, {
+    ...rest,
+    headers,
+    body: requestBody,
+  });
+
+  let payload = null;
+  const contentType = response.headers?.get?.('content-type') || response.headers?.get?.('Content-Type') || '';
+  const isJson = typeof contentType === 'string' && contentType.toLowerCase().includes('application/json');
+  if (isJson) {
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+  }
+
+  if (!response.ok) {
+    const message = payload?.message || 'An API error occurred';
+    const error = new Error(message);
+    error.status = response.status;
+    if (payload) {
+      error.data = payload;
+    }
+    throw error;
+  }
+
+  return payload;
 }
 
 export function OrgProvider({ children }) {
@@ -169,6 +227,7 @@ export function OrgProvider({ children }) {
     dataClient,
     setActiveOrg: setSupabaseActiveOrg,
   } = useSupabase();
+  const runtimeConfig = useRuntimeConfig();
   const requireAuthClient = useCallback(() => {
     if (!authClient) {
       throw new Error('לקוח Supabase אינו זמין. נסו שוב לאחר שהחיבור הושלם.');
@@ -190,6 +249,14 @@ export function OrgProvider({ children }) {
   const lastUserIdRef = useRef(null);
   const configRequestRef = useRef(0);
   const tenantClientReady = Boolean(dataClient);
+  const hasRuntimeConfig = Boolean(runtimeConfig?.supabaseUrl && runtimeConfig?.supabaseAnonKey);
+  const activeOrgConfigReady = Boolean(
+    activeOrgId &&
+      configStatus === 'success' &&
+      activeOrgConfig?.orgId === activeOrgId &&
+      activeOrgConfig?.supabaseUrl &&
+      activeOrgConfig?.supabaseAnonKey,
+  );
 
   const resetState = useCallback(() => {
     setStatus('idle');
@@ -331,90 +398,53 @@ export function OrgProvider({ children }) {
   }, [authClient, user, resetState]);
 
   const loadOrgDirectory = useCallback(
-    async (orgId) => {
+    async (orgId, { signal } = {}) => {
       if (!orgId) {
         setOrgMembers([]);
         setOrgInvites([]);
         return;
       }
 
-      if (!authClient) {
+      if (!session) {
         return;
       }
 
       try {
-        const client = authClient;
-        const [membersResponse, invitesResponse] = await Promise.all([
-          client
-            .from('org_memberships')
-            .select('id, org_id, user_id, role, created_at')
-            .eq('org_id', orgId)
-            .order('created_at', { ascending: true }),
-          client
-            .from('org_invitations')
-            .select('id, org_id, email, status, invited_by, created_at, expires_at')
-            .eq('org_id', orgId)
-            .in('status', ['pending', 'sent'])
-            .order('created_at', { ascending: true }),
-        ]);
+        const directoryData = await authenticatedFetch('/api/directory', {
+          params: { orgId },
+          signal,
+        });
 
-        if (membersResponse.error) throw membersResponse.error;
-        if (invitesResponse.error) throw invitesResponse.error;
+        const rawMembers = Array.isArray(directoryData?.members)
+          ? directoryData.members
+          : Array.isArray(directoryData?.orgMembers)
+            ? directoryData.orgMembers
+            : Array.isArray(directoryData?.data)
+              ? directoryData.data
+              : [];
+        const normalizedMembers = rawMembers.map((member) => normalizeMember(member)).filter(Boolean);
 
-        const membersData = membersResponse.data || [];
-        const userIds = membersData.map((member) => member.user_id).filter(Boolean);
-        const profileMap = new Map();
-
-        if (userIds.length) {
-          const idSet = new Set(userIds);
-          const accessToken = session?.access_token || null;
-
-          if (accessToken) {
-            try {
-              const currentProfile = await fetchCurrentUser({ accessToken });
-              if (currentProfile?.id && idSet.has(currentProfile.id)) {
-                const metadata = currentProfile.raw_user_meta_data;
-                const derivedName = deriveNameFromMetadata(metadata) || currentProfile.email || null;
-
-                profileMap.set(currentProfile.id, {
-                  id: currentProfile.id,
-                  email: currentProfile.email || null,
-                  full_name: derivedName,
-                  name: derivedName,
-                });
-              }
-            } catch (profileError) {
-              console.warn('Failed to load current user profile via /api/users/me', profileError);
-            }
-          } else {
-            console.warn('Skipped /api/users/me profile fetch due to missing access token.');
-          }
-        }
-
-        const normalizedMembers = membersData
-          .map((member) => {
-            const profile = profileMap.get(member.user_id);
-            if (profile) {
-              return normalizeMember({
-                ...member,
-                profile,
-                profiles: profile,
-                user_profile: profile,
-              });
-            }
-            return normalizeMember(member);
-          })
+        const rawInvites = Array.isArray(directoryData?.invites)
+          ? directoryData.invites
+          : Array.isArray(directoryData?.invitations)
+            ? directoryData.invitations
+            : [];
+        const normalizedInvites = rawInvites
+          .map((invite) => normalizeInvite(invite, invite?.organization))
           .filter(Boolean);
 
         setOrgMembers(normalizedMembers);
-        setOrgInvites((invitesResponse.data || []).map((invite) => normalizeInvite(invite)).filter(Boolean));
+        setOrgInvites(normalizedInvites);
       } catch (directoryError) {
+        if (directoryError?.name === 'AbortError') {
+          return;
+        }
         console.error('Failed to load organization directory', directoryError);
         setOrgMembers([]);
         setOrgInvites([]);
       }
     },
-    [authClient, session],
+    [session],
   );
 
   const fetchOrgRuntimeConfig = useCallback(async (orgId) => {
@@ -559,6 +589,10 @@ export function OrgProvider({ children }) {
   );
 
   useEffect(() => {
+    if (!hasRuntimeConfig) {
+      return;
+    }
+
     if (authStatus === 'loading') {
       return;
     }
@@ -589,7 +623,17 @@ export function OrgProvider({ children }) {
         if (existing) {
           applyActiveOrg(existing);
           writeStoredOrgId(user?.id ?? null, existing.id);
-          await loadOrgDirectory(existing.id);
+          if (
+            configStatus === 'success' &&
+            activeOrgConfig?.orgId === existing.id &&
+            activeOrgConfig?.supabaseUrl &&
+            activeOrgConfig?.supabaseAnonKey
+          ) {
+            await loadOrgDirectory(existing.id);
+          } else {
+            setOrgMembers([]);
+            setOrgInvites([]);
+          }
         } else {
           applyActiveOrg(null);
           setOrgMembers([]);
@@ -608,12 +652,60 @@ export function OrgProvider({ children }) {
     return () => {
       isActive = false;
     };
-  }, [authStatus, authClient, user, loadMemberships, determineStatus, resetState, applyActiveOrg, loadOrgDirectory]);
+  }, [
+    authStatus,
+    authClient,
+    user,
+    loadMemberships,
+    determineStatus,
+    resetState,
+    applyActiveOrg,
+    loadOrgDirectory,
+    hasRuntimeConfig,
+    configStatus,
+    activeOrgConfig,
+  ]);
 
   useEffect(() => {
-    if (!activeOrgId) return;
-    loadOrgDirectory(activeOrgId);
-  }, [activeOrgId, loadOrgDirectory]);
+    if (!hasRuntimeConfig) {
+      return;
+    }
+
+    if (!activeOrgId) {
+      setOrgMembers([]);
+      setOrgInvites([]);
+      return;
+    }
+
+    if (!session) {
+      return;
+    }
+
+    if (!activeOrgConfigReady) {
+      setOrgMembers([]);
+      setOrgInvites([]);
+      return;
+    }
+
+    const abortController = new AbortController();
+
+    const run = async () => {
+      try {
+        await loadOrgDirectory(activeOrgId, { signal: abortController.signal });
+      } catch (error) {
+        if (error?.name === 'AbortError') {
+          return;
+        }
+        console.error('Failed to refresh organization directory', error);
+      }
+    };
+
+    run();
+
+    return () => {
+      abortController.abort();
+    };
+  }, [activeOrgId, session, loadOrgDirectory, hasRuntimeConfig, activeOrgConfigReady]);
 
   useEffect(() => {
     if (!activeOrgId) return;
