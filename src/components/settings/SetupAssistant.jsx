@@ -11,7 +11,6 @@ import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
 import { SETUP_SQL_SCRIPT } from '@/lib/setup-sql.js';
 import { useOrg } from '@/org/OrgContext.jsx';
-import { resolveControlAccessToken } from '@/lib/api-client.js';
 import { verifyOrgConnection } from '@/runtime/verification.js';
 import { fetchLeavePolicySettings } from '@/lib/settings-client.js';
 import { asError } from '@/lib/error-utils.js';
@@ -834,8 +833,16 @@ export default function SetupAssistant() {
         throw sessionError;
       }
 
-      const token = resolveControlAccessToken(sessionData?.session);
-      const bearer = `Bearer ${token}`;
+      const token = sessionData?.session?.access_token || '';
+      const trimmedToken = token.trim();
+
+      if (!trimmedToken) {
+        throw new Error('Authentication token not found.');
+      }
+
+      const bearer = trimmedToken.startsWith('Bearer ')
+        ? trimmedToken
+        : `Bearer ${trimmedToken}`;
       const response = await fetch('/api/save-org-credentials', {
         method: 'POST',
         headers: {

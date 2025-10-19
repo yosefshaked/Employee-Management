@@ -10,7 +10,8 @@ import React, {
 import { toast } from 'sonner';
 import { useSupabase } from '@/context/SupabaseContext.jsx';
 import { maskSupabaseCredential } from '@/lib/supabase-utils.js';
-import { getPrimaryControlConfig, loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
+import { getAuthClient } from '@/lib/supabase-manager.js';
+import { loadRuntimeConfig, MissingRuntimeConfigError } from '@/runtime/config.js';
 import { useRuntimeConfig } from '@/runtime/RuntimeConfigContext.jsx';
 import { useAuth } from '@/auth/AuthContext.jsx';
 import { createOrganization as createOrganizationRpc } from '@/api/organizations.js';
@@ -127,96 +128,20 @@ function normalizeMember(record) {
   };
 }
 
-function base64UrlDecode(segment) {
-  if (typeof segment !== 'string') {
-    throw new Error('Invalid JWT payload.');
+async function authenticatedFetch(path, { params, session: _session, accessToken: _accessToken, ...options } = {}) {
+  const authClient = getAuthClient();
+  const { data, error } = await authClient.auth.getSession();
+
+  if (error) {
+    throw new Error('Authentication token not found.');
   }
 
-  const normalized = segment.replace(/-/g, '+').replace(/_/g, '/');
-  const padding = normalized.length % 4 === 0 ? '' : '='.repeat(4 - (normalized.length % 4));
-  const value = normalized + padding;
-
-  if (typeof globalThis?.atob === 'function') {
-    return globalThis.atob(value);
-  }
-
-  if (typeof globalThis?.Buffer?.from === 'function') {
-    return globalThis.Buffer.from(value, 'base64').toString('utf-8');
-  }
-
-  throw new Error('Unable to decode JWT payload in this environment.');
-}
-
-function extractDomain(urlLike) {
-  if (typeof urlLike !== 'string' || !urlLike.trim()) {
-    return '';
-  }
-
-  try {
-    const parsed = new URL(urlLike);
-    return parsed.host.toLowerCase();
-  } catch {
-    return '';
-  }
-}
-
-function decodeJwtPayload(token) {
-  const parts = token.split('.');
-  if (parts.length < 2) {
-    throw new Error('Malformed access token received.');
-  }
-
-  try {
-    const json = base64UrlDecode(parts[1]);
-    return JSON.parse(json);
-  } catch {
-    throw new Error('Unable to parse access token payload.');
-  }
-}
-
-function resolveControlAccessToken(credential) {
-  const rawToken = typeof credential === 'string'
-    ? credential
-    : credential?.access_token || credential?.accessToken || credential?.token || '';
-  const token = typeof rawToken === 'string' ? rawToken.trim() : '';
+  const token = data?.session?.access_token || null;
 
   if (!token) {
-    throw new Error('נדרש אסימון גישה פעיל כדי לקרוא ל-API.');
+    throw new Error('Authentication token not found.');
   }
 
-  const payload = decodeJwtPayload(token);
-  const config = getPrimaryControlConfig();
-
-  if (!config?.supabaseUrl) {
-    throw new Error('החיבור למסד הבקרה אינו זמין. נסה לרענן את ההגדרות ונסה שוב.');
-  }
-
-  const expectedDomain = extractDomain(config.supabaseUrl);
-  const issuerDomain = extractDomain(payload?.iss);
-  const audienceDomain = extractDomain(payload?.aud);
-  const candidateDomains = new Set();
-
-  if (issuerDomain) {
-    candidateDomains.add(issuerDomain);
-  }
-  if (audienceDomain) {
-    candidateDomains.add(audienceDomain);
-  }
-
-  if (candidateDomains.size === 0) {
-    throw new Error('אסימון ההתחברות חסר מידע זיהוי. התחבר מחדש ונסה שוב.');
-  }
-
-  if (expectedDomain && !candidateDomains.has(expectedDomain.toLowerCase())) {
-    throw new Error('זוהה אסימון שאינו שייך לפרויקט הבקרה. התחבר מחדש לחשבון הניהול.');
-  }
-
-  return token;
-}
-
-async function authenticatedFetch(path, { session, accessToken, params, ...options } = {}) {
-  const tokenSource = session ?? accessToken;
-  const token = resolveControlAccessToken(tokenSource);
   const bearer = `Bearer ${token}`;
 
   const { headers: customHeaders = {}, body, ...rest } = options || {};
@@ -486,7 +411,6 @@ export function OrgProvider({ children }) {
 
       try {
         const directoryData = await authenticatedFetch('/api/directory', {
-          session,
           params: { orgId },
           signal,
         });
