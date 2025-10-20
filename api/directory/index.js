@@ -1,79 +1,200 @@
 /* eslint-env node */
-import process from 'node:process';
-import { createClient } from '@supabase/supabase-js';
-import { json, resolveBearerAuthorization } from '../_shared/http.js';
+import { createSupabaseAdminClient, readSupabaseAdminConfig } from '../_shared/supabase-admin.js';
 
-const ADMIN_CLIENT_OPTIONS = {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-    detectSessionInUrl: false,
-  },
-  global: {
+function jsonResponse(context, status, payload, extraHeaders = {}) {
+  context.res = {
+    status,
     headers: {
-      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store',
+      ...extraHeaders,
     },
-  },
-};
-
-let cachedAdminClient = null;
-let cachedAdminConfig = null;
-
-function readEnv(context) {
-  if (context?.env && typeof context.env === 'object') {
-    return context.env;
-  }
-  return process.env ?? {};
+    body: JSON.stringify(payload),
+  };
 }
 
-function selectStringCandidate(source, key) {
-  if (!source) {
-    return '';
-  }
-  const value = source[key];
-  if (typeof value === 'string' && value.trim()) {
-    return value.trim();
-  }
-  return '';
+function maskForLog(value) {
+  if (!value) return '';
+  const stringValue = String(value);
+  if (stringValue.length <= 6) return '••••';
+  return `${stringValue.slice(0, 2)}••••${stringValue.slice(-2)}`;
 }
 
-function resolveAdminConfig(context) {
-  const env = readEnv(context);
-  const fallbackEnv = process.env ?? {};
-  const url =
-    selectStringCandidate(env, 'APP_CONTROL_DB_URL') ||
-    selectStringCandidate(fallbackEnv, 'APP_CONTROL_DB_URL');
-  const key =
-    selectStringCandidate(env, 'APP_CONTROL_DB_SERVICE_ROLE_KEY') ||
-    selectStringCandidate(fallbackEnv, 'APP_CONTROL_DB_SERVICE_ROLE_KEY');
-  return { url, key };
-}
-
-function createAdminClient(url, key) {
-  return createClient(url, key, ADMIN_CLIENT_OPTIONS);
-}
-
-function getAdminClient(context) {
-  const config = resolveAdminConfig(context);
-  if (!config.url || !config.key) {
-    return { client: null, error: new Error('missing_admin_credentials') };
+function normalizeHeaderValue(rawValue) {
+  if (!rawValue) {
+    return undefined;
   }
-  if (
-    !cachedAdminClient ||
-    !cachedAdminConfig ||
-    cachedAdminConfig.url !== config.url ||
-    cachedAdminConfig.key !== config.key
-  ) {
-    cachedAdminClient = createAdminClient(config.url, config.key);
-    cachedAdminConfig = config;
+
+  if (typeof rawValue === 'string') {
+    return rawValue;
   }
-  return { client: cachedAdminClient, error: null };
+
+  if (Array.isArray(rawValue)) {
+    for (const entry of rawValue) {
+      const normalized = normalizeHeaderValue(entry);
+      if (typeof normalized === 'string' && normalized.length > 0) {
+        return normalized;
+      }
+    }
+    return undefined;
+  }
+
+  if (typeof rawValue === 'object') {
+    if (typeof rawValue.value === 'string') {
+      return rawValue.value;
+    }
+
+    if (Array.isArray(rawValue.value)) {
+      const normalized = normalizeHeaderValue(rawValue.value);
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    if (typeof rawValue[0] === 'string') {
+      return rawValue[0];
+    }
+
+    if (typeof rawValue.toString === 'function' && rawValue.toString !== Object.prototype.toString) {
+      const candidate = rawValue.toString();
+      if (typeof candidate === 'string' && candidate && candidate !== '[object Object]') {
+        return candidate;
+      }
+    }
+
+    if (typeof rawValue[Symbol.iterator] === 'function') {
+      for (const entry of rawValue) {
+        const normalized = normalizeHeaderValue(entry);
+        if (typeof normalized === 'string' && normalized.length > 0) {
+          return normalized;
+        }
+      }
+    }
+  }
+
+  if (typeof rawValue === 'number' || typeof rawValue === 'boolean') {
+    return String(rawValue);
+  }
+
+  return undefined;
 }
 
-function respond(context, status, body, extraHeaders = {}) {
-  const response = json(status, body, { 'Cache-Control': 'no-store', ...extraHeaders });
-  context.res = response;
-  return response;
+function extractBearerToken(rawValue) {
+  const normalized = normalizeHeaderValue(rawValue);
+  if (typeof normalized !== 'string') {
+    return null;
+  }
+  const trimmed = normalized.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (!trimmed.toLowerCase().startsWith('bearer ')) {
+    return null;
+  }
+  const token = trimmed.slice('bearer '.length).trim();
+  return token || null;
+}
+
+function resolveHeaderValue(headers, name) {
+  if (!headers || !name) {
+    return undefined;
+  }
+
+  const targetName = typeof name === 'string' ? name : String(name || '');
+
+  if (typeof headers.get === 'function') {
+    const directValue = normalizeHeaderValue(headers.get(name));
+    if (typeof directValue === 'string' && directValue.length > 0) {
+      return directValue;
+    }
+
+    const lowerValue = normalizeHeaderValue(headers.get(name.toLowerCase()));
+    if (typeof lowerValue === 'string' && lowerValue.length > 0) {
+      return lowerValue;
+    }
+  }
+
+  if (typeof headers === 'object') {
+    if (Object.prototype.hasOwnProperty.call(headers, name)) {
+      const directValue = normalizeHeaderValue(headers[name]);
+      if (typeof directValue === 'string' && directValue.length > 0) {
+        return directValue;
+      }
+    }
+
+    const lowerName = typeof name === 'string' ? name.toLowerCase() : name;
+    if (lowerName !== name && Object.prototype.hasOwnProperty.call(headers, lowerName)) {
+      const lowerValue = normalizeHeaderValue(headers[lowerName]);
+      if (typeof lowerValue === 'string' && lowerValue.length > 0) {
+        return lowerValue;
+      }
+    }
+
+    const upperName = typeof name === 'string' ? name.toUpperCase() : name;
+    if (upperName !== name && Object.prototype.hasOwnProperty.call(headers, upperName)) {
+      const upperValue = normalizeHeaderValue(headers[upperName]);
+      if (typeof upperValue === 'string' && upperValue.length > 0) {
+        return upperValue;
+      }
+    }
+  }
+
+  if (typeof headers?.toJSON === 'function') {
+    const serialized = headers.toJSON();
+    if (serialized && typeof serialized === 'object') {
+      if (Object.prototype.hasOwnProperty.call(serialized, name)) {
+        const directValue = normalizeHeaderValue(serialized[name]);
+        if (typeof directValue === 'string' && directValue.length > 0) {
+          return directValue;
+        }
+      }
+
+      const lowerName = typeof name === 'string' ? name.toLowerCase() : name;
+      if (lowerName !== name && Object.prototype.hasOwnProperty.call(serialized, lowerName)) {
+        const lowerValue = normalizeHeaderValue(serialized[lowerName]);
+        if (typeof lowerValue === 'string' && lowerValue.length > 0) {
+          return lowerValue;
+        }
+      }
+
+      const upperName = typeof name === 'string' ? name.toUpperCase() : name;
+      if (upperName !== name && Object.prototype.hasOwnProperty.call(serialized, upperName)) {
+        const upperValue = normalizeHeaderValue(serialized[upperName]);
+        if (typeof upperValue === 'string' && upperValue.length > 0) {
+          return upperValue;
+        }
+      }
+    }
+  }
+
+  const rawHeaders = headers?.rawHeaders;
+  if (Array.isArray(rawHeaders)) {
+    for (let index = 0; index < rawHeaders.length - 1; index += 2) {
+      const rawName = rawHeaders[index];
+      if (typeof rawName !== 'string') {
+        continue;
+      }
+
+      if (rawName.toLowerCase() !== targetName.toLowerCase()) {
+        continue;
+      }
+
+      const rawValue = normalizeHeaderValue(rawHeaders[index + 1]);
+      if (typeof rawValue === 'string' && rawValue.length > 0) {
+        return rawValue;
+      }
+    }
+  }
+
+  const nestedHeaders = headers?.headers;
+  if (nestedHeaders && nestedHeaders !== headers) {
+    const nestedValue = resolveHeaderValue(nestedHeaders, name);
+    if (nestedValue) {
+      return nestedValue;
+    }
+  }
+
+  return undefined;
 }
 
 function normalizeUuid(value) {
@@ -91,31 +212,6 @@ function normalizeUuid(value) {
   return trimmed.toLowerCase();
 }
 
-async function getAuthenticatedUser(context, req, supabase) {
-  const authorization = resolveBearerAuthorization(req);
-  if (!authorization?.token) {
-    respond(context, 401, { message: 'missing bearer' });
-    return null;
-  }
-  let authResult;
-  try {
-    authResult = await supabase.auth.getUser(authorization.token);
-  } catch (error) {
-    context.log?.warn?.('directory failed to validate bearer token', { message: error?.message });
-    respond(context, 401, { message: 'invalid or expired token' });
-    return null;
-  }
-  if (authResult.error || !authResult.data?.user?.id) {
-    respond(context, 401, { message: 'invalid or expired token' });
-    return null;
-  }
-  const user = authResult.data.user;
-  return {
-    id: user.id,
-    email: typeof user.email === 'string' ? user.email.toLowerCase() : null,
-  };
-}
-
 async function requireOrgMembership(context, supabase, orgId, userId) {
   const membershipResult = await supabase
     .from('org_memberships')
@@ -130,12 +226,12 @@ async function requireOrgMembership(context, supabase, orgId, userId) {
       userId,
       message: membershipResult.error.message,
     });
-    respond(context, 500, { message: 'failed to verify membership' });
+    jsonResponse(context, 500, { message: 'failed to verify membership' });
     return null;
   }
 
   if (!membershipResult.data) {
-    respond(context, 403, { message: 'forbidden' });
+    jsonResponse(context, 403, { message: 'forbidden' });
     return null;
   }
 
@@ -151,7 +247,7 @@ function logSupabaseQueryFailure(context, req, userId, stage, error) {
       url: req?.url,
       query: req?.query,
     },
-    user: userId ? { id: userId } : undefined,
+    user: userId ? { id: maskForLog(userId) } : undefined,
     error: {
       message: error?.message,
       code: error?.code,
@@ -179,7 +275,7 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
 
     if (membershipsResult.error) {
       logSupabaseQueryFailure(context, req, userId, 'fetching membership rows', membershipsResult.error);
-      respond(context, 500, { message: 'failed to load members' });
+      jsonResponse(context, 500, { message: 'failed to load members' });
       return null;
     }
 
@@ -201,7 +297,7 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
 
       if (profilesResult.error) {
         logSupabaseQueryFailure(context, req, userId, 'fetching member profiles', profilesResult.error);
-        respond(context, 500, { message: 'failed to load members' });
+        jsonResponse(context, 500, { message: 'failed to load members' });
         return null;
       }
 
@@ -216,7 +312,7 @@ async function fetchOrgMembers(context, req, supabase, orgId, userId) {
     }));
   } catch (error) {
     logSupabaseQueryFailure(context, req, userId, 'fetching members', error);
-    respond(context, 500, { message: 'failed to load members' });
+    jsonResponse(context, 500, { message: 'failed to load members' });
     return null;
   }
 }
@@ -234,53 +330,106 @@ async function fetchPendingInvitations(context, req, supabase, orgId, userId) {
 
     if (result.error) {
       logSupabaseQueryFailure(context, req, userId, 'fetching invitations', result.error);
-      respond(context, 500, { message: 'failed to load invitations' });
+      jsonResponse(context, 500, { message: 'failed to load invitations' });
       return null;
     }
 
     return Array.isArray(result.data) ? result.data : [];
   } catch (error) {
     logSupabaseQueryFailure(context, req, userId, 'fetching invitations', error);
-    respond(context, 500, { message: 'failed to load invitations' });
+    jsonResponse(context, 500, { message: 'failed to load invitations' });
     return null;
   }
 }
 
 export default async function directory(context, req) {
-  const { client: supabase, error } = getAdminClient(context);
-  if (error || !supabase) {
-    context.log?.error?.('directory missing admin credentials', { message: error?.message });
-    respond(context, 500, { message: 'missing admin credentials' });
+  const env = context.env ?? globalThis.process?.env ?? {};
+  const adminConfig = readSupabaseAdminConfig(env);
+  const { supabaseUrl, serviceRoleKey } = adminConfig;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    context.log.error('Supabase metadata credentials are missing.');
+    jsonResponse(context, 500, { error: 'server_misconfigured' });
     return;
   }
 
-  const authUser = await getAuthenticatedUser(context, req, supabase);
-  if (!authUser) {
+  if (req.method !== 'GET') {
+    jsonResponse(
+      context,
+      405,
+      { error: 'method_not_allowed' },
+      { Allow: 'GET' },
+    );
+    return;
+  }
+
+  const headerCandidates = [
+    'X-Supabase-Authorization',
+    'x-supabase-auth',
+    'Authorization',
+  ];
+
+  let token = null;
+  for (const headerName of headerCandidates) {
+    const value = resolveHeaderValue(req.headers, headerName);
+    token = extractBearerToken(value);
+    if (token) {
+      break;
+    }
+  }
+
+  if (!token) {
+    jsonResponse(context, 401, { error: 'missing_or_invalid_token' });
+    return;
+  }
+
+  const supabase = createSupabaseAdminClient(adminConfig, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+
+  let userId;
+  try {
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error) throw error;
+    userId = data?.user?.id;
+  } catch (authError) {
+    context.log.warn('Failed to authenticate token for directory.', {
+      message: authError?.message,
+    });
+    jsonResponse(context, 401, { error: 'missing_or_invalid_token' });
+    return;
+  }
+
+  if (!userId) {
+    jsonResponse(context, 401, { error: 'missing_or_invalid_token' });
     return;
   }
 
   const orgId = normalizeUuid(req.query?.orgId ?? req.query?.org_id);
   if (!orgId) {
-    respond(context, 400, { message: 'missing orgId' });
+    jsonResponse(context, 400, { message: 'missing orgId' });
     return;
   }
 
-  const membership = await requireOrgMembership(context, supabase, orgId, authUser.id);
+  const membership = await requireOrgMembership(context, supabase, orgId, userId);
   if (!membership) {
     return;
   }
 
-  const members = await fetchOrgMembers(context, req, supabase, orgId, authUser.id);
+  const members = await fetchOrgMembers(context, req, supabase, orgId, userId);
   if (!members) {
     return;
   }
 
-  const invitations = await fetchPendingInvitations(context, req, supabase, orgId, authUser.id);
+  const invitations = await fetchPendingInvitations(context, req, supabase, orgId, userId);
   if (!invitations) {
     return;
   }
 
-  respond(context, 200, {
+  jsonResponse(context, 200, {
     members,
     invitations,
   });
