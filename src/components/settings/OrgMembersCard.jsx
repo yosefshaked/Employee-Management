@@ -55,6 +55,11 @@ export default function OrgMembersCard() {
   const [memberToRemove, setMemberToRemove] = useState(null);
   const [isRemovingMember, setIsRemovingMember] = useState(false);
 
+  useEffect(() => {
+    setMemberToRemove(null);
+    setIsRemovingMember(false);
+  }, []);
+
   const refreshInvitations = useCallback(
     async ({ signal, suppressToast } = {}) => {
       if (!canManageOrgMembers || !activeOrgId) {
@@ -153,16 +158,16 @@ export default function OrgMembersCard() {
       }
       if (!isRemovingMember) {
         setMemberToRemove(null);
+        setIsRemovingMember(false);
       }
     },
     [isRemovingMember],
   );
 
   const handleCancelRemove = useCallback(() => {
-    if (!isRemovingMember) {
-      setMemberToRemove(null);
-    }
-  }, [isRemovingMember]);
+    setMemberToRemove(null);
+    setIsRemovingMember(false);
+  }, []);
 
   const handleConfirmRemove = useCallback(async () => {
     if (!memberToRemove?.id) {
@@ -177,12 +182,12 @@ export default function OrgMembersCard() {
     try {
       await removeMember(memberToRemove.id, { session });
       toast.success('החבר הוסר מהארגון.');
-      setMemberToRemove(null);
     } catch (error) {
       console.error('Failed to remove member', error);
       toast.error(error?.message || 'הסרת החבר נכשלה. נסה שוב.');
     } finally {
       setIsRemovingMember(false);
+      setMemberToRemove(null);
     }
   }, [memberToRemove, removeMember, session]);
 

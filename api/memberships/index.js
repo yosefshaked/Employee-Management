@@ -196,47 +196,70 @@ async function revokeAcceptedInvitations(context, supabase, orgId, userId) {
 }
 
 export default async function memberships(context, req) {
-  const { client: supabase, error } = getAdminClient(context);
-  if (error || !supabase) {
-    context.log?.error?.('memberships missing admin credentials', { message: error?.message });
-    respond(context, 500, { message: 'missing admin credentials' });
-    return;
+  let membershipId = null;
+  let authUser = null;
+  let membershipRecord = null;
+
+  try {
+    const { client: supabase, error } = getAdminClient(context);
+    if (error || !supabase) {
+      context.log?.error?.('memberships missing admin credentials', { message: error?.message });
+      respond(context, 500, { message: 'missing admin credentials' });
+      return;
+    }
+
+    membershipId =
+      normalizeUuid(req?.params?.membershipId) || normalizeUuid(context?.bindingData?.membershipId);
+
+    if (!membershipId) {
+      respond(context, 400, { message: 'invalid membership id' });
+      return;
+    }
+
+    authUser = await getAuthenticatedUser(context, req, supabase);
+    if (!authUser) {
+      return;
+    }
+
+    membershipRecord = await fetchMembership(context, supabase, membershipId);
+    if (!membershipRecord) {
+      return;
+    }
+
+    const { org_id: orgId, user_id: memberUserId } = membershipRecord;
+
+    const callerMembership = await requireOrgAdmin(context, supabase, orgId, authUser.id);
+    if (!callerMembership) {
+      return;
+    }
+
+    const deleted = await deleteMembership(context, supabase, membershipId);
+    if (!deleted) {
+      return;
+    }
+
+    const revoked = await revokeAcceptedInvitations(context, supabase, orgId, memberUserId);
+    if (!revoked) {
+      return;
+    }
+
+    respond(context, 200, { success: true });
+  } catch (error) {
+    context.log?.error?.({
+      message: 'memberships unexpected failure',
+      request: {
+        method: req?.method || null,
+        url: req?.url || null,
+        invocationId: context?.invocationId || null,
+      },
+      membershipId,
+      orgId: membershipRecord?.org_id || null,
+      callerUserId: authUser?.id || null,
+      supabaseError: error?.message || null,
+      stack: error?.stack || null,
+    });
+    if (!context.res) {
+      respond(context, 500, { message: 'unexpected server error' });
+    }
   }
-
-  const membershipId =
-    normalizeUuid(req?.params?.membershipId) || normalizeUuid(context?.bindingData?.membershipId);
-
-  if (!membershipId) {
-    respond(context, 400, { message: 'invalid membership id' });
-    return;
-  }
-
-  const authUser = await getAuthenticatedUser(context, req, supabase);
-  if (!authUser) {
-    return;
-  }
-
-  const membership = await fetchMembership(context, supabase, membershipId);
-  if (!membership) {
-    return;
-  }
-
-  const { org_id: orgId, user_id: memberUserId } = membership;
-
-  const callerMembership = await requireOrgAdmin(context, supabase, orgId, authUser.id);
-  if (!callerMembership) {
-    return;
-  }
-
-  const deleted = await deleteMembership(context, supabase, membershipId);
-  if (!deleted) {
-    return;
-  }
-
-  const revoked = await revokeAcceptedInvitations(context, supabase, orgId, memberUserId);
-  if (!revoked) {
-    return;
-  }
-
-  respond(context, 200, { success: true });
 }
