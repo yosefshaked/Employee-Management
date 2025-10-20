@@ -345,7 +345,12 @@ async function fetchPendingInvitations(context, req, supabase, orgId, userId) {
 export default async function directory(context, req) {
   context.log.warn('RAW INCOMING HEADERS:', req.headers);
   const env = context.env ?? globalThis.process?.env ?? {};
-  const adminConfig = readSupabaseAdminConfig(env);
+  const controlUrl = env.APP_CONTROL_DB_URL || globalThis.process?.env?.APP_CONTROL_DB_URL;
+  const controlKey = env.APP_CONTROL_DB_SERVICE_ROLE_KEY || globalThis.process?.env?.APP_CONTROL_DB_SERVICE_ROLE_KEY;
+  const adminConfig = readSupabaseAdminConfig(env, {
+    supabaseUrl: controlUrl,
+    serviceRoleKey: controlKey,
+  });
   const { supabaseUrl, serviceRoleKey } = adminConfig;
 
   if (!supabaseUrl || !serviceRoleKey) {
