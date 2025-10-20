@@ -15,6 +15,9 @@
     "electron:dev": "concurrently -k -s first \"npm run dev\" \"wait-on http://localhost:5173 && set ELECTRON_START_URL=http://localhost:5173 && electron .\"",
     "electron:build": "npm run build && electron-builder"
   },
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.15",
     "@radix-ui/react-collapsible": "^1.1.12",
